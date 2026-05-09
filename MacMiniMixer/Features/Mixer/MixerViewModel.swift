@@ -16,6 +16,13 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
     @Published private(set) var isProcessTapLiveControlActive = false
     @Published private(set) var isProcessTapTesting = false
+    @Published private(set) var selectedTwoAppReadinessAppAID: MixerAppItem.ID?
+    @Published private(set) var selectedTwoAppReadinessAppBID: MixerAppItem.ID?
+    @Published private(set) var selectedTwoAppReadinessGain: ProcessTapReplayGainOption
+    @Published private(set) var twoAppReadinessEligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
+    @Published private(set) var twoAppReadinessSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
+    @Published private(set) var twoAppReadinessResult: ProcessTapTwoAppReadinessResult?
+    @Published private(set) var isTwoAppReadinessRunning = false
     @Published private(set) var activeExperimentalAppID: MixerAppItem.ID?
     @Published private(set) var activeLiveControlAppName: String?
     @Published private(set) var showAllApps = false
@@ -30,6 +37,7 @@ final class MixerViewModel: ObservableObject {
     private let processTapTester: ProcessTapTesting
     private let processTapReplayProbe: ProcessTapReplayProbing
     private let processTapLiveController: ProcessTapLiveControlling
+    private let twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
     private var lastNonZeroSystemVolume: Double
     private var lastSliderVolumeSetSucceeded: Bool?
     private var statusClearTask: Task<Void, Never>?
@@ -44,7 +52,8 @@ final class MixerViewModel: ObservableObject {
         systemVolumeController: SystemVolumeControlling,
         processTapTester: ProcessTapTesting,
         processTapReplayProbe: ProcessTapReplayProbing,
-        processTapLiveController: ProcessTapLiveControlling
+        processTapLiveController: ProcessTapLiveControlling,
+        twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
     ) {
         self.applicationLister = applicationLister
         self.audioController = audioController
@@ -55,9 +64,11 @@ final class MixerViewModel: ObservableObject {
         self.processTapTester = processTapTester
         self.processTapReplayProbe = processTapReplayProbe
         self.processTapLiveController = processTapLiveController
+        self.twoAppReadinessTester = twoAppReadinessTester
 
         let initialSystemVolume = audioController.systemVolume.clamped(to: AppConstants.volumeRange)
         let initialApps = applicationLister.listApplications()
+        let initialTwoAppReadinessEligibility = Self.twoAppReadinessEligibility(for: initialApps)
         self.systemVolume = initialSystemVolume
         self.isSystemOutputMuted = initialSystemVolume <= AppConstants.volumeRange.lowerBound
         self.lastNonZeroSystemVolume = initialSystemVolume > AppConstants.volumeRange.lowerBound
@@ -66,6 +77,16 @@ final class MixerViewModel: ObservableObject {
         self.apps = initialApps
         self.selectedProcessTapAppID = Self.preferredProcessTapAppID(in: initialApps)
         self.selectedProcessTapReplayGain = .defaultOption
+        self.twoAppReadinessEligibilityByAppID = initialTwoAppReadinessEligibility
+        self.selectedTwoAppReadinessAppAID = Self.preferredTwoAppReadinessAppIDs(
+            in: initialApps,
+            eligibilityByAppID: initialTwoAppReadinessEligibility
+        ).appAID
+        self.selectedTwoAppReadinessAppBID = Self.preferredTwoAppReadinessAppIDs(
+            in: initialApps,
+            eligibilityByAppID: initialTwoAppReadinessEligibility
+        ).appBID
+        self.selectedTwoAppReadinessGain = .defaultOption
 
         let listedOutputDevices = outputDeviceLister.listOutputDevices()
         self.outputDevices = listedOutputDevices
@@ -88,6 +109,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
+        _ = twoAppReadinessTester.stopAllNow(reason: .appTerminating)
     }
 
     var selectedOutputDeviceName: String {
@@ -192,6 +214,11 @@ final class MixerViewModel: ObservableObject {
             stopProcessTapLiveControl(reason: .outputDeviceChanged)
         }
 
+        if isTwoAppReadinessRunning,
+           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            stopTwoAppReadiness(reason: .outputDeviceChanged)
+        }
+
         if didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
             refreshSystemOutputVolume()
         }
@@ -222,6 +249,37 @@ final class MixerViewModel: ObservableObject {
         processTapDiagnosticProgress = nil
     }
 
+    func selectTwoAppReadinessAppA(_ appID: MixerAppItem.ID) {
+        guard !isTwoAppReadinessRunning,
+              apps.contains(where: { $0.id == appID }),
+              twoAppReadinessEligibilityByAppID[appID]?.isEligible == true else {
+            return
+        }
+
+        selectedTwoAppReadinessAppAID = appID
+        twoAppReadinessResult = nil
+    }
+
+    func selectTwoAppReadinessAppB(_ appID: MixerAppItem.ID) {
+        guard !isTwoAppReadinessRunning,
+              apps.contains(where: { $0.id == appID }),
+              twoAppReadinessEligibilityByAppID[appID]?.isEligible == true else {
+            return
+        }
+
+        selectedTwoAppReadinessAppBID = appID
+        twoAppReadinessResult = nil
+    }
+
+    func selectTwoAppReadinessGain(_ gain: ProcessTapReplayGainOption) {
+        guard !isTwoAppReadinessRunning else {
+            return
+        }
+
+        selectedTwoAppReadinessGain = gain
+        twoAppReadinessResult = nil
+    }
+
     func testSelectedProcessTapApp() {
         startProcessTapTest(mode: .diagnostics)
     }
@@ -231,7 +289,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     func selectProcessTapReplayGain(_ gain: ProcessTapReplayGainOption) {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive else {
+        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
             return
         }
 
@@ -241,7 +299,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     func testSelectedProcessTapReplayProbe() {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive else {
+        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
             return
         }
 
@@ -290,7 +348,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     func startProcessTapLiveControl() {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive else {
+        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
             return
         }
 
@@ -379,10 +437,132 @@ final class MixerViewModel: ObservableObject {
 
     func stopProcessTapLiveControlForTermination() {
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
+        _ = twoAppReadinessTester.stopAllNow(reason: .appTerminating)
         isProcessTapLiveControlActive = false
         isProcessTapTesting = false
         activeExperimentalAppID = nil
         activeLiveControlAppName = nil
+        isTwoAppReadinessRunning = false
+    }
+
+    func startTwoAppReadinessTest() {
+        guard !isTwoAppReadinessRunning else {
+            return
+        }
+
+        guard !isProcessTapTesting, !isProcessTapLiveControlActive else {
+            twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
+                outcome: .setupFailed,
+                message: "Stop active Process Tap work first",
+                severity: .warning
+            )
+            return
+        }
+
+        guard let appA = selectedTwoAppReadinessAppA,
+              let appB = selectedTwoAppReadinessAppB else {
+            twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
+                outcome: .invalidTarget,
+                message: "Select two running apps",
+                severity: .warning
+            )
+            return
+        }
+
+        guard appA.id != appB.id else {
+            twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
+                outcome: .invalidTarget,
+                message: "Choose two different apps",
+                severity: .warning
+            )
+            return
+        }
+
+        guard appA.isEligibleForExperimentalLiveControl,
+              appB.isEligibleForExperimentalLiveControl else {
+            twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
+                outcome: .invalidTarget,
+                message: "Both apps need valid processes",
+                severity: .warning
+            )
+            return
+        }
+
+        let appAEligibility = twoAppReadinessEligibilityByAppID[appA.id]
+        let appBEligibility = twoAppReadinessEligibilityByAppID[appB.id]
+        guard appAEligibility?.isEligible == true,
+              appBEligibility?.isEligible == true else {
+            twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
+                outcome: .setupFailed,
+                message: "Core Audio process unavailable",
+                detail: [appAEligibility?.reason, appBEligibility?.reason]
+                    .compactMap { $0 }
+                    .first,
+                severity: .warning
+            )
+            return
+        }
+
+        let targetA = ProcessTapTarget(
+            appID: appA.id,
+            appName: appA.name,
+            processIdentifier: appA.processIdentifier
+        )
+        let targetB = ProcessTapTarget(
+            appID: appB.id,
+            appName: appB.name,
+            processIdentifier: appB.processIdentifier
+        )
+        let gain = selectedTwoAppReadinessGain
+
+        isTwoAppReadinessRunning = true
+        twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
+            outcome: .starting,
+            message: "Starting two-app test...",
+            detail: "Gain \(gain.percentLabel).",
+            severity: .info
+        )
+        twoAppReadinessSnapshot = ProcessTapTwoAppReadinessSnapshot(
+            sessions: [
+                .starting(slot: .appA, target: targetA, gain: gain),
+                .starting(slot: .appB, target: targetB, gain: gain)
+            ]
+        )
+
+        Task {
+            let result = await twoAppReadinessTester.startTest(
+                appA: targetA,
+                appB: targetB,
+                gain: gain
+            ) { snapshot in
+                Task { @MainActor in
+                    self.twoAppReadinessSnapshot = snapshot
+                }
+            } onFinished: { result, snapshot in
+                Task { @MainActor in
+                    self.handleTwoAppReadinessFinished(result, snapshot: snapshot)
+                }
+            }
+
+            await MainActor.run {
+                twoAppReadinessResult = result
+                if result.outcome != .running {
+                    isTwoAppReadinessRunning = false
+                }
+            }
+        }
+    }
+
+    func stopTwoAppReadinessTest() {
+        stopTwoAppReadiness(reason: .userStopped)
+    }
+
+    func stopTwoAppReadinessForPanelClose() {
+        guard isTwoAppReadinessRunning else {
+            return
+        }
+
+        stopTwoAppReadiness(reason: .userStopped)
     }
 
     func isExperimentalControlActive(for appID: MixerAppItem.ID) -> Bool {
@@ -411,7 +591,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func startProcessTapTest(mode: ProcessTapTestMode) {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive else {
+        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
             return
         }
 
@@ -476,6 +656,7 @@ final class MixerViewModel: ObservableObject {
             updatedApp.isMuted = existingState.isMuted
             return updatedApp
         }
+        refreshTwoAppReadinessEligibility()
 
         if let activeExperimentalAppID,
            !apps.contains(where: { $0.id == activeExperimentalAppID }) {
@@ -495,6 +676,8 @@ final class MixerViewModel: ObservableObject {
             processTapDiagnosticProgress = nil
             processTapLiveDiagnostics = nil
         }
+
+        refreshTwoAppReadinessSelectionsAfterAppRefresh()
     }
 
     func volume(for appID: MixerAppItem.ID) -> Double {
@@ -534,6 +717,11 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
+        guard !isTwoAppReadinessRunning else {
+            showStatus("Stop two-app test first", style: .warning)
+            return
+        }
+
         guard app.isEligibleForExperimentalLiveControl else {
             showStatus("This app is not available for real app control", style: .warning)
             return
@@ -552,6 +740,11 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func startExperimentalControl(for appID: MixerAppItem.ID) {
+        guard !isTwoAppReadinessRunning else {
+            showStatus("Stop two-app test first", style: .warning)
+            return
+        }
+
         guard !isProcessTapTesting else {
             showStatus("Process Tap is already busy", style: .warning)
             return
@@ -671,6 +864,64 @@ final class MixerViewModel: ObservableObject {
         }
     }
 
+    private func stopTwoAppReadiness(reason: ProcessTapLiveStopReason) {
+        guard isTwoAppReadinessRunning else {
+            return
+        }
+
+        Task {
+            let result = await twoAppReadinessTester.stopAll(reason: reason)
+
+            await MainActor.run {
+                if result.message == "Two-app test is not running" {
+                    handleTwoAppReadinessFinished(result, snapshot: twoAppReadinessSnapshot)
+                }
+            }
+        }
+    }
+
+    private func handleTwoAppReadinessFinished(
+        _ result: ProcessTapTwoAppReadinessResult,
+        snapshot: ProcessTapTwoAppReadinessSnapshot
+    ) {
+        twoAppReadinessResult = result
+        twoAppReadinessSnapshot = snapshot
+        isTwoAppReadinessRunning = false
+
+        if result.severity == .warning {
+            showStatus(result.message, style: .warning)
+        }
+    }
+
+    private func refreshTwoAppReadinessSelectionsAfterAppRefresh() {
+        let appIDs = Set(apps.map(\.id))
+        let preferredIDs = Self.preferredTwoAppReadinessAppIDs(
+            in: apps,
+            eligibilityByAppID: twoAppReadinessEligibilityByAppID
+        )
+
+        if isTwoAppReadinessRunning {
+            if selectedTwoAppReadinessAppAID.map({ !appIDs.contains($0) }) == true ||
+                selectedTwoAppReadinessAppBID.map({ !appIDs.contains($0) }) == true {
+                stopTwoAppReadiness(reason: .targetAppExited)
+            }
+            return
+        }
+
+        if selectedTwoAppReadinessAppAID.map({ !appIDs.contains($0) || twoAppReadinessEligibilityByAppID[$0]?.isEligible != true }) != false {
+            selectedTwoAppReadinessAppAID = preferredIDs.appAID
+        }
+
+        if selectedTwoAppReadinessAppBID.map({ !appIDs.contains($0) || twoAppReadinessEligibilityByAppID[$0]?.isEligible != true }) != false ||
+            selectedTwoAppReadinessAppBID == selectedTwoAppReadinessAppAID {
+            selectedTwoAppReadinessAppBID = preferredIDs.appBID
+        }
+    }
+
+    private func refreshTwoAppReadinessEligibility() {
+        twoAppReadinessEligibilityByAppID = Self.twoAppReadinessEligibility(for: apps)
+    }
+
     private func updateExperimentalGainIfActive(for app: MixerAppItem) {
         guard isExperimentalControlActive(for: app.id) else {
             return
@@ -711,12 +962,52 @@ final class MixerViewModel: ObservableObject {
         apps.first { $0.isEligibleForExperimentalLiveControl }?.id ?? apps.first?.id
     }
 
+    private static func preferredTwoAppReadinessAppIDs(
+        in apps: [MixerAppItem],
+        eligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
+    ) -> (appAID: MixerAppItem.ID?, appBID: MixerAppItem.ID?) {
+        let eligibleApps = apps.filter { app in
+            eligibilityByAppID[app.id]?.isEligible == true
+        }
+
+        return (
+            appAID: eligibleApps.first?.id,
+            appBID: eligibleApps.dropFirst().first?.id
+        )
+    }
+
+    private static func twoAppReadinessEligibility(
+        for apps: [MixerAppItem]
+    ) -> [MixerAppItem.ID: ProcessTapProcessEligibility] {
+        Dictionary(
+            uniqueKeysWithValues: apps.map { app in
+                (app.id, ProcessTapCoreAudio.processTapEligibility(for: app.processIdentifier))
+            }
+        )
+    }
+
     private var selectedProcessTapApp: MixerAppItem? {
         guard let selectedProcessTapAppID else {
             return nil
         }
 
         return apps.first { $0.id == selectedProcessTapAppID }
+    }
+
+    private var selectedTwoAppReadinessAppA: MixerAppItem? {
+        guard let selectedTwoAppReadinessAppAID else {
+            return nil
+        }
+
+        return apps.first { $0.id == selectedTwoAppReadinessAppAID }
+    }
+
+    private var selectedTwoAppReadinessAppB: MixerAppItem? {
+        guard let selectedTwoAppReadinessAppBID else {
+            return nil
+        }
+
+        return apps.first { $0.id == selectedTwoAppReadinessAppBID }
     }
 
     private func applyRequestedSystemVolume(_ volume: Double) -> Bool {

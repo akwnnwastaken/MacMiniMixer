@@ -60,6 +60,9 @@ struct MixerPanelView: View {
         .task {
             await runOutputDeviceRefreshLoop()
         }
+        .onDisappear {
+            viewModel.stopTwoAppReadinessForPanelClose()
+        }
     }
 
     private var header: some View {
@@ -331,24 +334,42 @@ struct MixerPanelView: View {
             .buttonStyle(.plain)
 
             if isShowingAdvanced {
-                ProcessTapTestView(
-                    apps: viewModel.apps,
-                    selectedAppID: viewModel.selectedProcessTapAppID,
-                    result: viewModel.processTapTestResult,
-                    progress: viewModel.processTapDiagnosticProgress,
-                    selectedReplayGain: viewModel.selectedProcessTapReplayGain,
-                    liveDiagnostics: viewModel.processTapLiveDiagnostics,
-                    isTesting: viewModel.isProcessTapTesting,
-                    isLiveControlActive: viewModel.isProcessTapLiveControlActive,
-                    selectApp: viewModel.selectProcessTapApp,
-                    selectReplayGain: viewModel.selectProcessTapReplayGain,
-                    testProcessTap: viewModel.testSelectedProcessTapApp,
-                    testMuteBehavior: viewModel.testSelectedProcessTapMuteProbe,
-                    testReplayProbe: viewModel.testSelectedProcessTapReplayProbe,
-                    startLiveControl: viewModel.startProcessTapLiveControl,
-                    stopLiveControl: viewModel.stopProcessTapLiveControl,
-                    showsHeader: false
-                )
+                VStack(alignment: .leading, spacing: 8) {
+                    ProcessTapTestView(
+                        apps: viewModel.apps,
+                        selectedAppID: viewModel.selectedProcessTapAppID,
+                        result: viewModel.processTapTestResult,
+                        progress: viewModel.processTapDiagnosticProgress,
+                        selectedReplayGain: viewModel.selectedProcessTapReplayGain,
+                        liveDiagnostics: viewModel.processTapLiveDiagnostics,
+                        isTesting: viewModel.isProcessTapTesting,
+                        isLiveControlActive: viewModel.isProcessTapLiveControlActive,
+                        selectApp: viewModel.selectProcessTapApp,
+                        selectReplayGain: viewModel.selectProcessTapReplayGain,
+                        testProcessTap: viewModel.testSelectedProcessTapApp,
+                        testMuteBehavior: viewModel.testSelectedProcessTapMuteProbe,
+                        testReplayProbe: viewModel.testSelectedProcessTapReplayProbe,
+                        startLiveControl: viewModel.startProcessTapLiveControl,
+                        stopLiveControl: viewModel.stopProcessTapLiveControl,
+                        showsHeader: false
+                    )
+
+                    TwoAppReadinessTestView(
+                        apps: viewModel.apps,
+                        selectedAppAID: viewModel.selectedTwoAppReadinessAppAID,
+                        selectedAppBID: viewModel.selectedTwoAppReadinessAppBID,
+                        eligibilityByAppID: viewModel.twoAppReadinessEligibilityByAppID,
+                        selectedGain: viewModel.selectedTwoAppReadinessGain,
+                        snapshot: viewModel.twoAppReadinessSnapshot,
+                        result: viewModel.twoAppReadinessResult,
+                        isRunning: viewModel.isTwoAppReadinessRunning,
+                        selectAppA: viewModel.selectTwoAppReadinessAppA,
+                        selectAppB: viewModel.selectTwoAppReadinessAppB,
+                        selectGain: viewModel.selectTwoAppReadinessGain,
+                        startTest: viewModel.startTwoAppReadinessTest,
+                        stopAll: viewModel.stopTwoAppReadinessTest
+                    )
+                }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }

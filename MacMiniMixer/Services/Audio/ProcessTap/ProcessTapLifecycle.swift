@@ -1,6 +1,17 @@
 import CoreAudio
 import Foundation
 
+struct ProcessTapProcessEligibility: Equatable, Sendable {
+    let isEligible: Bool
+    let reason: String?
+
+    static let eligible = ProcessTapProcessEligibility(isEligible: true, reason: nil)
+
+    static func unavailable(_ reason: String) -> ProcessTapProcessEligibility {
+        ProcessTapProcessEligibility(isEligible: false, reason: reason)
+    }
+}
+
 enum ProcessTapCoreAudio {
     static var hasAudioCaptureUsageDescription: Bool {
         guard let usageDescription = Bundle.main.object(
@@ -40,6 +51,28 @@ enum ProcessTapCoreAudio {
         }
 
         return processObjectID
+    }
+
+    static func processTapEligibility(for processIdentifier: Int32?) -> ProcessTapProcessEligibility {
+        guard #available(macOS 14.2, *) else {
+            return .unavailable("Unsupported macOS")
+        }
+
+        guard hasAudioCaptureUsageDescription else {
+            return .unavailable("Missing audio capture usage description")
+        }
+
+        guard let processIdentifier, processIdentifier > 0 else {
+            return .unavailable("Invalid process")
+        }
+
+        // Browser and web-app audio may be rendered by helper/content processes,
+        // so the visible app PID may not be a Core Audio tap target.
+        guard processObjectID(for: pid_t(processIdentifier)) != nil else {
+            return .unavailable("Core Audio process unavailable")
+        }
+
+        return .eligible
     }
 
     static func defaultOutputDeviceID() -> AudioDeviceID? {

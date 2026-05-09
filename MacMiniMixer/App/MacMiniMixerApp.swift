@@ -16,6 +16,7 @@ struct MacMiniMixerApp: App {
         let processTapLiveController = ProcessTapLiveSessionManager(
             controller: CoreAudioProcessTapLiveController()
         )
+        let twoAppReadinessTester = CoreAudioProcessTapTwoAppReadinessTester()
 
         _mixerViewModel = StateObject(
             wrappedValue: MixerViewModel(
@@ -27,7 +28,8 @@ struct MacMiniMixerApp: App {
                 systemVolumeController: systemVolumeController,
                 processTapTester: processTapTester,
                 processTapReplayProbe: processTapReplayProbe,
-                processTapLiveController: processTapLiveController
+                processTapLiveController: processTapLiveController,
+                twoAppReadinessTester: twoAppReadinessTester
             )
         )
     }

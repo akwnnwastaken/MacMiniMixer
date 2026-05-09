@@ -49,6 +49,8 @@
 		9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */; };
 		9B7D1A882C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */; };
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
+		9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */; };
+		9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -96,6 +98,8 @@
 		9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLifecycle.swift; sourceTree = "<group>"; };
 		9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionState.swift; sourceTree = "<group>"; };
 		9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManager.swift; sourceTree = "<group>"; };
+		9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTwoAppReadinessTesting.swift; sourceTree = "<group>"; };
+		9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessTestView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +182,7 @@
 				9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */,
 				9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */,
 				9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */,
+				9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */,
 			);
 			path = MenuBar;
 			sourceTree = "<group>";
@@ -233,6 +238,7 @@
 				9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */,
 				9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */,
 				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
+				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
 			);
 			path = ProcessTap;
 			sourceTree = "<group>";
@@ -356,6 +362,8 @@
 				9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */,
 				9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */,
 				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
+				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
+				9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */,
 				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

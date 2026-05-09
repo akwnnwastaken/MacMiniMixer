@@ -9,6 +9,7 @@ enum AppConstants {
     static let processTapDiagnosticDuration: TimeInterval = 2.5
     static let processTapReplayProbeDuration: TimeInterval = 2.5
     static let processTapLiveControlMaxDuration: TimeInterval = 60
+    static let processTapTwoAppReadinessDuration: TimeInterval = 10
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
     static let processTapLivePrimingBufferCount = 2

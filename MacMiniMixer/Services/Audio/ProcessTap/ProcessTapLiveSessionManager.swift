@@ -17,17 +17,26 @@ protocol ProcessTapLiveSessionManaging: Sendable {
 }
 
 final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, ProcessTapLiveControlling, @unchecked Sendable {
-    private let controller: ProcessTapLiveControlling
+    private let controllerFactory: @Sendable () -> ProcessTapLiveControlling
     private let maxSessions: Int
     private let lock = NSLock()
     private var sessions: [ProcessTapLiveSessionID: ProcessTapLiveSessionState] = [:]
+    private var controllers: [ProcessTapLiveSessionID: ProcessTapLiveControlling] = [:]
     private var compatibilityActiveSessionID: ProcessTapLiveSessionID?
 
     init(
         controller: ProcessTapLiveControlling,
         maxSessions: Int = 1
     ) {
-        self.controller = controller
+        self.controllerFactory = { controller }
+        self.maxSessions = max(1, maxSessions)
+    }
+
+    init(
+        maxSessions: Int,
+        controllerFactory: @escaping @Sendable () -> ProcessTapLiveControlling
+    ) {
+        self.controllerFactory = controllerFactory
         self.maxSessions = max(1, maxSessions)
     }
 
@@ -54,8 +63,9 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     ) async -> ProcessTapLiveSessionStartResult {
         let sessionID = ProcessTapLiveSessionID()
         let sessionState = ProcessTapLiveSessionState(id: sessionID, target: target, gain: gain)
+        let controller = controllerFactory()
 
-        guard reserveSession(sessionState) else {
+        guard reserveSession(sessionState, controller: controller) else {
             return ProcessTapLiveSessionStartResult(
                 sessionID: nil,
                 result: ProcessTapTestResult(
@@ -89,6 +99,15 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
 
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
         markSession(id, phase: .stopping, stopReason: reason)
+
+        guard let controller = controller(for: id) else {
+            removeSession(id)
+            return ProcessTapTestResult(
+                outcome: .liveControlStopped,
+                message: "Live control is not active",
+                severity: .info
+            )
+        }
 
         let result = await controller.stopLiveControl(reason: reason)
         if result.message == "Live control is not active" {
@@ -124,7 +143,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         sessions[sessionID] = session
         lock.unlock()
 
-        controller.updateLiveControlGain(gain)
+        controller(for: sessionID)?.updateLiveControlGain(gain)
     }
 
     func startLiveControl(
@@ -175,6 +194,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     func stopLiveControlNow(reason: ProcessTapLiveStopReason) -> ProcessTapTestResult? {
         lock.lock()
         let sessionIDs = activeSessionIDs
+        let controllersToStop = sessionIDs.compactMap { controllers[$0] }
         for sessionID in sessionIDs {
             if var session = sessions[sessionID] {
                 session.phase = .stopping
@@ -185,11 +205,16 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         compatibilityActiveSessionID = nil
         lock.unlock()
 
-        let result = controller.stopLiveControlNow(reason: reason)
+        var result: ProcessTapTestResult?
+        for controller in controllersToStop {
+            let sessionResult = controller.stopLiveControlNow(reason: reason)
+            result = result ?? sessionResult
+        }
 
         lock.lock()
         for sessionID in sessionIDs {
             sessions.removeValue(forKey: sessionID)
+            controllers.removeValue(forKey: sessionID)
         }
         lock.unlock()
 
@@ -206,7 +231,10 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
             .map(\.key)
     }
 
-    private func reserveSession(_ sessionState: ProcessTapLiveSessionState) -> Bool {
+    private func reserveSession(
+        _ sessionState: ProcessTapLiveSessionState,
+        controller: ProcessTapLiveControlling
+    ) -> Bool {
         lock.lock()
         defer {
             lock.unlock()
@@ -217,7 +245,17 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         sessions[sessionState.id] = sessionState
+        controllers[sessionState.id] = controller
         return true
+    }
+
+    private func controller(for sessionID: ProcessTapLiveSessionID) -> ProcessTapLiveControlling? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        return controllers[sessionID]
     }
 
     private func currentCompatibilitySessionID() -> ProcessTapLiveSessionID? {
@@ -282,6 +320,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         sessions.removeValue(forKey: sessionID)
+        controllers.removeValue(forKey: sessionID)
         if compatibilityActiveSessionID == sessionID {
             compatibilityActiveSessionID = nil
         }
@@ -291,6 +330,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     private func removeSession(_ sessionID: ProcessTapLiveSessionID) {
         lock.lock()
         sessions.removeValue(forKey: sessionID)
+        controllers.removeValue(forKey: sessionID)
         if compatibilityActiveSessionID == sessionID {
             compatibilityActiveSessionID = nil
         }
