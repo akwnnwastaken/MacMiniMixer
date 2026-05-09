@@ -1,0 +1,548 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		9B7D1A2E2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A2D2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift */; };
+		9B7D1A302C8F4A9A8B2D0101 /* MenuBarRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */; };
+		9B7D1A322C8F4A9A8B2D0101 /* MixerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */; };
+		9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */; };
+		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
+		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
+		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
+		9B7D1A3C2C8F4A9A8B2D0101 /* MockAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */; };
+		9B7D1A3E2C8F4A9A8B2D0101 /* ApplicationListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */; };
+		9B7D1A402C8F4A9A8B2D0101 /* MockApplicationLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */; };
+		9B7D1A422C8F4A9A8B2D0101 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */; };
+		9B7D1A4C2C8F4A9A8B2D0101 /* OutputDeviceItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */; };
+		9B7D1A4E2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */; };
+		9B7D1A502C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */; };
+		9B7D1A522C8F4A9A8B2D0101 /* OutputDeviceListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */; };
+		9B7D1A542C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */; };
+		9B7D1A562C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */; };
+		9B7D1A582C8F4A9A8B2D0101 /* SystemVolumeReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */; };
+		9B7D1A5A2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */; };
+		9B7D1A5C2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5B2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift */; };
+		9B7D1A5E2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */; };
+		9B7D1A602C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5F2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift */; };
+		9B7D1A622C8F4A9A8B2D0101 /* MockSystemVolumeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A612C8F4A9A8B2D0101 /* MockSystemVolumeController.swift */; };
+		9B7D1A642C8F4A9A8B2D0101 /* OutputDeviceControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */; };
+		9B7D1A662C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */; };
+		9B7D1A682C8F4A9A8B2D0101 /* MockOutputDeviceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A672C8F4A9A8B2D0101 /* MockOutputDeviceController.swift */; };
+		9B7D1A6A2C8F4A9A8B2D0101 /* MixerStatusMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */; };
+		9B7D1A6D2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */; };
+		9B7D1A6F2C8F4A9A8B2D0101 /* ProcessTapTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */; };
+		9B7D1A712C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */; };
+		9B7D1A732C8F4A9A8B2D0101 /* MockProcessTapTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */; };
+		9B7D1A752C8F4A9A8B2D0101 /* ProcessTapTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */; };
+		9B7D1A782C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */; };
+		9B7D1A7A2C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A792C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift */; };
+		9B7D1A7C2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A7B2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift */; };
+		9B7D1A7E2C8F4A9A8B2D0101 /* ProcessTapLiveDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A7D2C8F4A9A8B2D0101 /* ProcessTapLiveDiagnostics.swift */; };
+		9B7D1A802C8F4A9A8B2D0101 /* ProcessTapLiveState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */; };
+		9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */; };
+		9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */; };
+		9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		9B7D1A242C8F4A9A8B2D0101 /* MacMiniMixer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacMiniMixer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B7D1A2D2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMiniMixerApp.swift; sourceTree = "<group>"; };
+		9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRootView.swift; sourceTree = "<group>"; };
+		9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerPanelView.swift; sourceTree = "<group>"; };
+		9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModel.swift; sourceTree = "<group>"; };
+		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
+		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
+		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
+		9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAudioController.swift; sourceTree = "<group>"; };
+		9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationListing.swift; sourceTree = "<group>"; };
+		9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockApplicationLister.swift; sourceTree = "<group>"; };
+		9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
+		9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceItem.swift; sourceTree = "<group>"; };
+		9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceSelectorView.swift; sourceTree = "<group>"; };
+		9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceApplicationLister.swift; sourceTree = "<group>"; };
+		9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceListing.swift; sourceTree = "<group>"; };
+		9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioOutputDeviceLister.swift; sourceTree = "<group>"; };
+		9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockOutputDeviceLister.swift; sourceTree = "<group>"; };
+		9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeReading.swift; sourceTree = "<group>"; };
+		9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSystemVolumeReader.swift; sourceTree = "<group>"; };
+		9B7D1A5B2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSystemVolumeReader.swift; sourceTree = "<group>"; };
+		9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeControlling.swift; sourceTree = "<group>"; };
+		9B7D1A5F2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSystemVolumeController.swift; sourceTree = "<group>"; };
+		9B7D1A612C8F4A9A8B2D0101 /* MockSystemVolumeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSystemVolumeController.swift; sourceTree = "<group>"; };
+		9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceControlling.swift; sourceTree = "<group>"; };
+		9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioOutputDeviceController.swift; sourceTree = "<group>"; };
+		9B7D1A672C8F4A9A8B2D0101 /* MockOutputDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockOutputDeviceController.swift; sourceTree = "<group>"; };
+		9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerStatusMessage.swift; sourceTree = "<group>"; };
+		9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTestResult.swift; sourceTree = "<group>"; };
+		9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTesting.swift; sourceTree = "<group>"; };
+		9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapTester.swift; sourceTree = "<group>"; };
+		9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockProcessTapTester.swift; sourceTree = "<group>"; };
+		9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTestView.swift; sourceTree = "<group>"; };
+		9B7D1A762C8F4A9A8B2D0101 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayResult.swift; sourceTree = "<group>"; };
+		9B7D1A792C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayProbing.swift; sourceTree = "<group>"; };
+		9B7D1A7B2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapReplayProbe.swift; sourceTree = "<group>"; };
+		9B7D1A7D2C8F4A9A8B2D0101 /* ProcessTapLiveDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveDiagnostics.swift; sourceTree = "<group>"; };
+		9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveState.swift; sourceTree = "<group>"; };
+		9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveControlling.swift; sourceTree = "<group>"; };
+		9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapLiveController.swift; sourceTree = "<group>"; };
+		9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLifecycle.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9B7D1A212C8F4A9A8B2D0101 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9B7D1A1B2C8F4A9A8B2D0101 = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A262C8F4A9A8B2D0101 /* MacMiniMixer */,
+				9B7D1A252C8F4A9A8B2D0101 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9B7D1A252C8F4A9A8B2D0101 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A242C8F4A9A8B2D0101 /* MacMiniMixer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9B7D1A262C8F4A9A8B2D0101 /* MacMiniMixer */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A272C8F4A9A8B2D0101 /* App */,
+				9B7D1A282C8F4A9A8B2D0101 /* Features */,
+				9B7D1A292C8F4A9A8B2D0101 /* Services */,
+				9B7D1A2A2C8F4A9A8B2D0101 /* Support */,
+			);
+			path = MacMiniMixer;
+			sourceTree = "<group>";
+		};
+		9B7D1A272C8F4A9A8B2D0101 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A2D2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		9B7D1A282C8F4A9A8B2D0101 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A2B2C8F4A9A8B2D0101 /* MenuBar */,
+				9B7D1A2C2C8F4A9A8B2D0101 /* Mixer */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		9B7D1A292C8F4A9A8B2D0101 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A432C8F4A9A8B2D0101 /* Audio */,
+				9B7D1A442C8F4A9A8B2D0101 /* Applications */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		9B7D1A2A2C8F4A9A8B2D0101 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A762C8F4A9A8B2D0101 /* Info.plist */,
+				9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		9B7D1A2B2C8F4A9A8B2D0101 /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */,
+				9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */,
+				9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */,
+				9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */,
+			);
+			path = MenuBar;
+			sourceTree = "<group>";
+		};
+		9B7D1A2C2C8F4A9A8B2D0101 /* Mixer */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */,
+				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
+				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
+				9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */,
+				9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */,
+			);
+			path = Mixer;
+			sourceTree = "<group>";
+		};
+		9B7D1A432C8F4A9A8B2D0101 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */,
+				9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */,
+				9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */,
+				9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */,
+				9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */,
+				9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */,
+				9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */,
+				9B7D1A672C8F4A9A8B2D0101 /* MockOutputDeviceController.swift */,
+				9B7D1A6B2C8F4A9A8B2D0101 /* ProcessTap */,
+				9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */,
+				9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */,
+				9B7D1A5B2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift */,
+				9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */,
+				9B7D1A5F2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift */,
+				9B7D1A612C8F4A9A8B2D0101 /* MockSystemVolumeController.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		9B7D1A6B2C8F4A9A8B2D0101 /* ProcessTap */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */,
+				9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */,
+				9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */,
+				9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */,
+				9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */,
+				9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */,
+				9B7D1A792C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift */,
+				9B7D1A7B2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift */,
+				9B7D1A7D2C8F4A9A8B2D0101 /* ProcessTapLiveDiagnostics.swift */,
+				9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */,
+				9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */,
+				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
+			);
+			path = ProcessTap;
+			sourceTree = "<group>";
+		};
+		9B7D1A442C8F4A9A8B2D0101 /* Applications */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */,
+				9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */,
+				9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */,
+			);
+			path = Applications;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9B7D1A232C8F4A9A8B2D0101 /* MacMiniMixer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9B7D1A462C8F4A9A8B2D0101 /* Build configuration list for PBXNativeTarget "MacMiniMixer" */;
+			buildPhases = (
+				9B7D1A202C8F4A9A8B2D0101 /* Sources */,
+				9B7D1A212C8F4A9A8B2D0101 /* Frameworks */,
+				9B7D1A222C8F4A9A8B2D0101 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacMiniMixer;
+			productName = MacMiniMixer;
+			productReference = 9B7D1A242C8F4A9A8B2D0101 /* MacMiniMixer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9B7D1A1C2C8F4A9A8B2D0101 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					9B7D1A232C8F4A9A8B2D0101 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = 9B7D1A1F2C8F4A9A8B2D0101 /* Build configuration list for PBXProject "MacMiniMixer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 9B7D1A1B2C8F4A9A8B2D0101;
+			productRefGroup = 9B7D1A252C8F4A9A8B2D0101 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9B7D1A232C8F4A9A8B2D0101 /* MacMiniMixer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9B7D1A222C8F4A9A8B2D0101 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9B7D1A202C8F4A9A8B2D0101 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B7D1A2E2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift in Sources */,
+				9B7D1A302C8F4A9A8B2D0101 /* MenuBarRootView.swift in Sources */,
+				9B7D1A322C8F4A9A8B2D0101 /* MixerPanelView.swift in Sources */,
+				9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */,
+				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
+				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
+				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
+				9B7D1A3C2C8F4A9A8B2D0101 /* MockAudioController.swift in Sources */,
+				9B7D1A3E2C8F4A9A8B2D0101 /* ApplicationListing.swift in Sources */,
+				9B7D1A402C8F4A9A8B2D0101 /* MockApplicationLister.swift in Sources */,
+				9B7D1A422C8F4A9A8B2D0101 /* AppConstants.swift in Sources */,
+				9B7D1A4C2C8F4A9A8B2D0101 /* OutputDeviceItem.swift in Sources */,
+				9B7D1A4E2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift in Sources */,
+				9B7D1A502C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift in Sources */,
+				9B7D1A522C8F4A9A8B2D0101 /* OutputDeviceListing.swift in Sources */,
+				9B7D1A542C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift in Sources */,
+				9B7D1A562C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift in Sources */,
+				9B7D1A582C8F4A9A8B2D0101 /* SystemVolumeReading.swift in Sources */,
+				9B7D1A5A2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift in Sources */,
+				9B7D1A5C2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift in Sources */,
+				9B7D1A5E2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift in Sources */,
+				9B7D1A602C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift in Sources */,
+				9B7D1A622C8F4A9A8B2D0101 /* MockSystemVolumeController.swift in Sources */,
+				9B7D1A642C8F4A9A8B2D0101 /* OutputDeviceControlling.swift in Sources */,
+				9B7D1A662C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift in Sources */,
+				9B7D1A682C8F4A9A8B2D0101 /* MockOutputDeviceController.swift in Sources */,
+				9B7D1A6A2C8F4A9A8B2D0101 /* MixerStatusMessage.swift in Sources */,
+				9B7D1A6D2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift in Sources */,
+				9B7D1A6F2C8F4A9A8B2D0101 /* ProcessTapTesting.swift in Sources */,
+				9B7D1A712C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift in Sources */,
+				9B7D1A732C8F4A9A8B2D0101 /* MockProcessTapTester.swift in Sources */,
+				9B7D1A752C8F4A9A8B2D0101 /* ProcessTapTestView.swift in Sources */,
+				9B7D1A782C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift in Sources */,
+				9B7D1A7A2C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift in Sources */,
+				9B7D1A7C2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift in Sources */,
+				9B7D1A7E2C8F4A9A8B2D0101 /* ProcessTapLiveDiagnostics.swift in Sources */,
+				9B7D1A802C8F4A9A8B2D0101 /* ProcessTapLiveState.swift in Sources */,
+				9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */,
+				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
+				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		9B7D1A452C8F4A9A8B2D0101 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9B7D1A482C8F4A9A8B2D0101 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacMiniMixer/Support/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MacMiniMixer";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9B7D1A492C8F4A9A8B2D0101 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacMiniMixer/Support/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MacMiniMixer";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		9B7D1A4A2C8F4A9A8B2D0101 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9B7D1A1F2C8F4A9A8B2D0101 /* Build configuration list for PBXProject "MacMiniMixer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9B7D1A452C8F4A9A8B2D0101 /* Debug */,
+				9B7D1A4A2C8F4A9A8B2D0101 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9B7D1A462C8F4A9A8B2D0101 /* Build configuration list for PBXNativeTarget "MacMiniMixer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9B7D1A482C8F4A9A8B2D0101 /* Debug */,
+				9B7D1A492C8F4A9A8B2D0101 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9B7D1A1C2C8F4A9A8B2D0101 /* Project object */;
+}

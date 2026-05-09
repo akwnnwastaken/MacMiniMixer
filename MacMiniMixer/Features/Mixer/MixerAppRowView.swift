@@ -1,0 +1,234 @@
+import SwiftUI
+
+struct MixerAppRowView: View {
+    let app: MixerAppItem
+    let isExperimentalControlActive: Bool
+    let isExperimentalControlBusy: Bool
+    let isExperimentalControlEligible: Bool
+    let isExperimentalRealAppControlEnabled: Bool
+    let toggleExperimentalControl: () -> Void
+    @Binding var volume: Double
+    @Binding var isMuted: Bool
+
+    var body: some View {
+        HStack(spacing: AppConstants.Layout.rowSpacing) {
+            Button {
+                isMuted.toggle()
+            } label: {
+                appIcon
+            }
+            .buttonStyle(.plain)
+            .help(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)")
+
+            Text(app.name)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .frame(width: AppConstants.Layout.appNameWidth, alignment: .leading)
+
+            Slider(value: $volume, in: AppConstants.volumeRange, step: 1)
+                .disabled(isMuted)
+
+            Text("\(Int(volume.rounded()))")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(isMuted ? .tertiary : .secondary)
+                .frame(width: AppConstants.Layout.volumeValueWidth, alignment: .trailing)
+
+            experimentalControlAccessory
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(rowBackground)
+        .opacity(isMuted ? 0.68 : 1)
+        .animation(.snappy(duration: 0.16), value: isMuted)
+        .animation(.snappy(duration: 0.16), value: isExperimentalControlActive)
+    }
+
+    private var appIcon: some View {
+        Color.clear
+            .frame(width: AppConstants.Layout.rowIconSize, height: AppConstants.Layout.rowIconSize)
+            .background {
+                iconBubble
+            }
+            .overlay {
+                appIconImage
+                    .frame(
+                        width: iconArtworkSize,
+                        height: iconArtworkSize,
+                        alignment: .center
+                    )
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if isMuted {
+                    mutedBadge
+                }
+            }
+            .contentShape(Circle())
+    }
+
+    private var iconBubble: some View {
+        ZStack {
+            Circle()
+                .fill(isMuted ? Color.red.opacity(0.14) : Color.white.opacity(0.12))
+        }
+        .frame(width: AppConstants.Layout.rowIconSize, height: AppConstants.Layout.rowIconSize)
+    }
+
+    private var mutedBadge: some View {
+        ZStack {
+            Circle()
+                .fill(Color.red)
+
+            Image(systemName: "xmark")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: AppConstants.Layout.rowIconMuteBadgeSize, height: AppConstants.Layout.rowIconMuteBadgeSize)
+        .offset(x: 1, y: 1)
+        .transition(.scale.combined(with: .opacity))
+    }
+
+    @ViewBuilder
+    private var appIconImage: some View {
+        switch app.icon {
+        case .systemSymbol(let systemName):
+            Image(systemName: systemName)
+                .font(.system(size: AppConstants.Layout.rowIconSymbolSize, weight: .semibold))
+                .foregroundStyle(isMuted ? .tertiary : .secondary)
+
+        case .image(let image):
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .saturation(isMuted ? 0.15 : 1)
+                .opacity(isMuted ? 0.65 : 1)
+        }
+    }
+
+    private var iconArtworkSize: CGFloat {
+        switch app.icon {
+        case .systemSymbol:
+            AppConstants.Layout.rowIconSymbolFrameSize
+        case .image:
+            AppConstants.Layout.rowIconImageArtworkSize
+        }
+    }
+
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
+            .fill(rowBackgroundFill)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
+                    .stroke(rowStrokeColor, lineWidth: 1)
+            )
+    }
+
+    private var rowBackgroundFill: Color {
+        if isExperimentalControlActive {
+            return Color.orange.opacity(0.1)
+        }
+
+        return isMuted ? Color.red.opacity(0.065) : Color.white.opacity(0.045)
+    }
+
+    private var rowStrokeColor: Color {
+        if isExperimentalControlActive {
+            return Color.orange.opacity(0.26)
+        }
+
+        return isMuted ? Color.red.opacity(0.16) : Color.white.opacity(0.075)
+    }
+
+    @ViewBuilder
+    private var experimentalControlAccessory: some View {
+        if isExperimentalControlActive {
+            realControlBadge
+        } else {
+            Color.clear
+                .frame(width: AppConstants.Layout.rowLiveButtonSize, height: AppConstants.Layout.rowLiveButtonSize)
+        }
+    }
+
+    private var realControlBadge: some View {
+        Button(action: toggleExperimentalControl) {
+            Text("Real")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.orange)
+                .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowLiveButtonSize)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.orange.opacity(0.14))
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(Color.orange.opacity(0.28), lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Stop experimental real app control for \(app.name)")
+        .accessibilityLabel(Text("Stop Real App Control"))
+    }
+
+    private var experimentalControlButton: some View {
+        Button(action: toggleExperimentalControl) {
+            experimentalControlButtonLabel
+        }
+        .buttonStyle(.plain)
+        .disabled(isExperimentalControlButtonDisabled)
+        .opacity(experimentalControlButtonOpacity)
+        .help(experimentalControlHelpText)
+        .accessibilityLabel(Text(isExperimentalControlActive ? "Stop Live Control" : "Live Control"))
+        .accessibilityHint(Text(experimentalControlHelpText))
+    }
+
+    private var isExperimentalControlButtonDisabled: Bool {
+        isExperimentalControlBusy || (!isExperimentalControlActive && !isExperimentalControlEligible)
+    }
+
+    private var experimentalControlButtonOpacity: Double {
+        if !isExperimentalControlActive && !isExperimentalControlEligible {
+            return 0.34
+        }
+
+        if isExperimentalControlBusy && !isExperimentalControlActive {
+            return 0.45
+        }
+
+        return 1
+    }
+
+    private var experimentalControlHelpText: String {
+        if isExperimentalControlActive {
+            return "Stop experimental live control for \(app.name)"
+        }
+
+        if !isExperimentalControlEligible {
+            return "Live control requires a running app process."
+        }
+
+        if isExperimentalControlBusy {
+            return "Stop the active live control first."
+        }
+
+        return "Experimental Live Control: may briefly affect real audio for \(app.name)"
+    }
+
+    private var experimentalControlButtonLabel: some View {
+        Label(isExperimentalControlActive ? "On" : "Live", systemImage: "testtube.2")
+            .labelStyle(.iconOnly)
+            .font(.system(size: 11, weight: .semibold))
+            .frame(width: AppConstants.Layout.rowLiveButtonSize, height: AppConstants.Layout.rowLiveButtonSize)
+            .foregroundStyle(isExperimentalControlActive ? .orange : .secondary)
+            .background(
+                Circle()
+                    .fill(isExperimentalControlActive ? Color.orange.opacity(0.16) : Color.white.opacity(0.06))
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                isExperimentalControlActive ? Color.orange.opacity(0.28) : Color.white.opacity(0.08),
+                                lineWidth: 1
+                            )
+                    )
+            )
+    }
+}
