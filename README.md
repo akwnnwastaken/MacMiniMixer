@@ -6,9 +6,11 @@ The app is not targeting the Mac App Store. It uses native macOS APIs directly, 
 
 ## Current Status
 
-MacMiniMixer is in a v0.10.1 simplified mixer UI with Advanced diagnostics milestone.
+MacMiniMixer is in a v0.11 internal live-session manager foundation milestone, with v0.10.1 simplified UI behavior preserved.
 
-It provides a cleaner menu bar mixer panel focused on everyday controls, with stable system-level output controls, real output device listing/switching, real running app discovery, a compact global opt-in mode that can make one eligible app row real when the user interacts with it, and technical Process Tap tools tucked into a collapsed Advanced section. It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by default, and general multi-app per-application control is not implemented.
+It provides a cleaner menu bar mixer panel focused on everyday controls, with stable system-level output controls, real output device listing/switching, real running app discovery, a compact global opt-in mode that can make one eligible app row real when the user interacts with it, and technical Process Tap tools tucked into a collapsed Advanced section.
+
+v0.11 is primarily an internal architecture milestone. The app now has a `ProcessTapLiveSessionManager` and session identity/state foundation for future multi-session work, but the user-facing behavior is still one active real-controlled app at a time. It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by default, and general multi-app per-application control is not implemented.
 
 ## Features
 
@@ -37,6 +39,7 @@ It provides a cleaner menu bar mixer panel focused on everyday controls, with st
 - Experimental Mute Probe that may briefly suppress the selected app during a user-triggered test
 - Experimental Replay Probe with fixed gain choices: 25%, 50%, 75%, and 100%
 - Experimental one-app Live Control session with Start/Stop, selected gain, smoothing, safety timeout, and cleanup
+- Internal `ProcessTapLiveSessionManager` foundation for future multi-session work
 - Compact `Real app control` toggle, OFF by default
 - Slider interaction can start real one-app control when the global mode is enabled
 - One active experimental app row at a time
@@ -84,6 +87,16 @@ The Advanced diagnostics section can create short-lived Core Audio process tap d
 Replay Probe, manual Live Control, and global opt-in row control go further: they can temporarily suppress the selected app's original output, replay captured audio through `AudioQueue`, and apply gain. These paths are experimental, user-triggered, and currently limited to one app. They do not make every row a real mixer control.
 
 The app includes `NSAudioCaptureUsageDescription` for system audio capture experiments. It does not request system audio recording permission on launch. macOS may ask for System Audio Recording permission when the user explicitly runs a diagnostic or live control action.
+
+## Architecture Notes
+
+The current live-control implementation is intentionally still limited to one active session. v0.11 adds internal session-management scaffolding without exposing multi-app control in the UI.
+
+- `ProcessTapLiveSessionManager` wraps the existing Core Audio live controller.
+- `ProcessTapLiveSessionID` and `ProcessTapLiveSessionState` provide a foundation for future per-session tracking.
+- `maxSessions` is currently `1`.
+- Existing global Real app control and Advanced manual Live Control route through this manager-backed path.
+- Future multi-session work can build on this foundation, but multi-app real control is not enabled yet.
 
 ## Requirements
 
@@ -147,12 +160,15 @@ Research and experiments:
 - Add safe debug logging for tap diagnostics
 - Design safe architecture for per-app gain/mute experiments
 - Refine the one-app-row experimental Live opt-in path
-- v0.11 multi-session architecture research
+- Advanced two-app readiness experiment
+- CPU, latency, buffer drop, and cleanup diagnostics before exposing multi-app control
+- Multi-session architecture research using the internal session manager foundation
 - Refine automatic audio-relevant app detection
 - Audio activity detection improvements
 - Eventual automatic real mixer behavior if stable
 - Reduce experimental UI over time if stability improves
 - Eventually evaluate multi-app architecture
+- Evaluate a centralized mixer/renderer if independent sessions are not stable
 - Investigate routing/replay requirements
 - Decide whether Process Tap alone is enough or whether a virtual device/HAL approach is needed later
 - Better app active/inactive state handling
