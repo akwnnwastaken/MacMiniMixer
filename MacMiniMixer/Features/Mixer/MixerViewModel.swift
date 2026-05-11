@@ -23,6 +23,13 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var twoAppReadinessSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
     @Published private(set) var twoAppReadinessResult: ProcessTapTwoAppReadinessResult?
     @Published private(set) var isTwoAppReadinessRunning = false
+    @Published private(set) var selectedHelperDiscoveryAppID: MixerAppItem.ID?
+    @Published private(set) var helperProcessCandidates: [HelperProcessCandidate] = []
+    @Published private(set) var helperProcessDiscoveryMessage: String?
+    @Published private(set) var isHelperProcessDiscoveryScanning = false
+    @Published private(set) var helperProcessProbeResultsByPID: [Int32: ProcessTapTestResult] = [:]
+    @Published private(set) var helperProcessProbeProgressByPID: [Int32: ProcessTapDiagnosticProgress] = [:]
+    @Published private(set) var helperProcessProbeRunningPID: Int32?
     @Published private(set) var activeExperimentalAppID: MixerAppItem.ID?
     @Published private(set) var activeLiveControlAppName: String?
     @Published private(set) var showAllApps = false
@@ -38,6 +45,8 @@ final class MixerViewModel: ObservableObject {
     private let processTapReplayProbe: ProcessTapReplayProbing
     private let processTapLiveController: ProcessTapLiveControlling
     private let twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
+    private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
+    private let processLister: ProcessListing
     private var lastNonZeroSystemVolume: Double
     private var lastSliderVolumeSetSucceeded: Bool?
     private var statusClearTask: Task<Void, Never>?
@@ -53,7 +62,9 @@ final class MixerViewModel: ObservableObject {
         processTapTester: ProcessTapTesting,
         processTapReplayProbe: ProcessTapReplayProbing,
         processTapLiveController: ProcessTapLiveControlling,
-        twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
+        twoAppReadinessTester: ProcessTapTwoAppReadinessTesting,
+        helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
+        processLister: ProcessListing
     ) {
         self.applicationLister = applicationLister
         self.audioController = audioController
@@ -65,6 +76,8 @@ final class MixerViewModel: ObservableObject {
         self.processTapReplayProbe = processTapReplayProbe
         self.processTapLiveController = processTapLiveController
         self.twoAppReadinessTester = twoAppReadinessTester
+        self.helperProcessAudioProbe = helperProcessAudioProbe
+        self.processLister = processLister
 
         let initialSystemVolume = audioController.systemVolume.clamped(to: AppConstants.volumeRange)
         let initialApps = applicationLister.listApplications()
@@ -76,6 +89,7 @@ final class MixerViewModel: ObservableObject {
             : AppConstants.defaultSystemOutputRestoreVolume
         self.apps = initialApps
         self.selectedProcessTapAppID = Self.preferredProcessTapAppID(in: initialApps)
+        self.selectedHelperDiscoveryAppID = Self.preferredHelperDiscoveryAppID(in: initialApps)
         self.selectedProcessTapReplayGain = .defaultOption
         self.twoAppReadinessEligibilityByAppID = initialTwoAppReadinessEligibility
         self.selectedTwoAppReadinessAppAID = Self.preferredTwoAppReadinessAppIDs(
@@ -110,6 +124,7 @@ final class MixerViewModel: ObservableObject {
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
         _ = twoAppReadinessTester.stopAllNow(reason: .appTerminating)
+        helperProcessAudioProbe.stopCurrentProbe(reason: .userStopped)
     }
 
     var selectedOutputDeviceName: String {
@@ -219,6 +234,11 @@ final class MixerViewModel: ObservableObject {
             stopTwoAppReadiness(reason: .outputDeviceChanged)
         }
 
+        if helperProcessProbeRunningPID != nil,
+           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            stopHelperProcessProbe(reason: .outputDeviceChanged)
+        }
+
         if didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
             refreshSystemOutputVolume()
         }
@@ -278,6 +298,120 @@ final class MixerViewModel: ObservableObject {
 
         selectedTwoAppReadinessGain = gain
         twoAppReadinessResult = nil
+    }
+
+    func selectHelperDiscoveryApp(_ appID: MixerAppItem.ID) {
+        guard !isHelperProcessDiscoveryScanning,
+              helperProcessProbeRunningPID == nil,
+              apps.contains(where: { $0.id == appID }) else {
+            return
+        }
+
+        selectedHelperDiscoveryAppID = appID
+        helperProcessCandidates = []
+        helperProcessDiscoveryMessage = nil
+        helperProcessProbeResultsByPID = [:]
+        helperProcessProbeProgressByPID = [:]
+    }
+
+    func scanHelperProcesses() {
+        guard !isHelperProcessDiscoveryScanning,
+              helperProcessProbeRunningPID == nil else {
+            return
+        }
+
+        guard let app = selectedHelperDiscoveryApp else {
+            helperProcessDiscoveryMessage = "Select a visible app"
+            helperProcessCandidates = []
+            return
+        }
+
+        isHelperProcessDiscoveryScanning = true
+        helperProcessDiscoveryMessage = nil
+        helperProcessCandidates = []
+        helperProcessProbeResultsByPID = [:]
+        helperProcessProbeProgressByPID = [:]
+
+        let processLister = processLister
+        Task {
+            let processes = await Task.detached(priority: .userInitiated) {
+                processLister.listProcesses()
+            }.value
+            let candidates = Self.helperProcessCandidates(for: app, processes: processes)
+            let eligibleCount = candidates.filter(\.isTapEligible).count
+
+            await MainActor.run {
+                guard self.selectedHelperDiscoveryAppID == app.id else {
+                    self.isHelperProcessDiscoveryScanning = false
+                    return
+                }
+
+                self.helperProcessCandidates = candidates
+                self.isHelperProcessDiscoveryScanning = false
+
+                if candidates.isEmpty {
+                    self.helperProcessDiscoveryMessage = "No related helper candidates found"
+                } else if eligibleCount == 0 {
+                    self.helperProcessDiscoveryMessage = "No tap-eligible helper processes found"
+                } else {
+                    self.helperProcessDiscoveryMessage = "\(eligibleCount) tap-eligible candidate\(eligibleCount == 1 ? "" : "s")"
+                }
+            }
+        }
+    }
+
+    func probeHelperProcessCandidate(_ processIdentifier: Int32) {
+        guard helperProcessProbeRunningPID == nil else {
+            return
+        }
+
+        guard let candidate = helperProcessCandidates.first(where: { $0.id == processIdentifier }),
+              candidate.isTapEligible else {
+            helperProcessProbeResultsByPID[processIdentifier] = ProcessTapTestResult(
+                outcome: .processNotFound,
+                message: "Core Audio process unavailable",
+                severity: .warning
+            )
+            return
+        }
+
+        let target = ProcessTapTarget(
+            appID: "process:\(candidate.process.processIdentifier)",
+            appName: candidate.process.name,
+            processIdentifier: candidate.process.processIdentifier
+        )
+        let initialProgress = ProcessTapDiagnosticProgress(
+            callbackCount: 0,
+            peakLevel: 0,
+            rmsLevel: 0,
+            audioDetected: false
+        )
+
+        helperProcessProbeRunningPID = processIdentifier
+        helperProcessProbeProgressByPID[processIdentifier] = initialProgress
+        helperProcessProbeResultsByPID[processIdentifier] = ProcessTapTestResult(
+            outcome: .helperProbeRunning,
+            message: "Probing...",
+            detail: "Listening briefly. No audio will be replayed, saved, or modified.",
+            severity: .info
+        )
+
+        Task {
+            let result = await helperProcessAudioProbe.probeAudio(for: target) { progress in
+                Task { @MainActor in
+                    guard self.helperProcessProbeRunningPID == processIdentifier else {
+                        return
+                    }
+
+                    self.helperProcessProbeProgressByPID[processIdentifier] = progress
+                }
+            }
+
+            await MainActor.run {
+                self.helperProcessProbeResultsByPID[processIdentifier] = result
+                self.helperProcessProbeRunningPID = nil
+            }
+        }
     }
 
     func testSelectedProcessTapApp() {
@@ -438,8 +572,10 @@ final class MixerViewModel: ObservableObject {
     func stopProcessTapLiveControlForTermination() {
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
         _ = twoAppReadinessTester.stopAllNow(reason: .appTerminating)
+        helperProcessAudioProbe.stopCurrentProbe(reason: .userStopped)
         isProcessTapLiveControlActive = false
         isProcessTapTesting = false
+        helperProcessProbeRunningPID = nil
         activeExperimentalAppID = nil
         activeLiveControlAppName = nil
         isTwoAppReadinessRunning = false
@@ -666,6 +802,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         refreshTwoAppReadinessSelectionsAfterAppRefresh()
+        refreshHelperDiscoverySelectionAfterAppRefresh()
     }
 
     func volume(for appID: MixerAppItem.ID) -> Double {
@@ -868,6 +1005,14 @@ final class MixerViewModel: ObservableObject {
         }
     }
 
+    private func stopHelperProcessProbe(reason: ProcessTapCandidateProbeStopReason) {
+        guard helperProcessProbeRunningPID != nil else {
+            return
+        }
+
+        helperProcessAudioProbe.stopCurrentProbe(reason: reason)
+    }
+
     private func handleTwoAppReadinessFinished(
         _ result: ProcessTapTwoAppReadinessResult,
         snapshot: ProcessTapTwoAppReadinessSnapshot
@@ -904,6 +1049,20 @@ final class MixerViewModel: ObservableObject {
             selectedTwoAppReadinessAppBID == selectedTwoAppReadinessAppAID {
             selectedTwoAppReadinessAppBID = preferredIDs.appBID
         }
+    }
+
+    private func refreshHelperDiscoverySelectionAfterAppRefresh() {
+        let appIDs = Set(apps.map(\.id))
+
+        guard selectedHelperDiscoveryAppID.map({ appIDs.contains($0) }) != true else {
+            return
+        }
+
+        selectedHelperDiscoveryAppID = Self.preferredHelperDiscoveryAppID(in: apps)
+        helperProcessCandidates = []
+        helperProcessDiscoveryMessage = nil
+        helperProcessProbeResultsByPID = [:]
+        helperProcessProbeProgressByPID = [:]
     }
 
     private func refreshTwoAppReadinessEligibility() {
@@ -950,6 +1109,13 @@ final class MixerViewModel: ObservableObject {
         apps.first { $0.isEligibleForExperimentalLiveControl }?.id ?? apps.first?.id
     }
 
+    private static func preferredHelperDiscoveryAppID(in apps: [MixerAppItem]) -> MixerAppItem.ID? {
+        apps.first { app in
+            let searchableText = normalizedSearchText("\(app.name) \(app.id)")
+            return browserSearchKeywords.contains { searchableText.contains($0) }
+        }?.id ?? apps.first?.id
+    }
+
     private static func preferredTwoAppReadinessAppIDs(
         in apps: [MixerAppItem],
         eligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
@@ -962,6 +1128,209 @@ final class MixerViewModel: ObservableObject {
             appAID: eligibleApps.first?.id,
             appBID: eligibleApps.dropFirst().first?.id
         )
+    }
+
+    private static let helperProcessCandidateDisplayLimit = 30
+
+    private static let browserSearchKeywords = [
+        "safari",
+        "chrome",
+        "chromium",
+        "youtube",
+        "browser",
+        "webkit",
+        "arc",
+        "brave",
+        "edge",
+        "opera"
+    ]
+
+    private static func helperProcessCandidates(
+        for app: MixerAppItem,
+        processes: [SystemProcessInfo]
+    ) -> [HelperProcessCandidate] {
+        guard let appPID = app.processIdentifier, appPID > 0 else {
+            return []
+        }
+
+        var processByPID = Dictionary(
+            uniqueKeysWithValues: processes.map { process in
+                (process.processIdentifier, process)
+            }
+        )
+
+        if processByPID[appPID] == nil {
+            processByPID[appPID] = SystemProcessInfo(
+                processIdentifier: appPID,
+                parentProcessIdentifier: nil,
+                name: app.name,
+                executablePath: nil
+            )
+        }
+
+        let candidates = processByPID.values.compactMap { process -> HelperProcessCandidate? in
+            guard let relation = helperProcessRelation(
+                for: process,
+                selectedApp: app,
+                processByPID: processByPID
+            ) else {
+                return nil
+            }
+
+            return HelperProcessCandidate(
+                process: process,
+                relation: relation,
+                eligibility: ProcessTapCoreAudio.processTapEligibility(for: process.processIdentifier)
+            )
+        }
+
+        return candidates
+            .sorted(by: helperProcessCandidateSort)
+            .prefix(helperProcessCandidateDisplayLimit)
+            .map { $0 }
+    }
+
+    private static func helperProcessRelation(
+        for process: SystemProcessInfo,
+        selectedApp: MixerAppItem,
+        processByPID: [Int32: SystemProcessInfo]
+    ) -> HelperProcessRelation? {
+        guard let selectedPID = selectedApp.processIdentifier else {
+            return nil
+        }
+
+        if process.processIdentifier == selectedPID {
+            return .directApp
+        }
+
+        if process.parentProcessIdentifier == selectedPID {
+            return .child
+        }
+
+        if isDescendant(process, of: selectedPID, processByPID: processByPID) {
+            return .descendant
+        }
+
+        if matchesHelperNameHeuristic(process, selectedApp: selectedApp) {
+            return .nameMatch
+        }
+
+        return nil
+    }
+
+    private static func isDescendant(
+        _ process: SystemProcessInfo,
+        of rootPID: Int32,
+        processByPID: [Int32: SystemProcessInfo]
+    ) -> Bool {
+        var visitedPIDs = Set<Int32>()
+        var parentPID = process.parentProcessIdentifier
+
+        for _ in 0..<64 {
+            guard let currentPID = parentPID,
+                  visitedPIDs.insert(currentPID).inserted else {
+                return false
+            }
+
+            if currentPID == rootPID {
+                return true
+            }
+
+            parentPID = processByPID[currentPID]?.parentProcessIdentifier
+        }
+
+        return false
+    }
+
+    private static func matchesHelperNameHeuristic(
+        _ process: SystemProcessInfo,
+        selectedApp: MixerAppItem
+    ) -> Bool {
+        let candidateText = normalizedSearchText(
+            "\(process.name) \(process.executablePath ?? "")"
+        )
+        let keywords = helperDiscoveryKeywords(for: selectedApp)
+
+        return keywords.contains { keyword in
+            candidateText.contains(keyword)
+        }
+    }
+
+    private static func helperDiscoveryKeywords(for app: MixerAppItem) -> [String] {
+        let selectedText = normalizedSearchText("\(app.name) \(app.id)")
+
+        if selectedText.contains("safari") || selectedText.contains("webkit") {
+            return ["safari", "webkit", "webcontent", "com.apple.webkit"]
+        }
+
+        if selectedText.contains("chrome") ||
+            selectedText.contains("chromium") ||
+            selectedText.contains("brave") ||
+            selectedText.contains("edge") ||
+            selectedText.contains("arc") ||
+            selectedText.contains("opera") {
+            return [
+                "chrome helper",
+                "chrome",
+                "chromium",
+                "renderer",
+                "gpu",
+                "utility",
+                "audio",
+                "brave",
+                "edge",
+                "arc",
+                "opera"
+            ]
+        }
+
+        if selectedText.contains("youtube") {
+            return [
+                "youtube",
+                "safari",
+                "webkit",
+                "webcontent",
+                "chrome helper",
+                "chrome",
+                "chromium",
+                "renderer",
+                "gpu",
+                "utility",
+                "audio"
+            ]
+        }
+
+        return selectedText
+            .split(separator: " ")
+            .map(String.init)
+            .filter { $0.count > 2 }
+            .prefix(3)
+            .map { $0 }
+    }
+
+    private static func helperProcessCandidateSort(
+        lhs: HelperProcessCandidate,
+        rhs: HelperProcessCandidate
+    ) -> Bool {
+        if lhs.relation.sortPriority != rhs.relation.sortPriority {
+            return lhs.relation.sortPriority < rhs.relation.sortPriority
+        }
+
+        if lhs.isTapEligible != rhs.isTapEligible {
+            return lhs.isTapEligible && !rhs.isTapEligible
+        }
+
+        let nameComparison = lhs.process.name.localizedCaseInsensitiveCompare(rhs.process.name)
+        if nameComparison != .orderedSame {
+            return nameComparison == .orderedAscending
+        }
+
+        return lhs.process.processIdentifier < rhs.process.processIdentifier
+    }
+
+    private static func normalizedSearchText(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
     }
 
     private static func twoAppReadinessEligibility(
@@ -996,6 +1365,14 @@ final class MixerViewModel: ObservableObject {
         }
 
         return apps.first { $0.id == selectedTwoAppReadinessAppBID }
+    }
+
+    private var selectedHelperDiscoveryApp: MixerAppItem? {
+        guard let selectedHelperDiscoveryAppID else {
+            return nil
+        }
+
+        return apps.first { $0.id == selectedHelperDiscoveryAppID }
     }
 
     private func applyRequestedSystemVolume(_ volume: Double) -> Bool {

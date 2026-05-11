@@ -351,6 +351,20 @@ struct MixerPanelView: View {
                         showsHeader: false
                     )
 
+                    HelperProcessDiscoveryView(
+                        apps: viewModel.apps,
+                        selectedAppID: viewModel.selectedHelperDiscoveryAppID,
+                        candidates: viewModel.helperProcessCandidates,
+                        message: viewModel.helperProcessDiscoveryMessage,
+                        isScanning: viewModel.isHelperProcessDiscoveryScanning,
+                        probeResultsByPID: viewModel.helperProcessProbeResultsByPID,
+                        probeProgressByPID: viewModel.helperProcessProbeProgressByPID,
+                        runningProbePID: viewModel.helperProcessProbeRunningPID,
+                        selectApp: viewModel.selectHelperDiscoveryApp,
+                        scanHelpers: viewModel.scanHelperProcesses,
+                        probeCandidate: viewModel.probeHelperProcessCandidate
+                    )
+
                     TwoAppReadinessTestView(
                         apps: viewModel.apps,
                         selectedAppAID: viewModel.selectedTwoAppReadinessAppAID,

@@ -53,6 +53,10 @@
 		9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */; };
 		9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */; };
 		9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */; };
+		9B7D1A942C8F4A9A8B2D0101 /* ProcessListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A952C8F4A9A8B2D0101 /* ProcessListing.swift */; };
+		9B7D1A962C8F4A9A8B2D0101 /* SystemProcessLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A972C8F4A9A8B2D0101 /* SystemProcessLister.swift */; };
+		9B7D1A982C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */; };
+		9B7D1A9B2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -104,6 +108,10 @@
 		9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessTestView.swift; sourceTree = "<group>"; };
 		9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioHelpers.swift; sourceTree = "<group>"; };
 		9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Comparable+Clamped.swift"; sourceTree = "<group>"; };
+		9B7D1A952C8F4A9A8B2D0101 /* ProcessListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessListing.swift; sourceTree = "<group>"; };
+		9B7D1A972C8F4A9A8B2D0101 /* SystemProcessLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProcessLister.swift; sourceTree = "<group>"; };
+		9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessDiscoveryView.swift; sourceTree = "<group>"; };
+		9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapCandidateAudioProbing.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -166,6 +174,7 @@
 			children = (
 				9B7D1A432C8F4A9A8B2D0101 /* Audio */,
 				9B7D1A442C8F4A9A8B2D0101 /* Applications */,
+				9B7D1A9A2C8F4A9A8B2D0101 /* Processes */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -187,6 +196,7 @@
 				9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */,
 				9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */,
 				9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */,
+				9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */,
 				9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */,
 			);
 			path = MenuBar;
@@ -245,6 +255,7 @@
 				9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */,
 				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
 				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
+				9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */,
 			);
 			path = ProcessTap;
 			sourceTree = "<group>";
@@ -265,6 +276,15 @@
 				9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */,
 			);
 			path = Applications;
+			sourceTree = "<group>";
+		};
+		9B7D1A9A2C8F4A9A8B2D0101 /* Processes */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A952C8F4A9A8B2D0101 /* ProcessListing.swift */,
+				9B7D1A972C8F4A9A8B2D0101 /* SystemProcessLister.swift */,
+			);
+			path = Processes;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -381,6 +401,10 @@
 				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
 				9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */,
 				9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */,
+				9B7D1A942C8F4A9A8B2D0101 /* ProcessListing.swift in Sources */,
+				9B7D1A962C8F4A9A8B2D0101 /* SystemProcessLister.swift in Sources */,
+				9B7D1A982C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift in Sources */,
+				9B7D1A9B2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

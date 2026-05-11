@@ -16,6 +16,10 @@ struct ProcessTapTestResult: Identifiable, Equatable, Sendable {
         case streamDiagnosticsNoAudio
         case streamDiagnosticsNoCallbacks
         case streamDiagnosticsLevelUnavailable
+        case helperProbeRunning
+        case helperProbeStopped
+        case helperProbeOutputChanged
+        case helperProbeTargetExited
         case muteBehaviorNotAvailable
         case muteBehaviorProbeDetectedAudio
         case muteBehaviorProbeNoAudio
