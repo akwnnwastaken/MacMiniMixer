@@ -24,12 +24,9 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     private var controllers: [ProcessTapLiveSessionID: ProcessTapLiveControlling] = [:]
     private var compatibilityActiveSessionID: ProcessTapLiveSessionID?
 
-    init(
-        controller: ProcessTapLiveControlling,
-        maxSessions: Int = 1
-    ) {
+    init(controller: ProcessTapLiveControlling) {
         self.controllerFactory = { controller }
-        self.maxSessions = max(1, maxSessions)
+        self.maxSessions = 1
     }
 
     init(

@@ -3,9 +3,6 @@ import SwiftUI
 struct MixerAppRowView: View {
     let app: MixerAppItem
     let isExperimentalControlActive: Bool
-    let isExperimentalControlBusy: Bool
-    let isExperimentalControlEligible: Bool
-    let isExperimentalRealAppControlEnabled: Bool
     let toggleExperimentalControl: () -> Void
     @Binding var volume: Double
     @Binding var isMuted: Bool
@@ -167,68 +164,5 @@ struct MixerAppRowView: View {
         .buttonStyle(.plain)
         .help("Stop experimental real app control for \(app.name)")
         .accessibilityLabel(Text("Stop Real App Control"))
-    }
-
-    private var experimentalControlButton: some View {
-        Button(action: toggleExperimentalControl) {
-            experimentalControlButtonLabel
-        }
-        .buttonStyle(.plain)
-        .disabled(isExperimentalControlButtonDisabled)
-        .opacity(experimentalControlButtonOpacity)
-        .help(experimentalControlHelpText)
-        .accessibilityLabel(Text(isExperimentalControlActive ? "Stop Live Control" : "Live Control"))
-        .accessibilityHint(Text(experimentalControlHelpText))
-    }
-
-    private var isExperimentalControlButtonDisabled: Bool {
-        isExperimentalControlBusy || (!isExperimentalControlActive && !isExperimentalControlEligible)
-    }
-
-    private var experimentalControlButtonOpacity: Double {
-        if !isExperimentalControlActive && !isExperimentalControlEligible {
-            return 0.34
-        }
-
-        if isExperimentalControlBusy && !isExperimentalControlActive {
-            return 0.45
-        }
-
-        return 1
-    }
-
-    private var experimentalControlHelpText: String {
-        if isExperimentalControlActive {
-            return "Stop experimental live control for \(app.name)"
-        }
-
-        if !isExperimentalControlEligible {
-            return "Live control requires a running app process."
-        }
-
-        if isExperimentalControlBusy {
-            return "Stop the active live control first."
-        }
-
-        return "Experimental Live Control: may briefly affect real audio for \(app.name)"
-    }
-
-    private var experimentalControlButtonLabel: some View {
-        Label(isExperimentalControlActive ? "On" : "Live", systemImage: "testtube.2")
-            .labelStyle(.iconOnly)
-            .font(.system(size: 11, weight: .semibold))
-            .frame(width: AppConstants.Layout.rowLiveButtonSize, height: AppConstants.Layout.rowLiveButtonSize)
-            .foregroundStyle(isExperimentalControlActive ? .orange : .secondary)
-            .background(
-                Circle()
-                    .fill(isExperimentalControlActive ? Color.orange.opacity(0.16) : Color.white.opacity(0.06))
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                isExperimentalControlActive ? Color.orange.opacity(0.28) : Color.white.opacity(0.08),
-                                lineWidth: 1
-                            )
-                    )
-            )
     }
 }

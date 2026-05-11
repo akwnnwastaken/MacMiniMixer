@@ -51,6 +51,8 @@
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
 		9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */; };
 		9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */; };
+		9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */; };
+		9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,6 +102,8 @@
 		9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManager.swift; sourceTree = "<group>"; };
 		9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTwoAppReadinessTesting.swift; sourceTree = "<group>"; };
 		9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessTestView.swift; sourceTree = "<group>"; };
+		9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioHelpers.swift; sourceTree = "<group>"; };
+		9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Comparable+Clamped.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -171,6 +175,7 @@
 			children = (
 				9B7D1A762C8F4A9A8B2D0101 /* Info.plist */,
 				9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */,
+				9B7D1A932C8F4A9A8B2D0101 /* Extensions */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -202,6 +207,7 @@
 		9B7D1A432C8F4A9A8B2D0101 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
+				9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */,
 				9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */,
 				9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */,
 				9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */,
@@ -241,6 +247,14 @@
 				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
 			);
 			path = ProcessTap;
+			sourceTree = "<group>";
+		};
+		9B7D1A932C8F4A9A8B2D0101 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */,
+			);
+			path = Extensions;
 			sourceTree = "<group>";
 		};
 		9B7D1A442C8F4A9A8B2D0101 /* Applications */ = {
@@ -365,6 +379,8 @@
 				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
 				9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */,
 				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
+				9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */,
+				9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

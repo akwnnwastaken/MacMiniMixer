@@ -31,7 +31,7 @@ struct CoreAudioOutputDeviceLister: OutputDeviceListing {
     }
 
     private func realOutputDevices() -> [OutputDeviceItem] {
-        let defaultDeviceID = defaultOutputDeviceID()
+        let defaultDeviceID = CoreAudioHelpers.defaultOutputDeviceID()
         var seenIDs = Set<OutputDeviceItem.ID>()
 
         return allAudioDeviceIDs()
@@ -147,32 +147,6 @@ struct CoreAudioOutputDeviceLister: OutputDeviceListing {
         return UnsafeMutableAudioBufferListPointer(audioBufferList)
             .contains { $0.mNumberChannels > 0 }
     }
-
-    private func defaultOutputDeviceID() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID(kAudioObjectUnknown)
-        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &dataSize,
-            &deviceID
-        )
-
-        guard status == noErr, deviceID != AudioDeviceID(kAudioObjectUnknown) else {
-            return nil
-        }
-
-        return deviceID
-    }
-
     private func stableID(for deviceID: AudioDeviceID) -> OutputDeviceItem.ID {
         if let uid = stringProperty(kAudioDevicePropertyDeviceUID, for: deviceID) {
             return "coreaudio:\(uid)"

@@ -3,7 +3,7 @@ import Foundation
 
 struct CoreAudioSystemVolumeController: SystemVolumeControlling {
     func setCurrentOutputVolumeScalar(_ volumeScalar: Double) -> Bool {
-        guard let deviceID = defaultOutputDeviceID() else {
+        guard let deviceID = CoreAudioHelpers.defaultOutputDeviceID() else {
             return false
         }
 
@@ -81,36 +81,5 @@ struct CoreAudioSystemVolumeController: SystemVolumeControlling {
         )
 
         return setStatus == noErr
-    }
-
-    private func defaultOutputDeviceID() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID(kAudioObjectUnknown)
-        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &dataSize,
-            &deviceID
-        )
-
-        guard status == noErr, deviceID != AudioDeviceID(kAudioObjectUnknown) else {
-            return nil
-        }
-
-        return deviceID
-    }
-}
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
     }
 }

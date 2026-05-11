@@ -4,8 +4,8 @@ struct ProcessTapReplayGainOption: Identifiable, Equatable, Sendable {
     let scalar: Float
     let label: String
 
-    var id: Float {
-        scalar
+    var id: String {
+        label
     }
 
     var percentLabel: String {

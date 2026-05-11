@@ -569,18 +569,6 @@ final class MixerViewModel: ObservableObject {
         activeExperimentalAppID == appID && isProcessTapLiveControlActive
     }
 
-    func isExperimentalControlBusy(for appID: MixerAppItem.ID) -> Bool {
-        if activeExperimentalAppID == appID {
-            return isProcessTapTesting
-        }
-
-        return isProcessTapTesting || isProcessTapLiveControlActive
-    }
-
-    func isExperimentalControlEligible(for appID: MixerAppItem.ID) -> Bool {
-        apps.first { $0.id == appID }?.isEligibleForExperimentalLiveControl ?? false
-    }
-
     func toggleExperimentalControl(for appID: MixerAppItem.ID) {
         if isExperimentalControlActive(for: appID) {
             stopProcessTapLiveControl()
@@ -1071,12 +1059,6 @@ final class MixerViewModel: ObservableObject {
         if clampedVolume > AppConstants.volumeRange.lowerBound {
             lastNonZeroSystemVolume = clampedVolume
         }
-    }
-}
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 
