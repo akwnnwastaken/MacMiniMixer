@@ -337,6 +337,7 @@ struct MixerPanelView: View {
                         selectedAppID: viewModel.selectedProcessTapAppID,
                         result: viewModel.processTapTestResult,
                         progress: viewModel.processTapDiagnosticProgress,
+                        advancedTarget: viewModel.advancedProcessTapTarget,
                         selectedReplayGain: viewModel.selectedProcessTapReplayGain,
                         liveDiagnostics: viewModel.processTapLiveDiagnostics,
                         isTesting: viewModel.isProcessTapTesting,
@@ -348,6 +349,7 @@ struct MixerPanelView: View {
                         testReplayProbe: viewModel.testSelectedProcessTapReplayProbe,
                         startLiveControl: viewModel.startProcessTapLiveControl,
                         stopLiveControl: viewModel.stopProcessTapLiveControl,
+                        clearAdvancedTarget: viewModel.clearAdvancedProcessTapTarget,
                         showsHeader: false
                     )
 
@@ -360,9 +362,11 @@ struct MixerPanelView: View {
                         probeResultsByPID: viewModel.helperProcessProbeResultsByPID,
                         probeProgressByPID: viewModel.helperProcessProbeProgressByPID,
                         runningProbePID: viewModel.helperProcessProbeRunningPID,
+                        advancedTarget: viewModel.advancedProcessTapTarget,
                         selectApp: viewModel.selectHelperDiscoveryApp,
                         scanHelpers: viewModel.scanHelperProcesses,
-                        probeCandidate: viewModel.probeHelperProcessCandidate
+                        probeCandidate: viewModel.probeHelperProcessCandidate,
+                        useCandidateAsAdvancedTarget: viewModel.useHelperCandidateAsAdvancedTarget
                     )
 
                     TwoAppReadinessTestView(

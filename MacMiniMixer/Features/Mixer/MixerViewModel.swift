@@ -1,6 +1,25 @@
 import AppKit
 import Foundation
 
+struct AdvancedProcessTapTarget: Identifiable, Equatable, Sendable {
+    let target: ProcessTapTarget
+    let parentAppName: String
+    let relation: HelperProcessRelation
+    let eligibility: ProcessTapProcessEligibility
+    let probeResult: ProcessTapTestResult?
+
+    var id: String { target.appID }
+
+    var displayName: String {
+        "\(parentAppName) helper"
+    }
+
+    var detail: String {
+        let pidText = target.processIdentifier.map { "PID \($0)" } ?? "PID -"
+        return "\(target.appName) · \(pidText) · \(relation.label)"
+    }
+}
+
 @MainActor
 final class MixerViewModel: ObservableObject {
     @Published private(set) var systemVolume: Double
@@ -30,6 +49,7 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var helperProcessProbeResultsByPID: [Int32: ProcessTapTestResult] = [:]
     @Published private(set) var helperProcessProbeProgressByPID: [Int32: ProcessTapDiagnosticProgress] = [:]
     @Published private(set) var helperProcessProbeRunningPID: Int32?
+    @Published private(set) var advancedProcessTapTarget: AdvancedProcessTapTarget?
     @Published private(set) var activeExperimentalAppID: MixerAppItem.ID?
     @Published private(set) var activeLiveControlAppName: String?
     @Published private(set) var showAllApps = false
@@ -265,6 +285,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         selectedProcessTapAppID = appID
+        advancedProcessTapTarget = nil
         processTapTestResult = nil
         processTapDiagnosticProgress = nil
     }
@@ -358,6 +379,39 @@ final class MixerViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func useHelperCandidateAsAdvancedTarget(_ processIdentifier: Int32) {
+        guard let candidate = helperProcessCandidates.first(where: { $0.id == processIdentifier }),
+              candidate.isTapEligible else {
+            processTapTestResult = ProcessTapTestResult(
+                outcome: .processNotFound,
+                message: "Core Audio process unavailable",
+                severity: .warning
+            )
+            return
+        }
+
+        let parentAppName = selectedHelperDiscoveryApp?.name ?? "Selected app"
+        advancedProcessTapTarget = AdvancedProcessTapTarget(
+            target: ProcessTapTarget(
+                appID: "helper:\(parentAppName):\(candidate.process.processIdentifier)",
+                appName: candidate.process.name,
+                processIdentifier: candidate.process.processIdentifier
+            ),
+            parentAppName: parentAppName,
+            relation: candidate.relation,
+            eligibility: candidate.eligibility,
+            probeResult: helperProcessProbeResultsByPID[processIdentifier]
+        )
+        processTapTestResult = nil
+        processTapDiagnosticProgress = nil
+    }
+
+    func clearAdvancedProcessTapTarget() {
+        advancedProcessTapTarget = nil
+        processTapTestResult = nil
+        processTapDiagnosticProgress = nil
     }
 
     func probeHelperProcessCandidate(_ processIdentifier: Int32) {
@@ -719,23 +773,31 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        guard let app = selectedProcessTapApp else {
+        guard let target = processTapTarget(for: mode) else {
             processTapTestResult = ProcessTapTestResult(
                 outcome: .invalidTarget,
-                message: "Select a running app",
+                message: "Select a running app or Advanced target",
                 severity: .warning
             )
             return
         }
 
-        let target = ProcessTapTarget(
-            appID: app.id,
-            appName: app.name,
-            processIdentifier: app.processIdentifier
-        )
+        if mode == .diagnostics, advancedProcessTapTarget != nil {
+            let eligibility = ProcessTapCoreAudio.processTapEligibility(for: target.processIdentifier)
+            guard eligibility.isEligible else {
+                processTapTestResult = ProcessTapTestResult(
+                    outcome: .processNotFound,
+                    message: "Advanced target unavailable",
+                    detail: eligibility.reason ?? "Core Audio process unavailable",
+                    severity: .warning
+                )
+                return
+            }
+        }
+
         processTapTestResult = ProcessTapTestResult(
             outcome: .streamDiagnosticsRunning,
-            message: mode.runningMessage(for: app.name),
+            message: mode.runningMessage(for: target.appName),
             detail: mode.runningDetail,
             severity: .info
         )
@@ -1349,6 +1411,22 @@ final class MixerViewModel: ObservableObject {
         }
 
         return apps.first { $0.id == selectedProcessTapAppID }
+    }
+
+    private func processTapTarget(for mode: ProcessTapTestMode) -> ProcessTapTarget? {
+        if mode == .diagnostics, let advancedProcessTapTarget {
+            return advancedProcessTapTarget.target
+        }
+
+        guard let selectedProcessTapApp else {
+            return nil
+        }
+
+        return ProcessTapTarget(
+            appID: selectedProcessTapApp.id,
+            appName: selectedProcessTapApp.name,
+            processIdentifier: selectedProcessTapApp.processIdentifier
+        )
     }
 
     private var selectedTwoAppReadinessAppA: MixerAppItem? {

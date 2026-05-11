@@ -9,9 +9,11 @@ struct HelperProcessDiscoveryView: View {
     let probeResultsByPID: [Int32: ProcessTapTestResult]
     let probeProgressByPID: [Int32: ProcessTapDiagnosticProgress]
     let runningProbePID: Int32?
+    let advancedTarget: AdvancedProcessTapTarget?
     let selectApp: (MixerAppItem.ID) -> Void
     let scanHelpers: () -> Void
     let probeCandidate: (Int32) -> Void
+    let useCandidateAsAdvancedTarget: (Int32) -> Void
 
     @State private var isExpanded = false
 
@@ -109,6 +111,10 @@ struct HelperProcessDiscoveryView: View {
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(messageTint)
                     .lineLimit(2)
+            }
+
+            if let advancedTarget {
+                selectedAdvancedTargetLine(advancedTarget)
             }
 
             if !candidates.isEmpty {
@@ -218,6 +224,23 @@ struct HelperProcessDiscoveryView: View {
                     .disabled(runningProbePID != nil || isScanning)
                     .opacity(runningProbePID == nil && !isScanning ? 1 : 0.55)
                     .help("Listen briefly for audio callbacks from this helper process")
+
+                    Button {
+                        useCandidateAsAdvancedTarget(candidate.id)
+                    } label: {
+                        Text(isAdvancedTarget(candidate) ? "Target" : "Use")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.blue.opacity(isAdvancedTarget(candidate) ? 0.18 : 0.11))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(runningProbePID != nil || isScanning || isAdvancedTarget(candidate))
+                    .opacity(runningProbePID == nil && !isScanning ? 1 : 0.55)
+                    .help("Use this helper PID as the Advanced Process Tap Test target")
                 }
             }
 
@@ -317,6 +340,31 @@ struct HelperProcessDiscoveryView: View {
         .foregroundStyle(progress.audioDetected ? Color.green.opacity(0.82) : Color.secondary.opacity(0.7))
     }
 
+    private func selectedAdvancedTargetLine(_ target: AdvancedProcessTapTarget) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "scope")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.blue)
+
+            Text("Advanced target: \(target.displayName)")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Text(target.target.processIdentifier.map { "PID \($0)" } ?? "PID -")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.blue.opacity(0.06))
+        )
+    }
+
     private var selectedAppName: String {
         guard let selectedAppID,
               let app = apps.first(where: { $0.id == selectedAppID }) else {
@@ -341,6 +389,10 @@ struct HelperProcessDiscoveryView: View {
 
     private func formattedLevel(_ level: Double) -> String {
         String(format: "%.3f", level)
+    }
+
+    private func isAdvancedTarget(_ candidate: HelperProcessCandidate) -> Bool {
+        advancedTarget?.target.processIdentifier == candidate.process.processIdentifier
     }
 }
 

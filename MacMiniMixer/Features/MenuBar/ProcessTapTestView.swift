@@ -5,6 +5,7 @@ struct ProcessTapTestView: View {
     let selectedAppID: MixerAppItem.ID?
     let result: ProcessTapTestResult?
     let progress: ProcessTapDiagnosticProgress?
+    let advancedTarget: AdvancedProcessTapTarget?
     let selectedReplayGain: ProcessTapReplayGainOption
     let liveDiagnostics: ProcessTapLiveDiagnostics?
     let isTesting: Bool
@@ -16,6 +17,7 @@ struct ProcessTapTestView: View {
     let testReplayProbe: () -> Void
     let startLiveControl: () -> Void
     let stopLiveControl: () -> Void
+    let clearAdvancedTarget: () -> Void
     let showsHeader: Bool
 
     @State private var isExpanded = false
@@ -25,6 +27,7 @@ struct ProcessTapTestView: View {
         selectedAppID: MixerAppItem.ID?,
         result: ProcessTapTestResult?,
         progress: ProcessTapDiagnosticProgress?,
+        advancedTarget: AdvancedProcessTapTarget?,
         selectedReplayGain: ProcessTapReplayGainOption,
         liveDiagnostics: ProcessTapLiveDiagnostics?,
         isTesting: Bool,
@@ -36,12 +39,14 @@ struct ProcessTapTestView: View {
         testReplayProbe: @escaping () -> Void,
         startLiveControl: @escaping () -> Void,
         stopLiveControl: @escaping () -> Void,
+        clearAdvancedTarget: @escaping () -> Void,
         showsHeader: Bool = true
     ) {
         self.apps = apps
         self.selectedAppID = selectedAppID
         self.result = result
         self.progress = progress
+        self.advancedTarget = advancedTarget
         self.selectedReplayGain = selectedReplayGain
         self.liveDiagnostics = liveDiagnostics
         self.isTesting = isTesting
@@ -53,6 +58,7 @@ struct ProcessTapTestView: View {
         self.testReplayProbe = testReplayProbe
         self.startLiveControl = startLiveControl
         self.stopLiveControl = stopLiveControl
+        self.clearAdvancedTarget = clearAdvancedTarget
         self.showsHeader = showsHeader
     }
 
@@ -128,11 +134,11 @@ struct ProcessTapTestView: View {
                 Button {
                     testProcessTap()
                 } label: {
-                    Label(isTesting ? "Testing" : "Test", systemImage: isTesting ? "hourglass" : "play.fill")
+                    Label(testButtonTitle, systemImage: isTesting ? "hourglass" : "play.fill")
                         .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.plain)
-                .disabled(controlsDisabled || apps.isEmpty)
+                .disabled(controlsDisabled || (apps.isEmpty && advancedTarget == nil))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -143,6 +149,10 @@ struct ProcessTapTestView: View {
                                 .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
                         )
                 )
+            }
+
+            if let advancedTarget {
+                advancedTargetRow(advancedTarget)
             }
 
             HStack(spacing: 8) {
@@ -160,7 +170,8 @@ struct ProcessTapTestView: View {
                         .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.plain)
-                .disabled(controlsDisabled || apps.isEmpty)
+                .disabled(visibleAppControlsDisabled)
+                .opacity(visibleAppControlsDisabled ? 0.52 : 1)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -188,7 +199,8 @@ struct ProcessTapTestView: View {
                         .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.plain)
-                .disabled(controlsDisabled || apps.isEmpty)
+                .disabled(visibleAppControlsDisabled)
+                .opacity(visibleAppControlsDisabled ? 0.52 : 1)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -325,7 +337,8 @@ struct ProcessTapTestView: View {
                             .font(.caption.weight(.medium))
                     }
                     .buttonStyle(.plain)
-                    .disabled(isTesting || apps.isEmpty)
+                    .disabled(visibleAppControlsDisabled)
+                    .opacity(visibleAppControlsDisabled ? 0.52 : 1)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(
@@ -376,15 +389,75 @@ struct ProcessTapTestView: View {
             )
         }
         .menuStyle(.borderlessButton)
-        .disabled(controlsDisabled)
+        .disabled(visibleAppControlsDisabled)
     }
 
     private var controlsDisabled: Bool {
         isTesting || isLiveControlActive
     }
 
+    private var visibleAppControlsDisabled: Bool {
+        controlsDisabled || apps.isEmpty || advancedTarget != nil
+    }
+
+    private var testButtonTitle: String {
+        if isTesting {
+            return "Testing"
+        }
+
+        return advancedTarget == nil ? "Test" : "Test Target"
+    }
+
     private var selectedAppName: String {
         apps.first { $0.id == selectedAppID }?.name ?? "Select app"
+    }
+
+    private func advancedTargetRow(_ target: AdvancedProcessTapTarget) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "scope")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.blue)
+                .frame(width: 13)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Advanced target: \(target.displayName)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(target.detail)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                clearAdvancedTarget()
+            } label: {
+                Text("Clear")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.055))
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(controlsDisabled)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.blue.opacity(0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.blue.opacity(0.12), lineWidth: 1)
+                )
+        )
     }
 
     private func levelMeter(_ progress: ProcessTapDiagnosticProgress) -> some View {
