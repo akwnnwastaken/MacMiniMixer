@@ -28,6 +28,9 @@ struct ProcessTapTestResult: Identifiable, Equatable, Sendable {
         case replayProbeCompleted
         case replayProbeNoAudio
         case replayProbePlaybackSetupFailed
+        case replayProbeStopped
+        case replayProbeOutputChanged
+        case replayProbeTargetExited
         case liveControlStarting
         case liveControlStarted
         case liveControlStopped

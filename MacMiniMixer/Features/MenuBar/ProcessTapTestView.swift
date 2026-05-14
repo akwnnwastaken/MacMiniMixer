@@ -185,7 +185,7 @@ struct ProcessTapTestView: View {
             }
 
             HStack(spacing: 8) {
-                Label("Replay Probe may briefly mute/replay selected app audio.", systemImage: "exclamationmark.triangle.fill")
+                Label(replayWarningText, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
                     .foregroundStyle(.red.opacity(0.82))
                     .lineLimit(2)
@@ -199,8 +199,8 @@ struct ProcessTapTestView: View {
                         .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.plain)
-                .disabled(visibleAppControlsDisabled)
-                .opacity(visibleAppControlsDisabled ? 0.52 : 1)
+                .disabled(replayControlsDisabled)
+                .opacity(replayControlsDisabled ? 0.52 : 1)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -389,7 +389,7 @@ struct ProcessTapTestView: View {
             )
         }
         .menuStyle(.borderlessButton)
-        .disabled(visibleAppControlsDisabled)
+        .disabled(replayControlsDisabled)
     }
 
     private var controlsDisabled: Bool {
@@ -400,12 +400,22 @@ struct ProcessTapTestView: View {
         controlsDisabled || apps.isEmpty || advancedTarget != nil
     }
 
+    private var replayControlsDisabled: Bool {
+        controlsDisabled || (apps.isEmpty && advancedTarget == nil)
+    }
+
     private var testButtonTitle: String {
         if isTesting {
             return "Testing"
         }
 
         return advancedTarget == nil ? "Test" : "Test Target"
+    }
+
+    private var replayWarningText: String {
+        advancedTarget == nil
+            ? "Replay Probe may briefly mute/replay selected app audio."
+            : "Replay Probe may briefly mute/replay selected helper audio."
     }
 
     private var selectedAppName: String {

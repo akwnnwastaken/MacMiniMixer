@@ -11,6 +11,9 @@ struct ProcessTapReplayResult: Equatable, Sendable {
         case playbackSetupFailed
         case replayCompleted
         case noAudioDetected
+        case stopped
+        case outputDeviceChanged
+        case targetExited
         case cleanupWarning
     }
 
@@ -80,6 +83,12 @@ private extension ProcessTapReplayResult.Outcome {
             return .replayProbeCompleted
         case .noAudioDetected:
             return .replayProbeNoAudio
+        case .stopped:
+            return .replayProbeStopped
+        case .outputDeviceChanged:
+            return .replayProbeOutputChanged
+        case .targetExited:
+            return .replayProbeTargetExited
         case .cleanupWarning:
             return .tapCleanupFailed
         }

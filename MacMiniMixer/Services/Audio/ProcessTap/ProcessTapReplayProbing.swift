@@ -1,5 +1,11 @@
 import Foundation
 
+enum ProcessTapReplayProbeStopReason: Sendable {
+    case userStopped
+    case outputDeviceChanged
+    case targetExited
+}
+
 struct ProcessTapReplayGainOption: Identifiable, Equatable, Sendable {
     let scalar: Float
     let label: String
@@ -28,4 +34,6 @@ protocol ProcessTapReplayProbing: Sendable {
         gain: ProcessTapReplayGainOption,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) async -> ProcessTapReplayResult
+
+    func stopCurrentReplayProbe(reason: ProcessTapReplayProbeStopReason)
 }

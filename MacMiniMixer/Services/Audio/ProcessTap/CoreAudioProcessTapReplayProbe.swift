@@ -1,16 +1,29 @@
 import AudioToolbox
 import CoreAudio
+import Darwin
 import Foundation
 
-struct CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing {
+final class CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var isRunning = false
+    private var requestedStopReason: ProcessTapReplayProbeStopReason?
+
     func runReplayProbe(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) async -> ProcessTapReplayResult {
         await Task.detached(priority: .userInitiated) {
-            runReplayProbeSynchronously(for: target, gain: gain, onProgress: onProgress)
+            self.runReplayProbeSynchronously(for: target, gain: gain, onProgress: onProgress)
         }.value
+    }
+
+    func stopCurrentReplayProbe(reason: ProcessTapReplayProbeStopReason) {
+        lock.lock()
+        if isRunning, requestedStopReason == nil {
+            requestedStopReason = reason
+        }
+        lock.unlock()
     }
 
     private func runReplayProbeSynchronously(
@@ -18,6 +31,18 @@ struct CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing {
         gain: ProcessTapReplayGainOption,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) -> ProcessTapReplayResult {
+        guard beginReplayProbe() else {
+            return ProcessTapReplayResult(
+                outcome: .tapSetupFailed,
+                message: "Replay probe is already running",
+                severity: .warning
+            )
+        }
+
+        defer {
+            finishReplayProbe()
+        }
+
         guard let processIdentifier = target.processIdentifier, processIdentifier > 0 else {
             return ProcessTapReplayResult(
                 outcome: .invalidTarget,
@@ -51,6 +76,37 @@ struct CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing {
                 severity: .warning
             )
         }
+    }
+
+    private func beginReplayProbe() -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        guard !isRunning else {
+            return false
+        }
+
+        isRunning = true
+        requestedStopReason = nil
+        return true
+    }
+
+    private func finishReplayProbe() {
+        lock.lock()
+        isRunning = false
+        requestedStopReason = nil
+        lock.unlock()
+    }
+
+    private func currentStopReason() -> ProcessTapReplayProbeStopReason? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        return requestedStopReason
     }
 
     @available(macOS 14.2, *)
@@ -188,7 +244,11 @@ struct CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing {
             )
         }
 
-        publishProgress(from: accumulator, onProgress: onProgress)
+        let stopReason = publishProgress(
+            from: accumulator,
+            targetPID: pid,
+            onProgress: onProgress
+        )
 
         let snapshot = accumulator.snapshot()
         let playbackSnapshot = replayOutput.snapshot()
@@ -208,6 +268,10 @@ struct CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing {
                 severity: .warning,
                 diagnostics: diagnostics
             )
+        }
+
+        if let stopReason {
+            return stoppedResult(for: stopReason, diagnostics: diagnostics)
         }
 
         guard snapshot.callbackCount > 0 else {
@@ -241,13 +305,65 @@ struct CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing {
 
     private func publishProgress(
         from accumulator: ProcessTapReplayAccumulator,
+        targetPID: pid_t,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
-    ) {
+    ) -> ProcessTapReplayProbeStopReason? {
         let deadline = Date().addingTimeInterval(AppConstants.processTapReplayProbeDuration)
 
         while Date() < deadline {
             Thread.sleep(forTimeInterval: AppConstants.processTapLevelMeterUpdateInterval)
+
+            if let stopReason = currentStopReason() {
+                return stopReason
+            }
+
+            guard processExists(targetPID) else {
+                return .targetExited
+            }
+
             onProgress(accumulator.snapshot().progress)
+        }
+
+        return nil
+    }
+
+    private func processExists(_ pid: pid_t) -> Bool {
+        if kill(pid, 0) == 0 {
+            return true
+        }
+
+        return errno == EPERM
+    }
+
+    private func stoppedResult(
+        for reason: ProcessTapReplayProbeStopReason,
+        diagnostics: ProcessTapReplayDiagnostics
+    ) -> ProcessTapReplayResult {
+        switch reason {
+        case .userStopped:
+            return ProcessTapReplayResult(
+                outcome: .stopped,
+                message: "Replay probe stopped",
+                detail: replayDetail(diagnostics),
+                severity: .info,
+                diagnostics: diagnostics
+            )
+        case .outputDeviceChanged:
+            return ProcessTapReplayResult(
+                outcome: .outputDeviceChanged,
+                message: "Replay probe stopped: output changed",
+                detail: "Temporary replay resources were cleaned up.",
+                severity: .warning,
+                diagnostics: diagnostics
+            )
+        case .targetExited:
+            return ProcessTapReplayResult(
+                outcome: .targetExited,
+                message: "Replay probe stopped: process exited",
+                detail: "Temporary replay resources were cleaned up.",
+                severity: .warning,
+                diagnostics: diagnostics
+            )
         }
     }
 
