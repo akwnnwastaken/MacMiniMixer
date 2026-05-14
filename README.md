@@ -6,13 +6,13 @@ The app is not targeting the Mac App Store. It uses native macOS APIs directly, 
 
 ## Current Status
 
-MacMiniMixer is in a v0.11 Advanced helper-target diagnostics milestone, including successful Spotify + YouTube helper two-app readiness, with the main one-app mixer behavior preserved.
+MacMiniMixer is in a v0.11 Advanced helper discovery milestone with an auto-detect audio helper flow, including successful Spotify + YouTube helper two-app readiness, with the main one-app mixer behavior preserved.
 
 It provides a cleaner menu bar mixer panel focused on everyday controls, with stable system-level output controls, real output device listing/switching, real running app discovery, a compact global opt-in mode that can make one eligible app row real when the user interacts with it, and technical Process Tap tools tucked into a collapsed Advanced section.
 
 v0.11 adds an internal `ProcessTapLiveSessionManager` foundation, Advanced-only helper process discovery, and an Advanced-only Two-App Readiness diagnostic. The main UI still supports only one active real-controlled visible app at a time, and it does not expose real multi-app mixer control or browser/helper mapping.
 
-Advanced helper diagnostics can scan helper/content process candidates for visible apps such as Safari or YouTube. Candidate Probe can detect audio on a helper process, such as `com.apple.WebKit.GPU`, and that helper can be manually selected as an Advanced helper target. Process Tap Test, Replay Probe, and Two-App Readiness can then run against that helper PID from Advanced.
+Advanced helper diagnostics can scan helper/content process candidates for visible apps such as Safari or YouTube. Candidate Probe can detect audio on a helper process, such as `com.apple.WebKit.GPU`, and that helper can be manually selected as an Advanced helper target. The `Find audio helper` action can also probe eligible helper candidates sequentially with short unmuted diagnostics, score them by detected audio, RMS, peak, and callback count, and automatically select the best audio-carrying helper as the Advanced target. Process Tap Test, Replay Probe, and Two-App Readiness can then run against that helper PID from Advanced.
 
 A successful Advanced readiness test was observed with Spotify + a YouTube helper target at 50% gain: Spotify reported 928 callbacks, peak 0.202, RMS 0.060, 928 queued buffers, 0 drops, and 0 failures; the YouTube helper reported 932 callbacks, peak 0.590, RMS 0.174, 932 queued buffers, 0 drops, and 0 failures. Both sessions stopped cleanly by timeout. This is promising, but it does not mean the app is production-ready as a multi-app mixer or that YouTube/Safari rows are real-controlled in the main UI.
 
@@ -52,7 +52,8 @@ It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by
 - `Stop All` for the Two-App Readiness test
 - Core Audio tap-eligible app filtering for the Two-App Readiness pickers
 - Advanced Helper Process Discovery for browser/helper/content process candidates
-- Helper candidate audio probe for identifying which helper process carries audio
+- Manual helper candidate audio probe for identifying which helper process carries audio
+- `Find audio helper` auto-detect flow for selecting the best audio-carrying helper candidate
 - Manual Advanced helper target selection
 - Process Tap Test against an Advanced helper target
 - Replay Probe against an Advanced helper target
@@ -89,6 +90,7 @@ Experimental Process Tap features:
 - While one eligible row is active, that row's slider controls experimental live gain and that row's mute maps to gain 0
 - Advanced Two-App Readiness diagnostic that can run two explicit, short-lived readiness sessions with per-session diagnostics
 - Advanced Helper Process Discovery that can find tap-eligible helper/content processes for visible browser/web apps
+- Advanced helper auto-detect that sequentially probes eligible candidates and selects the strongest detected audio helper
 - Advanced helper targets that can be tested with Process Tap Test, Replay Probe, and Two-App Readiness
 
 Mock-only today:
@@ -108,7 +110,7 @@ The Advanced diagnostics section can create short-lived Core Audio process tap d
 
 The Advanced Two-App Readiness test is separate from the main mixer. It uses an isolated readiness configuration with `maxSessions = 2`, requires explicit user start, runs for a short timeout, currently 10 seconds, and provides `Stop All`. It can use visible apps whose PID translates to a Core Audio process object, and it can also use one manually selected Advanced helper target. Music + Spotify have run together successfully in testing with callbacks, peak/RMS, queued buffers, and zero drops/failures observed. Spotify + a YouTube helper target has also run successfully in Advanced diagnostics. This remains prototyping-only and is not exposed as production multi-app row control.
 
-Safari, YouTube, and other browser/web surfaces may not be tap-eligible through the visible app PID because their audio can be rendered by helper/content processes instead of the visible app process. Helper targets are manual, Advanced-only, and not persisted across app launches.
+Safari, YouTube, and other browser/web surfaces may not be tap-eligible through the visible app PID because their audio can be rendered by helper/content processes instead of the visible app process. Helper targets are manual or auto-detected from Advanced only, and they are not persisted across app launches.
 
 Replay Probe, manual Live Control, and global opt-in row control go further: they can temporarily suppress the selected app's original output, replay captured audio through `AudioQueue`, and apply gain. These paths are experimental, user-triggered, and currently limited to one app. They do not make every row a real mixer control.
 
@@ -127,6 +129,7 @@ The current live-control implementation is intentionally still limited to one ac
 - The main product path remains one-app-only.
 - Browser and web audio may be rendered by helper/content processes rather than the visible app PID.
 - Helper process PIDs can change as tabs, pages, and browser helpers restart.
+- `Find audio helper` is Advanced-only and uses short unmuted diagnostic probes to rank eligible helper candidates.
 - Advanced helper target state is manual, temporary, Advanced-only, and not currently persisted across launches.
 - Helper-target diagnostics currently help evaluate feasibility; they are not a stable tab-level browser mapping layer.
 
@@ -155,8 +158,10 @@ The current project is a native macOS Xcode project. It does not use Flutter and
 - Advanced Process Tap tools are separated from the normal mixer flow.
 - Process Tap features are user-triggered only.
 - Helper discovery and helper probing require explicit user action in Advanced.
+- `Find audio helper` requires explicit user action, probes candidates sequentially, and uses unmuted diagnostics.
 - Helper targets are not persisted across launches.
 - No capture starts automatically when a helper process is discovered or selected.
+- No replay or audio saving happens during helper auto-detect.
 - Two-App Readiness is explicit, Advanced-only, short-lived, and diagnostic.
 - Two-App Readiness uses `Stop All` and a timeout to clean up both sessions.
 - Output device changes, selected app exit, panel close for the Advanced test, or app quit stop the Two-App Readiness test.
@@ -202,6 +207,8 @@ Research and experiments:
 - Continue testing Two-App Readiness with more Core Audio tap-eligible apps
 - Investigate browser/helper process discovery for Safari, YouTube, and similar web audio
 - Refine helper candidate selection
+- Refine helper confidence/scoring for auto-detected audio helpers
+- Investigate helper PID changes across tab reloads, navigation, and browser helper restarts
 - Explore automatic best-helper detection
 - Prototype one browser row mapping behind explicit experimental mode
 - Evaluate independent sessions versus a centralized mixer/renderer
