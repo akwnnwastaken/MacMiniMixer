@@ -370,10 +370,9 @@ struct MixerPanelView: View {
                     )
 
                     TwoAppReadinessTestView(
-                        apps: viewModel.apps,
+                        targets: viewModel.twoAppReadinessTargets,
                         selectedAppAID: viewModel.selectedTwoAppReadinessAppAID,
                         selectedAppBID: viewModel.selectedTwoAppReadinessAppBID,
-                        eligibilityByAppID: viewModel.twoAppReadinessEligibilityByAppID,
                         selectedGain: viewModel.selectedTwoAppReadinessGain,
                         snapshot: viewModel.twoAppReadinessSnapshot,
                         result: viewModel.twoAppReadinessResult,

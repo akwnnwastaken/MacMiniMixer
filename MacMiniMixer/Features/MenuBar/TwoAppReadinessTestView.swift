@@ -1,10 +1,9 @@
 import SwiftUI
 
 struct TwoAppReadinessTestView: View {
-    let apps: [MixerAppItem]
+    let targets: [TwoAppReadinessTargetOption]
     let selectedAppAID: MixerAppItem.ID?
     let selectedAppBID: MixerAppItem.ID?
-    let eligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
     let selectedGain: ProcessTapReplayGainOption
     let snapshot: ProcessTapTwoAppReadinessSnapshot
     let result: ProcessTapTwoAppReadinessResult?
@@ -178,19 +177,19 @@ struct TwoAppReadinessTestView: View {
     ) -> some View {
         Menu {
             if eligibleApps.isEmpty {
-                Text("No tap-eligible apps")
+                Text("No tap-eligible targets")
             } else {
                 ForEach(eligibleApps) { app in
                     Button {
                         selectApp(app.id)
                     } label: {
                         if app.id == selectedAppID {
-                            Label(app.name, systemImage: "checkmark")
+                            Label(app.title, systemImage: "checkmark")
                         } else {
-                            Text(app.name)
+                            Text(app.title)
                         }
                     }
-                    .disabled(app.id == excludedAppID)
+                    .disabled(isExcluded(app, excludedID: excludedAppID))
                 }
             }
         } label: {
@@ -343,10 +342,8 @@ struct TwoAppReadinessTestView: View {
         )
     }
 
-    private var eligibleApps: [MixerAppItem] {
-        apps.filter { app in
-            eligibilityByAppID[app.id]?.isEligible == true
-        }
+    private var eligibleApps: [TwoAppReadinessTargetOption] {
+        targets.filter { $0.eligibility.isEligible }
     }
 
     private var canStart: Bool {
@@ -356,8 +353,12 @@ struct TwoAppReadinessTestView: View {
             return false
         }
 
-        return eligibleApps.contains(where: { $0.id == selectedAppAID }) &&
-            eligibleApps.contains(where: { $0.id == selectedAppBID })
+        guard let targetA = target(for: selectedAppAID),
+              let targetB = target(for: selectedAppBID) else {
+            return false
+        }
+
+        return targetA.processIdentifier != targetB.processIdentifier
     }
 
     private var readinessIssue: String? {
@@ -365,33 +366,37 @@ struct TwoAppReadinessTestView: View {
             return nil
         }
 
-        guard eligibleApps.count >= 2 else {
-            return "No Core Audio tap-eligible second app found"
+        guard hasTwoDistinctProcessTargets else {
+            return "No Core Audio tap-eligible second target found"
         }
 
         guard let selectedAppAID,
               let selectedAppBID else {
-            return "Select two tap-eligible apps"
+            return "Select two tap-eligible targets"
         }
 
         if selectedAppAID == selectedAppBID {
-            return "Choose two different apps"
+            return "Choose two different targets"
         }
 
         if let reason = eligibilityIssue(for: selectedAppAID) ?? eligibilityIssue(for: selectedAppBID) {
             return reason
         }
 
+        if target(for: selectedAppAID)?.processIdentifier == target(for: selectedAppBID)?.processIdentifier {
+            return "Choose two different process targets"
+        }
+
         return nil
     }
 
     private func eligibilityIssue(for appID: MixerAppItem.ID) -> String? {
-        guard apps.contains(where: { $0.id == appID }) else {
-            return "Selected app is not running"
+        guard let target = target(for: appID) else {
+            return "Selected target is unavailable"
         }
 
-        guard eligibilityByAppID[appID]?.isEligible == true else {
-            return eligibilityByAppID[appID]?.reason ?? "Core Audio process unavailable"
+        guard target.eligibility.isEligible else {
+            return target.eligibility.reason ?? "Core Audio process unavailable"
         }
 
         return nil
@@ -399,11 +404,41 @@ struct TwoAppReadinessTestView: View {
 
     private func appName(for appID: MixerAppItem.ID?) -> String {
         guard let appID,
-              let app = apps.first(where: { $0.id == appID }) else {
+              let app = target(for: appID) else {
             return "Select"
         }
 
-        return app.name
+        return app.title
+    }
+
+    private func target(for targetID: String) -> TwoAppReadinessTargetOption? {
+        eligibleApps.first { $0.id == targetID }
+    }
+
+    private func isExcluded(
+        _ option: TwoAppReadinessTargetOption,
+        excludedID: String?
+    ) -> Bool {
+        guard let excludedID,
+              let excludedTarget = target(for: excludedID) else {
+            return false
+        }
+
+        return option.id == excludedTarget.id ||
+            option.processIdentifier == excludedTarget.processIdentifier
+    }
+
+    private var hasTwoDistinctProcessTargets: Bool {
+        for firstTarget in eligibleApps {
+            if eligibleApps.contains(where: { secondTarget in
+                secondTarget.id != firstTarget.id &&
+                    secondTarget.processIdentifier != firstTarget.processIdentifier
+            }) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private func formattedLevel(_ level: Double) -> String {
