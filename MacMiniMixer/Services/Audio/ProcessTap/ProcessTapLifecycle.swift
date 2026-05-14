@@ -270,12 +270,14 @@ final class ProcessTapResourceContext {
         cleanupLock.lock()
         guard !didCleanUp else {
             cleanupLock.unlock()
+            AppLogger.cleanup.info("Process Tap cleanup ignored duplicate request")
             return []
         }
 
         didCleanUp = true
         cleanupLock.unlock()
 
+        AppLogger.cleanup.info("Process Tap cleanup claimed tapID=\(self.tapID, privacy: .public) aggregateID=\(self.aggregateDeviceID, privacy: .public) didStartIO=\(self.didStartIO, privacy: .public)")
         var cleanupErrors: [String] = []
 
         beforeStoppingIO?()
@@ -308,6 +310,12 @@ final class ProcessTapResourceContext {
             if destroyTapStatus != noErr {
                 cleanupErrors.append("destroy tap \(statusFormatter(destroyTapStatus))")
             }
+        }
+
+        if cleanupErrors.isEmpty {
+            AppLogger.cleanup.info("Process Tap cleanup finished")
+        } else {
+            AppLogger.cleanup.warning("Process Tap cleanup finished with warnings: \(cleanupErrors.joined(separator: ", "), privacy: .public)")
         }
 
         return cleanupErrors

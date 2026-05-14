@@ -358,26 +358,31 @@ final class MixerViewModel: ObservableObject {
 
         if isProcessTapLiveControlActive,
            didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            AppLogger.audio.warning("Output device change stopping live control previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
             stopProcessTapLiveControl(reason: .outputDeviceChanged)
         }
 
         if isTwoAppReadinessRunning,
            didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            AppLogger.audio.warning("Output device change stopping two-app readiness previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
             stopTwoAppReadiness(reason: .outputDeviceChanged)
         }
 
         if (helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning),
            didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            AppLogger.audio.warning("Output device change stopping helper probe previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
             stopHelperProcessProbe(reason: .outputDeviceChanged)
         }
 
         if isAppAudioTargetResolving,
            didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            AppLogger.audio.warning("Output device change cancelling app audio resolution previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
             cancelAppAudioTargetResolution(reason: .outputDeviceChanged)
         }
 
         if isProcessTapReplayProbeRunning,
            didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            AppLogger.audio.warning("Output device change stopping replay probe previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
             processTapReplayProbe.stopCurrentReplayProbe(reason: .outputDeviceChanged)
         }
 
@@ -641,6 +646,7 @@ final class MixerViewModel: ObservableObject {
         isHelperProcessAutoDetectRunning = true
         helperProcessAutoDetectProgressText = "Testing 1/\(eligibleCandidates.count)"
         helperProcessDiscoveryMessage = "Testing 1/\(eligibleCandidates.count)"
+        AppLogger.helperResolution.info("Advanced helper auto-detect started candidates=\(eligibleCandidates.count, privacy: .public)")
 
         helperProcessAutoDetectTask?.cancel()
         helperProcessAutoDetectTask = Task { [weak self] in
@@ -1559,17 +1565,20 @@ final class MixerViewModel: ObservableObject {
 
         guard !wasCancelled else {
             helperProcessDiscoveryMessage = "Auto-detect stopped"
+            AppLogger.helperResolution.info("Advanced helper auto-detect stopped")
             return
         }
 
         guard let bestScore,
               bestScore.hasDetectedAudio else {
             helperProcessDiscoveryMessage = "No audio helper detected"
+            AppLogger.helperResolution.info("Advanced helper auto-detect found no audio helper")
             return
         }
 
         useHelperCandidateAsAdvancedTarget(bestScore.processIdentifier)
         helperProcessDiscoveryMessage = "Selected audio helper"
+        AppLogger.helperResolution.info("Advanced helper auto-detect selected helperPID=\(bestScore.processIdentifier, privacy: .public) rms=\(bestScore.progress.rmsLevel, privacy: .public) peak=\(bestScore.progress.peakLevel, privacy: .public)")
     }
 
     private func handleTwoAppReadinessFinished(

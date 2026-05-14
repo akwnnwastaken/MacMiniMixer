@@ -47,6 +47,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) -> ProcessTapTestResult {
         guard beginProbe() else {
+            AppLogger.processTap.warning("Helper probe rejected: already running app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .helperProbeRunning,
                 message: "A helper probe is already running",
@@ -59,6 +60,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         }
 
         guard let processIdentifier = target.processIdentifier, processIdentifier > 0 else {
+            AppLogger.processTap.warning("Helper probe rejected: invalid PID app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .invalidTarget,
                 message: "Invalid helper process",
@@ -68,6 +70,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
 
         if #available(macOS 14.2, *) {
             guard ProcessTapCoreAudio.hasAudioCaptureUsageDescription else {
+                AppLogger.processTap.warning("Helper probe rejected: missing usage description app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
                 return ProcessTapTestResult(
                     outcome: .missingUsageDescription,
                     message: "Missing audio capture usage description",
@@ -83,6 +86,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
                 onProgress: onProgress
             )
         } else {
+            AppLogger.processTap.warning("Helper probe rejected: unsupported macOS app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .unsupportedOS,
                 message: "Process Tap not available on this macOS version",
@@ -100,6 +104,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) -> ProcessTapTestResult {
         let pid = pid_t(processIdentifier)
+        AppLogger.processTap.info("Helper probe started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) duration=\(duration, privacy: .public)")
         let resources = ProcessTapResourceContext()
         var didCleanUp = false
 
@@ -110,6 +115,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         }
 
         guard let processObjectID = ProcessTapCoreAudio.processObjectID(for: pid) else {
+            AppLogger.processTap.warning("Helper probe setup failed: Core Audio process unavailable app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .processNotFound,
                 message: "Core Audio process unavailable",
@@ -125,6 +131,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         )
 
         guard createStatus == noErr, resources.tapID != kAudioObjectUnknown else {
+            AppLogger.processTap.error("Helper probe setup failed: create tap status=\(ProcessTapCoreAudio.formatOSStatus(createStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: createStatus == kAudioDevicePermissionsError ? .permissionDenied : .tapSetupFailed,
                 message: createStatus == kAudioDevicePermissionsError
@@ -136,6 +143,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         }
 
         guard let tapUID = resources.tapUID else {
+            AppLogger.processTap.error("Helper probe setup failed: missing tap UID app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .tapSetupFailed,
                 message: "Could not read helper probe tap UID",
@@ -151,6 +159,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         )
 
         guard createAggregateStatus == noErr, resources.aggregateDeviceID != kAudioObjectUnknown else {
+            AppLogger.processTap.error("Helper probe setup failed: create aggregate status=\(ProcessTapCoreAudio.formatOSStatus(createAggregateStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .tapSetupFailed,
                 message: "Could not create helper probe device",
@@ -171,6 +180,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         )
 
         guard createIOProcStatus == noErr, resources.ioProcID != nil else {
+            AppLogger.processTap.error("Helper probe setup failed: create IOProc status=\(ProcessTapCoreAudio.formatOSStatus(createIOProcStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .tapSetupFailed,
                 message: "Could not attach helper probe callback",
@@ -181,6 +191,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
 
         let startStatus = resources.startIO()
         guard startStatus == noErr else {
+            AppLogger.processTap.error("Helper probe setup failed: start IO status=\(ProcessTapCoreAudio.formatOSStatus(startStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .tapSetupFailed,
                 message: "Could not start helper audio probe",
@@ -199,9 +210,11 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
             didCleanUp = true
 
             if !cleanupErrors.isEmpty {
+                AppLogger.cleanup.warning("Helper probe cleanup warning app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) warnings=\(cleanupErrors.joined(separator: ", "), privacy: .public)")
                 return cleanupWarningResult(cleanupErrors)
             }
 
+            AppLogger.processTap.info("Helper probe stopped app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) reason=\(String(describing: stopReason), privacy: .public)")
             return stoppedResult(for: stopReason)
         }
 
@@ -211,10 +224,13 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         didCleanUp = true
 
         guard cleanupErrors.isEmpty else {
+            AppLogger.cleanup.warning("Helper probe cleanup warning app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) warnings=\(cleanupErrors.joined(separator: ", "), privacy: .public)")
             return cleanupWarningResult(cleanupErrors)
         }
 
-        return diagnosticResult(for: target, snapshot: snapshot, duration: duration)
+        let result = diagnosticResult(for: target, snapshot: snapshot, duration: duration)
+        AppLogger.processTap.info("Helper probe finished app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outcome=\(String(describing: result.outcome), privacy: .public) callbacks=\(snapshot.callbackCount, privacy: .public) peak=\(snapshot.peakLevel, privacy: .public) rms=\(snapshot.rmsLevel, privacy: .public)")
+        return result
     }
 
     private func beginProbe() -> Bool {

@@ -59,6 +59,7 @@
 		9B7D1A9B2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */; };
 		9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */; };
 		9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */; };
+		9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -116,6 +117,7 @@
 		9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapCandidateAudioProbing.swift; sourceTree = "<group>"; };
 		9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessCandidateDiscovery.swift; sourceTree = "<group>"; };
 		9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioTargetResolving.swift; sourceTree = "<group>"; };
+		9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -188,6 +190,7 @@
 			children = (
 				9B7D1A762C8F4A9A8B2D0101 /* Info.plist */,
 				9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */,
+				9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */,
 				9B7D1A932C8F4A9A8B2D0101 /* Extensions */,
 			);
 			path = Support;
@@ -413,6 +416,7 @@
 				9B7D1A9B2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift in Sources */,
 				9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */,
 				9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */,
+				9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

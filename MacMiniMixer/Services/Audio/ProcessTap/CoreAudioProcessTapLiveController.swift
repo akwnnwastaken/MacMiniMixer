@@ -74,6 +74,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         guard let processIdentifier = target.processIdentifier, processIdentifier > 0 else {
+            AppLogger.processTap.warning("Live control start rejected: invalid PID app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .invalidTarget,
                 message: "Select a real running app",
@@ -84,6 +85,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
         if #available(macOS 14.2, *) {
             guard ProcessTapCoreAudio.hasAudioCaptureUsageDescription else {
+                AppLogger.processTap.warning("Live control start rejected: missing usage description app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
                 return ProcessTapTestResult(
                     outcome: .missingUsageDescription,
                     message: "Missing audio capture usage description",
@@ -100,6 +102,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
                 onStopped: onStopped
             )
         } else {
+            AppLogger.processTap.warning("Live control start rejected: unsupported macOS app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .unsupportedOS,
                 message: "Process Tap is not available on this macOS version",
@@ -118,6 +121,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) -> ProcessTapTestResult {
         let pid = pid_t(processIdentifier)
+        AppLogger.processTap.info("Live control start requested app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) gain=\(gain.percentLabel, privacy: .public)")
         let resources = ProcessTapResourceContext()
         var didActivateSession = false
         let outputQueue = ProcessTapLiveOutputQueue()
@@ -137,6 +141,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         guard let startDefaultOutputDeviceID = ProcessTapCoreAudio.defaultOutputDeviceID() else {
+            AppLogger.processTap.error("Live control setup failed: missing default output device app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not read default output device",
@@ -145,6 +150,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         guard let processObjectID = ProcessTapCoreAudio.processObjectID(for: pid) else {
+            AppLogger.processTap.warning("Live control setup failed: Core Audio process not found app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .processNotFound,
                 message: "Could not find Core Audio process",
@@ -159,6 +165,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             muteBehavior: .mutedWhenTapped
         )
         guard createStatus == noErr, resources.tapID != kAudioObjectUnknown else {
+            AppLogger.processTap.error("Live control setup failed: create tap status=\(ProcessTapCoreAudio.formatOSStatus(createStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: createStatus == kAudioDevicePermissionsError ? .permissionDenied : .liveControlSetupFailed,
                 message: createStatus == kAudioDevicePermissionsError
@@ -170,6 +177,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         guard let tapUID = resources.tapUID else {
+            AppLogger.processTap.error("Live control setup failed: missing tap UID app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not read process tap UID",
@@ -184,6 +192,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         )
 
         guard createAggregateStatus == noErr, resources.aggregateDeviceID != kAudioObjectUnknown else {
+            AppLogger.processTap.error("Live control setup failed: create aggregate status=\(ProcessTapCoreAudio.formatOSStatus(createAggregateStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not create live tap device",
@@ -193,6 +202,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         guard let tapStreamDescription = ProcessTapCoreAudio.streamDescription(for: resources.aggregateDeviceID) else {
+            AppLogger.processTap.error("Live control setup failed: could not read stream format app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not read live tap format",
@@ -201,6 +211,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         guard ProcessTapCoreAudio.isSupportedFloatPCMMonoOrStereo(tapStreamDescription) else {
+            AppLogger.processTap.warning("Live control setup failed: unsupported stream format app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) channels=\(tapStreamDescription.mChannelsPerFrame, privacy: .public) bits=\(tapStreamDescription.mBitsPerChannel, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Unsupported live tap format",
@@ -219,6 +230,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
         let outputStartStatus = outputQueue.start(format: outputFormat)
         guard outputStartStatus == noErr else {
+            AppLogger.processTap.error("Live control setup failed: AudioQueue start status=\(ProcessTapCoreAudio.formatOSStatus(outputStartStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Live playback setup failed",
@@ -240,6 +252,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         )
 
         guard createIOProcStatus == noErr, resources.ioProcID != nil else {
+            AppLogger.processTap.error("Live control setup failed: create IOProc status=\(ProcessTapCoreAudio.formatOSStatus(createIOProcStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not attach live callback",
@@ -250,6 +263,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
         let startStatus = resources.startIO()
         guard startStatus == noErr else {
+            AppLogger.processTap.error("Live control setup failed: start IO status=\(ProcessTapCoreAudio.formatOSStatus(startStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not start live control",
@@ -286,6 +300,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
         startTimers(for: session)
         onDiagnostics(session.diagnostics())
+        AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public)")
 
         return ProcessTapTestResult(
             outcome: .liveControlStarted,
@@ -334,6 +349,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
     @discardableResult
     private func stop(session: ProcessTapLiveSession, reason: ProcessTapLiveStopReason) -> ProcessTapTestResult {
         guard session.beginStopping() else {
+            AppLogger.processTap.info("Live control stop ignored: already stopping app=\(session.targetName, privacy: .public) pid=\(session.pid, privacy: .public) reason=\(String(describing: reason), privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlStopped,
                 message: "Live control is already stopping",
@@ -347,6 +363,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
         sessionLock.unlock()
 
+        AppLogger.processTap.info("Live control stop requested app=\(session.targetName, privacy: .public) pid=\(session.pid, privacy: .public) reason=\(String(describing: reason), privacy: .public)")
         let diagnostics = session.diagnostics()
         let cleanupErrors = session.cleanup()
         let result = liveStopResult(
@@ -357,6 +374,11 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         )
 
         session.onStopped(result, diagnostics)
+        if cleanupErrors.isEmpty {
+            AppLogger.processTap.info("Live control stopped app=\(session.targetName, privacy: .public) pid=\(session.pid, privacy: .public) reason=\(String(describing: reason), privacy: .public)")
+        } else {
+            AppLogger.processTap.warning("Live control stopped with cleanup warnings app=\(session.targetName, privacy: .public) pid=\(session.pid, privacy: .public) warnings=\(cleanupErrors.joined(separator: ", "), privacy: .public)")
+        }
         return result
     }
 

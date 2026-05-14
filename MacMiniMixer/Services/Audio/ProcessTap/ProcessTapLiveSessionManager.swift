@@ -63,6 +63,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         let controller = controllerFactory()
 
         guard reserveSession(sessionState, controller: controller) else {
+            AppLogger.processTap.warning("Live session start rejected: max sessions reached app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public) maxSessions=\(self.maxSessions, privacy: .public)")
             return ProcessTapLiveSessionStartResult(
                 sessionID: nil,
                 result: ProcessTapTestResult(
@@ -73,6 +74,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
             )
         }
 
+        AppLogger.processTap.info("Live session start reserved sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
         let result = await controller.startLiveControl(
             for: target,
             gain: gain
@@ -86,19 +88,23 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
 
         if result.outcome == .liveControlStarted {
             markSession(sessionID, phase: .active, gain: gain)
+            AppLogger.processTap.info("Live session active sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public)")
             return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
         }
 
         markSession(sessionID, phase: .failed)
         removeSession(sessionID)
+        AppLogger.processTap.warning("Live session start failed sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public) outcome=\(String(describing: result.outcome), privacy: .public)")
         return ProcessTapLiveSessionStartResult(sessionID: nil, result: result)
     }
 
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        AppLogger.processTap.info("Live session stop requested sessionID=\(id.rawValue.uuidString, privacy: .public) reason=\(String(describing: reason), privacy: .public)")
         markSession(id, phase: .stopping, stopReason: reason)
 
         guard let controller = controller(for: id) else {
             removeSession(id)
+            AppLogger.processTap.info("Live session stop found no controller sessionID=\(id.rawValue.uuidString, privacy: .public)")
             return ProcessTapTestResult(
                 outcome: .liveControlNotActive,
                 message: "Live control is not active",
@@ -111,6 +117,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
             removeSession(id)
         }
 
+        AppLogger.processTap.info("Live session stop completed sessionID=\(id.rawValue.uuidString, privacy: .public) outcome=\(String(describing: result.outcome), privacy: .public)")
         return result
     }
 
