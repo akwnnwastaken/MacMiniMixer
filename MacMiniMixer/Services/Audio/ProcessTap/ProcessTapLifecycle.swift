@@ -13,6 +13,16 @@ struct ProcessTapProcessEligibility: Equatable, Sendable {
 }
 
 enum ProcessTapCoreAudio {
+    static var isProcessTapAvailable: Bool {
+        if #available(macOS 14.2, *) {
+            return true
+        }
+
+        return false
+    }
+
+    static let unsupportedOSMessage = "Process Tap requires macOS 14.2 or later."
+
     static var hasAudioCaptureUsageDescription: Bool {
         guard let usageDescription = Bundle.main.object(
             forInfoDictionaryKey: "NSAudioCaptureUsageDescription"
@@ -23,6 +33,7 @@ enum ProcessTapCoreAudio {
         return !usageDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    @available(macOS 14.2, *)
     static func processObjectID(for pid: pid_t) -> AudioObjectID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
@@ -55,7 +66,7 @@ enum ProcessTapCoreAudio {
 
     static func processTapEligibility(for processIdentifier: Int32?) -> ProcessTapProcessEligibility {
         guard #available(macOS 14.2, *) else {
-            return .unavailable("Unsupported macOS")
+            return .unavailable(unsupportedOSMessage)
         }
 
         guard hasAudioCaptureUsageDescription else {
@@ -196,18 +207,19 @@ final class ProcessTapResourceContext {
     private let cleanupLock = NSLock()
 
     var tapUID: String? {
-        ProcessTapCoreAudio.stringProperty(kAudioTapPropertyUID, for: tapID)
+        guard #available(macOS 14.2, *) else {
+            return nil
+        }
+
+        return ProcessTapCoreAudio.stringProperty(kAudioTapPropertyUID, for: tapID)
     }
 
+    @available(macOS 14.2, *)
     func createProcessTap(
         processObjectID: AudioObjectID,
         name: String,
         muteBehavior: CATapMuteBehavior
     ) -> OSStatus {
-        guard #available(macOS 14.2, *) else {
-            return kAudioHardwareUnsupportedOperationError
-        }
-
         let tapDescription = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
         tapDescription.name = name
         tapDescription.isPrivate = true
@@ -216,6 +228,7 @@ final class ProcessTapResourceContext {
         return AudioHardwareCreateProcessTap(tapDescription, &tapID)
     }
 
+    @available(macOS 14.2, *)
     func createPrivateAggregateDevice(
         name: String,
         uidPrefix: String,

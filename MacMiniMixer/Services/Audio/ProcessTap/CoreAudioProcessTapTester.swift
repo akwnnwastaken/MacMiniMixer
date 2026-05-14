@@ -263,6 +263,7 @@ private struct ProcessTapDiagnosticsSnapshot {
 }
 
 private extension ProcessTapTestMode {
+    @available(macOS 14.2, *)
     var tapMuteBehavior: CATapMuteBehavior {
         switch self {
         case .diagnostics:

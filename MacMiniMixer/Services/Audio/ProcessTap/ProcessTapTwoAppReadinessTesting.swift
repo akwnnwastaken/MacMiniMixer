@@ -420,7 +420,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
             let reasons = [appAEligibility.reason, appBEligibility.reason]
                 .compactMap { $0 }
             let reason = reasons.first ?? "Core Audio process unavailable"
-            let message = reason == "Unsupported macOS"
+            let message = reason == ProcessTapCoreAudio.unsupportedOSMessage
                 ? "Process Tap is not available"
                 : reason
 

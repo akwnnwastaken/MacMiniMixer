@@ -111,7 +111,7 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
             )
         }
 
-        if visibleEligibility.reason == "Unsupported macOS" ||
+        if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
             visibleEligibility.reason == "Missing audio capture usage description" {
             AppLogger.helperResolution.warning("Visible app PID unavailable for platform/config app=\(request.appName, privacy: .public) reason=\(visibleEligibility.reason ?? "unknown", privacy: .public)")
             return .unavailable(visibleEligibility.reason ?? "Process Tap is unavailable")

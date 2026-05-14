@@ -904,12 +904,15 @@ final class MixerViewModel: ObservableObject {
         let appBEligibility = ProcessTapCoreAudio.processTapEligibility(for: appB.processIdentifier)
         guard appAEligibility.isEligible,
               appBEligibility.isEligible else {
+            let reason = [appAEligibility.reason, appBEligibility.reason]
+                .compactMap { $0 }
+                .first
             twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
                 outcome: .setupFailed,
-                message: "Core Audio process unavailable",
-                detail: [appAEligibility.reason, appBEligibility.reason]
-                    .compactMap { $0 }
-                    .first,
+                message: reason == ProcessTapCoreAudio.unsupportedOSMessage
+                    ? "Process Tap is not available"
+                    : "Core Audio process unavailable",
+                detail: reason,
                 severity: .warning
             )
             return
@@ -1232,6 +1235,12 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
+        if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
+            visibleEligibility.reason == "Missing audio capture usage description" {
+            showStatus(visibleEligibility.reason ?? "Process Tap is unavailable", style: .warning)
+            return
+        }
+
         guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget) else {
             showStatus("This app is not available for real app control", style: .warning)
             return
@@ -1415,6 +1424,8 @@ final class MixerViewModel: ObservableObject {
             showStatus("Live control stopped: app exited", style: .warning)
         case .liveControlSetupFailed:
             showStatus("Could not start live control", style: .warning)
+        case .unsupportedOS:
+            showStatus(ProcessTapCoreAudio.unsupportedOSMessage, style: .warning)
         default:
             break
         }
