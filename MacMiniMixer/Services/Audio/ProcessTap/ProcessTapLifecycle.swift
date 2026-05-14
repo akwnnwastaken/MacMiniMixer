@@ -193,6 +193,7 @@ final class ProcessTapResourceContext {
 
     private var didStartIO = false
     private var didCleanUp = false
+    private let cleanupLock = NSLock()
 
     var tapUID: String? {
         ProcessTapCoreAudio.stringProperty(kAudioTapPropertyUID, for: tapID)
@@ -264,11 +265,17 @@ final class ProcessTapResourceContext {
         afterDestroyingIOProc: (() -> Void)? = nil,
         statusFormatter: (OSStatus) -> String = ProcessTapCoreAudio.formatOSStatus
     ) -> [String] {
+        // Multiple stop paths can race. Claim cleanup under a lock, then perform
+        // slower Core Audio teardown outside the lock.
+        cleanupLock.lock()
         guard !didCleanUp else {
+            cleanupLock.unlock()
             return []
         }
 
         didCleanUp = true
+        cleanupLock.unlock()
+
         var cleanupErrors: [String] = []
 
         beforeStoppingIO?()
