@@ -17,3 +17,6 @@ jobs:
 
       - name: Build MacMiniMixer
         run: xcodebuild -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configuration Debug -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO build
+
+      - name: Test MacMiniMixer
+        run: xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS' -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO

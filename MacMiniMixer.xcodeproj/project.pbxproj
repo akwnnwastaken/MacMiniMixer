@@ -61,7 +61,20 @@
 		9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */; };
 		9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */; };
 		9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */; };
+		9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */; };
+		9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */; };
+		9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9B7D1ABC2C8F4A9A8B2D0101 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9B7D1A1C2C8F4A9A8B2D0101 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9B7D1A232C8F4A9A8B2D0101;
+			remoteInfo = MacMiniMixer;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		9B7D1A242C8F4A9A8B2D0101 /* MacMiniMixer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacMiniMixer.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -120,10 +133,21 @@
 		9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessCandidateDiscovery.swift; sourceTree = "<group>"; };
 		9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioTargetResolving.swift; sourceTree = "<group>"; };
 		9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComparableClampedTests.swift; sourceTree = "<group>"; };
+		9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayGainOptionTests.swift; sourceTree = "<group>"; };
+		9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulatorTests.swift; sourceTree = "<group>"; };
+		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		9B7D1A212C8F4A9A8B2D0101 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9B7D1AB82C8F4A9A8B2D0101 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -137,6 +161,7 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1A262C8F4A9A8B2D0101 /* MacMiniMixer */,
+				9B7D1AB72C8F4A9A8B2D0101 /* MacMiniMixerTests */,
 				9B7D1A252C8F4A9A8B2D0101 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -145,6 +170,7 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1A242C8F4A9A8B2D0101 /* MacMiniMixer.app */,
+				9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -299,6 +325,16 @@
 			path = Processes;
 			sourceTree = "<group>";
 		};
+		9B7D1AB72C8F4A9A8B2D0101 /* MacMiniMixerTests */ = {
+			isa = PBXGroup;
+			children = (
+				9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */,
+				9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */,
+				9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */,
+			);
+			path = MacMiniMixerTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -319,6 +355,24 @@
 			productReference = 9B7D1A242C8F4A9A8B2D0101 /* MacMiniMixer.app */;
 			productType = "com.apple.product-type.application";
 		};
+		9B7D1ABB2C8F4A9A8B2D0101 /* MacMiniMixerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9B7D1AC02C8F4A9A8B2D0101 /* Build configuration list for PBXNativeTarget "MacMiniMixerTests" */;
+			buildPhases = (
+				9B7D1AB92C8F4A9A8B2D0101 /* Sources */,
+				9B7D1AB82C8F4A9A8B2D0101 /* Frameworks */,
+				9B7D1ABA2C8F4A9A8B2D0101 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9B7D1ABD2C8F4A9A8B2D0101 /* PBXTargetDependency */,
+			);
+			name = MacMiniMixerTests;
+			productName = MacMiniMixerTests;
+			productReference = 9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -331,6 +385,10 @@
 				TargetAttributes = {
 					9B7D1A232C8F4A9A8B2D0101 = {
 						CreatedOnToolsVersion = 26.3;
+					};
+					9B7D1ABB2C8F4A9A8B2D0101 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = 9B7D1A232C8F4A9A8B2D0101;
 					};
 				};
 			};
@@ -348,12 +406,20 @@
 			projectRoot = "";
 			targets = (
 				9B7D1A232C8F4A9A8B2D0101 /* MacMiniMixer */,
+				9B7D1ABB2C8F4A9A8B2D0101 /* MacMiniMixerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		9B7D1A222C8F4A9A8B2D0101 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9B7D1ABA2C8F4A9A8B2D0101 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -424,7 +490,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		9B7D1AB92C8F4A9A8B2D0101 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */,
+				9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */,
+				9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9B7D1ABD2C8F4A9A8B2D0101 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9B7D1A232C8F4A9A8B2D0101 /* MacMiniMixer */;
+			targetProxy = 9B7D1ABC2C8F4A9A8B2D0101 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		9B7D1A452C8F4A9A8B2D0101 /* Debug */ = {
@@ -593,6 +677,54 @@
 			};
 			name = Release;
 		};
+		9B7D1ABE2C8F4A9A8B2D0101 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MacMiniMixerTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MacMiniMixer.app/Contents/MacOS/MacMiniMixer";
+			};
+			name = Debug;
+		};
+		9B7D1ABF2C8F4A9A8B2D0101 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MacMiniMixerTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MacMiniMixer.app/Contents/MacOS/MacMiniMixer";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -610,6 +742,15 @@
 			buildConfigurations = (
 				9B7D1A482C8F4A9A8B2D0101 /* Debug */,
 				9B7D1A492C8F4A9A8B2D0101 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9B7D1AC02C8F4A9A8B2D0101 /* Build configuration list for PBXNativeTarget "MacMiniMixerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9B7D1ABE2C8F4A9A8B2D0101 /* Debug */,
+				9B7D1ABF2C8F4A9A8B2D0101 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
