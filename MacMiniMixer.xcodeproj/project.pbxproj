@@ -50,6 +50,7 @@
 		9B7D1A882C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */; };
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
 		9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */; };
+		9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA72C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift */; };
 		9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */; };
 		9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */; };
 		9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */; };
@@ -108,6 +109,7 @@
 		9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionState.swift; sourceTree = "<group>"; };
 		9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManager.swift; sourceTree = "<group>"; };
 		9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTwoAppReadinessTesting.swift; sourceTree = "<group>"; };
+		9B7D1AA72C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulator.swift; sourceTree = "<group>"; };
 		9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessTestView.swift; sourceTree = "<group>"; };
 		9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioHelpers.swift; sourceTree = "<group>"; };
 		9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Comparable+Clamped.swift"; sourceTree = "<group>"; };
@@ -249,6 +251,7 @@
 			children = (
 				9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */,
 				9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */,
+				9B7D1AA72C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift */,
 				9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */,
 				9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */,
 				9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */,
@@ -406,6 +409,7 @@
 				9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */,
 				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
 				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
+				9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */,
 				9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */,
 				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
 				9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */,

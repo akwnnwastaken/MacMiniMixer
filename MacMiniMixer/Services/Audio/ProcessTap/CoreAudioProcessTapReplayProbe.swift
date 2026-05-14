@@ -210,7 +210,7 @@ final class CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked 
             )
         }
 
-        let accumulator = ProcessTapReplayAccumulator()
+        let accumulator = ProcessTapDiagnosticsAccumulator()
         let callbackQueue = DispatchQueue(label: "com.macminimixer.process-tap-replay-probe.callback")
         let ioBlock: AudioDeviceIOBlock = { _, inputData, _, _, _ in
             accumulator.observe(inputData)
@@ -304,7 +304,7 @@ final class CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked 
     }
 
     private func publishProgress(
-        from accumulator: ProcessTapReplayAccumulator,
+        from accumulator: ProcessTapDiagnosticsAccumulator,
         targetPID: pid_t,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) -> ProcessTapReplayProbeStopReason? {
@@ -369,7 +369,7 @@ final class CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked 
 
     private func replayDiagnostics(
         gain: ProcessTapReplayGainOption,
-        snapshot: ProcessTapReplaySnapshot,
+        snapshot: ProcessTapDiagnosticsSnapshot,
         playbackSnapshot: ProcessTapReplayOutputSnapshot
     ) -> ProcessTapReplayDiagnostics {
         ProcessTapReplayDiagnostics(
@@ -712,88 +712,4 @@ private func processTapReplayAudioQueueCallback(
 
     let outputQueue = Unmanaged<ProcessTapReplayOutputQueue>.fromOpaque(userData).takeUnretainedValue()
     outputQueue.recycle(buffer)
-}
-
-private struct ProcessTapReplaySnapshot {
-    let callbackCount: Int
-    let measuredSampleCount: UInt64
-    let peakLevel: Double
-    let rmsLevel: Double
-
-    var detectedNonSilentAudio: Bool {
-        peakLevel > 0.001
-    }
-
-    var progress: ProcessTapDiagnosticProgress {
-        ProcessTapDiagnosticProgress(
-            callbackCount: callbackCount,
-            peakLevel: peakLevel,
-            rmsLevel: rmsLevel,
-            audioDetected: detectedNonSilentAudio
-        )
-    }
-}
-
-private final class ProcessTapReplayAccumulator: @unchecked Sendable {
-    private let lock = NSLock()
-    private var callbackCount = 0
-    private var measuredSampleCount: UInt64 = 0
-    private var peakLevel: Double = 0
-    private var sumOfSquares: Double = 0
-
-    func observe(_ inputData: UnsafePointer<AudioBufferList>) {
-        var localSampleCount: UInt64 = 0
-        var localPeak: Double = 0
-        var localSumOfSquares: Double = 0
-
-        let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inputData)
-        for buffer in UnsafeMutableAudioBufferListPointer(mutableInputData) {
-            guard let data = buffer.mData else {
-                continue
-            }
-
-            let sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.stride
-            guard sampleCount > 0 else {
-                continue
-            }
-
-            let samples = data.assumingMemoryBound(to: Float32.self)
-            for index in 0..<sampleCount {
-                let sampleValue = Double(samples[index])
-                guard sampleValue.isFinite else {
-                    continue
-                }
-
-                let absoluteSample = abs(sampleValue)
-                localPeak = max(localPeak, absoluteSample)
-                localSumOfSquares += sampleValue * sampleValue
-                localSampleCount += 1
-            }
-        }
-
-        lock.lock()
-        callbackCount += 1
-        peakLevel = max(peakLevel, localPeak)
-        sumOfSquares += localSumOfSquares
-        measuredSampleCount += localSampleCount
-        lock.unlock()
-    }
-
-    func snapshot() -> ProcessTapReplaySnapshot {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-
-        let rmsLevel = measuredSampleCount > 0
-            ? sqrt(sumOfSquares / Double(measuredSampleCount))
-            : 0
-
-        return ProcessTapReplaySnapshot(
-            callbackCount: callbackCount,
-            measuredSampleCount: measuredSampleCount,
-            peakLevel: peakLevel,
-            rmsLevel: rmsLevel
-        )
-    }
 }

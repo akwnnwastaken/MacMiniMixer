@@ -239,7 +239,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             )
         }
 
-        let accumulator = ProcessTapLiveAccumulator()
+        let accumulator = ProcessTapDiagnosticsAccumulator()
         let callbackQueue = DispatchQueue(label: "com.macminimixer.process-tap-live-control.callback")
         let ioBlock: AudioDeviceIOBlock = { _, inputData, _, _, _ in
             accumulator.observe(inputData)
@@ -462,7 +462,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
     let startDefaultOutputDeviceID: AudioDeviceID
     let resources: ProcessTapResourceContext
     let outputQueue: ProcessTapLiveOutputQueue
-    let accumulator: ProcessTapLiveAccumulator
+    let accumulator: ProcessTapDiagnosticsAccumulator
     let onDiagnostics: @Sendable (ProcessTapLiveDiagnostics) -> Void
     let onStopped: @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
 
@@ -479,7 +479,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         startDefaultOutputDeviceID: AudioDeviceID,
         resources: ProcessTapResourceContext,
         outputQueue: ProcessTapLiveOutputQueue,
-        accumulator: ProcessTapLiveAccumulator,
+        accumulator: ProcessTapDiagnosticsAccumulator,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) {
@@ -1014,75 +1014,4 @@ private struct ProcessTapLiveOutputSnapshot {
     let droppedBufferCount: Int
     let enqueueFailureCount: Int
     let copyFailureCount: Int
-}
-
-private struct ProcessTapLiveInputSnapshot {
-    let callbackCount: Int
-    let measuredSampleCount: UInt64
-    let peakLevel: Double
-    let rmsLevel: Double
-}
-
-private final class ProcessTapLiveAccumulator: @unchecked Sendable {
-    private let lock = NSLock()
-    private var callbackCount = 0
-    private var measuredSampleCount: UInt64 = 0
-    private var peakLevel: Double = 0
-    private var sumOfSquares: Double = 0
-
-    func observe(_ inputData: UnsafePointer<AudioBufferList>) {
-        var localSampleCount: UInt64 = 0
-        var localPeak: Double = 0
-        var localSumOfSquares: Double = 0
-
-        let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inputData)
-        for buffer in UnsafeMutableAudioBufferListPointer(mutableInputData) {
-            guard let data = buffer.mData else {
-                continue
-            }
-
-            let sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.stride
-            guard sampleCount > 0 else {
-                continue
-            }
-
-            let samples = data.assumingMemoryBound(to: Float32.self)
-            for index in 0..<sampleCount {
-                let sampleValue = Double(samples[index])
-                guard sampleValue.isFinite else {
-                    continue
-                }
-
-                let absoluteSample = abs(sampleValue)
-                localPeak = max(localPeak, absoluteSample)
-                localSumOfSquares += sampleValue * sampleValue
-                localSampleCount += 1
-            }
-        }
-
-        lock.lock()
-        callbackCount += 1
-        peakLevel = max(peakLevel, localPeak)
-        sumOfSquares += localSumOfSquares
-        measuredSampleCount += localSampleCount
-        lock.unlock()
-    }
-
-    func snapshot() -> ProcessTapLiveInputSnapshot {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-
-        let rmsLevel = measuredSampleCount > 0
-            ? sqrt(sumOfSquares / Double(measuredSampleCount))
-            : 0
-
-        return ProcessTapLiveInputSnapshot(
-            callbackCount: callbackCount,
-            measuredSampleCount: measuredSampleCount,
-            peakLevel: peakLevel,
-            rmsLevel: rmsLevel
-        )
-    }
 }
