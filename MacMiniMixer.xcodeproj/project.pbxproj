@@ -57,6 +57,8 @@
 		9B7D1A962C8F4A9A8B2D0101 /* SystemProcessLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A972C8F4A9A8B2D0101 /* SystemProcessLister.swift */; };
 		9B7D1A982C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */; };
 		9B7D1A9B2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */; };
+		9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */; };
+		9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -112,6 +114,8 @@
 		9B7D1A972C8F4A9A8B2D0101 /* SystemProcessLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProcessLister.swift; sourceTree = "<group>"; };
 		9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessDiscoveryView.swift; sourceTree = "<group>"; };
 		9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapCandidateAudioProbing.swift; sourceTree = "<group>"; };
+		9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessCandidateDiscovery.swift; sourceTree = "<group>"; };
+		9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioTargetResolving.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -256,6 +260,8 @@
 				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
 				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
 				9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */,
+				9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */,
+				9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */,
 			);
 			path = ProcessTap;
 			sourceTree = "<group>";
@@ -405,6 +411,8 @@
 				9B7D1A962C8F4A9A8B2D0101 /* SystemProcessLister.swift in Sources */,
 				9B7D1A982C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift in Sources */,
 				9B7D1A9B2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift in Sources */,
+				9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */,
+				9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

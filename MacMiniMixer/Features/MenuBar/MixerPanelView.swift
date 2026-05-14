@@ -240,6 +240,7 @@ struct MixerPanelView: View {
                             MixerAppRowView(
                                 app: app,
                                 isExperimentalControlActive: viewModel.isExperimentalControlActive(for: app.id),
+                                isExperimentalControlResolving: viewModel.isResolvingExperimentalControl(for: app.id),
                                 toggleExperimentalControl: {
                                     viewModel.toggleExperimentalControl(for: app.id)
                                 },

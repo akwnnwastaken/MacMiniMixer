@@ -96,6 +96,7 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var isHelperProcessAutoDetectRunning = false
     @Published private(set) var helperProcessAutoDetectProgressText: String?
     @Published private(set) var advancedProcessTapTarget: AdvancedProcessTapTarget?
+    @Published private(set) var appAudioResolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] = [:]
     @Published private(set) var activeExperimentalAppID: MixerAppItem.ID?
     @Published private(set) var activeLiveControlAppName: String?
     @Published private(set) var showAllApps = false
@@ -112,11 +113,13 @@ final class MixerViewModel: ObservableObject {
     private let processTapLiveController: ProcessTapLiveControlling
     private let twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
+    private let appAudioTargetResolver: AppAudioTargetResolving
     private let processLister: ProcessListing
     private var lastNonZeroSystemVolume: Double
     private var lastSliderVolumeSetSucceeded: Bool?
     private var isProcessTapReplayProbeRunning = false
     private var helperProcessAutoDetectTask: Task<Void, Never>?
+    private var appAudioResolutionTask: Task<Void, Never>?
     private var statusClearTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
 
@@ -132,6 +135,7 @@ final class MixerViewModel: ObservableObject {
         processTapLiveController: ProcessTapLiveControlling,
         twoAppReadinessTester: ProcessTapTwoAppReadinessTesting,
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
+        appAudioTargetResolver: AppAudioTargetResolving,
         processLister: ProcessListing
     ) {
         self.applicationLister = applicationLister
@@ -145,6 +149,7 @@ final class MixerViewModel: ObservableObject {
         self.processTapLiveController = processTapLiveController
         self.twoAppReadinessTester = twoAppReadinessTester
         self.helperProcessAudioProbe = helperProcessAudioProbe
+        self.appAudioTargetResolver = appAudioTargetResolver
         self.processLister = processLister
 
         let initialSystemVolume = audioController.systemVolume.clamped(to: AppConstants.volumeRange)
@@ -193,6 +198,9 @@ final class MixerViewModel: ObservableObject {
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
         _ = twoAppReadinessTester.stopAllNow(reason: .appTerminating)
         helperProcessAutoDetectTask?.cancel()
+        appAudioResolutionTask?.cancel()
+        appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
+        appAudioTargetResolver.invalidateAllCachedTargets()
         helperProcessAudioProbe.stopCurrentProbe(reason: .userStopped)
         processTapReplayProbe.stopCurrentReplayProbe(reason: .userStopped)
     }
@@ -207,7 +215,9 @@ final class MixerViewModel: ObservableObject {
         }
 
         return apps.filter { app in
-            app.isLikelyAudioRelevant || isActiveLiveControlTarget(app.id)
+            app.isLikelyAudioRelevant ||
+                isActiveLiveControlTarget(app.id) ||
+                isResolvingExperimentalControl(for: app.id)
         }
     }
 
@@ -267,6 +277,11 @@ final class MixerViewModel: ObservableObject {
 
         if !isEnabled, isProcessTapLiveControlActive {
             stopProcessTapLiveControl()
+        }
+
+        if !isEnabled {
+            cancelAppAudioTargetResolution(reason: .userStopped)
+            appAudioTargetResolver.invalidateAllCachedTargets()
         }
     }
 
@@ -356,12 +371,18 @@ final class MixerViewModel: ObservableObject {
             stopHelperProcessProbe(reason: .outputDeviceChanged)
         }
 
+        if isAppAudioTargetResolving,
+           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            cancelAppAudioTargetResolution(reason: .outputDeviceChanged)
+        }
+
         if isProcessTapReplayProbeRunning,
            didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
             processTapReplayProbe.stopCurrentReplayProbe(reason: .outputDeviceChanged)
         }
 
         if didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+            appAudioTargetResolver.invalidateAllCachedTargets()
             refreshSystemOutputVolume()
         }
     }
@@ -378,7 +399,8 @@ final class MixerViewModel: ObservableObject {
     }
 
     func selectProcessTapApp(_ appID: MixerAppItem.ID) {
-        guard !isProcessTapLiveControlActive else {
+        guard !isProcessTapLiveControlActive,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -425,6 +447,7 @@ final class MixerViewModel: ObservableObject {
         guard !isHelperProcessDiscoveryScanning,
               helperProcessProbeRunningPID == nil,
               !isHelperProcessAutoDetectRunning,
+              !isAppAudioTargetResolving,
               apps.contains(where: { $0.id == appID }) else {
             return
         }
@@ -439,7 +462,8 @@ final class MixerViewModel: ObservableObject {
     func scanHelperProcesses() {
         guard !isHelperProcessDiscoveryScanning,
               helperProcessProbeRunningPID == nil,
-              !isHelperProcessAutoDetectRunning else {
+              !isHelperProcessAutoDetectRunning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -460,7 +484,10 @@ final class MixerViewModel: ObservableObject {
             let processes = await Task.detached(priority: .userInitiated) {
                 processLister.listProcesses()
             }.value
-            let candidates = Self.helperProcessCandidates(for: app, processes: processes)
+            let candidates = HelperProcessCandidateDiscovery.candidates(
+                for: app.helperProcessDiscoveryTarget,
+                processes: processes
+            )
             let eligibleCount = candidates.filter(\.isTapEligible).count
 
             await MainActor.run {
@@ -484,7 +511,8 @@ final class MixerViewModel: ObservableObject {
     }
 
     func useHelperCandidateAsAdvancedTarget(_ processIdentifier: Int32) {
-        guard !isHelperProcessAutoDetectRunning else {
+        guard !isHelperProcessAutoDetectRunning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -534,7 +562,8 @@ final class MixerViewModel: ObservableObject {
 
     func probeHelperProcessCandidate(_ processIdentifier: Int32) {
         guard helperProcessProbeRunningPID == nil,
-              !isHelperProcessAutoDetectRunning else {
+              !isHelperProcessAutoDetectRunning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -593,7 +622,8 @@ final class MixerViewModel: ObservableObject {
     func autoDetectHelperProcessCandidate() {
         guard !isHelperProcessAutoDetectRunning,
               helperProcessProbeRunningPID == nil,
-              !isHelperProcessDiscoveryScanning else {
+              !isHelperProcessDiscoveryScanning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -637,7 +667,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     func testSelectedProcessTapReplayProbe() {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
+        guard !isProcessTapTesting,
+              !isProcessTapLiveControlActive,
+              !isTwoAppReadinessRunning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -696,7 +729,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     func startProcessTapLiveControl() {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
+        guard !isProcessTapTesting,
+              !isProcessTapLiveControlActive,
+              !isTwoAppReadinessRunning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -787,6 +823,9 @@ final class MixerViewModel: ObservableObject {
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
         _ = twoAppReadinessTester.stopAllNow(reason: .appTerminating)
         helperProcessAutoDetectTask?.cancel()
+        appAudioResolutionTask?.cancel()
+        appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
+        appAudioTargetResolver.invalidateAllCachedTargets()
         helperProcessAudioProbe.stopCurrentProbe(reason: .userStopped)
         processTapReplayProbe.stopCurrentReplayProbe(reason: .userStopped)
         isProcessTapLiveControlActive = false
@@ -795,6 +834,7 @@ final class MixerViewModel: ObservableObject {
         helperProcessProbeRunningPID = nil
         isHelperProcessAutoDetectRunning = false
         helperProcessAutoDetectProgressText = nil
+        appAudioResolutionStateByAppID = [:]
         activeExperimentalAppID = nil
         activeLiveControlAppName = nil
         isTwoAppReadinessRunning = false
@@ -805,7 +845,9 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive else {
+        guard !isProcessTapTesting,
+              !isProcessTapLiveControlActive,
+              !isAppAudioTargetResolving else {
             twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
                 outcome: .setupFailed,
                 message: "Stop active Process Tap work first",
@@ -916,15 +958,21 @@ final class MixerViewModel: ObservableObject {
     func stopTwoAppReadinessForPanelClose() {
         guard isTwoAppReadinessRunning else {
             stopHelperProcessAutoDetect(reason: .userStopped)
+            cancelAppAudioTargetResolution(reason: .userStopped)
             return
         }
 
         stopTwoAppReadiness(reason: .userStopped)
         stopHelperProcessAutoDetect(reason: .userStopped)
+        cancelAppAudioTargetResolution(reason: .userStopped)
     }
 
     func isExperimentalControlActive(for appID: MixerAppItem.ID) -> Bool {
         activeExperimentalAppID == appID && isProcessTapLiveControlActive
+    }
+
+    func isResolvingExperimentalControl(for appID: MixerAppItem.ID) -> Bool {
+        appAudioResolutionStateByAppID[appID] != nil
     }
 
     func toggleExperimentalControl(for appID: MixerAppItem.ID) {
@@ -937,7 +985,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func startProcessTapTest(mode: ProcessTapTestMode) {
-        guard !isProcessTapTesting, !isProcessTapLiveControlActive, !isTwoAppReadinessRunning else {
+        guard !isProcessTapTesting,
+              !isProcessTapLiveControlActive,
+              !isTwoAppReadinessRunning,
+              !isAppAudioTargetResolving else {
             return
         }
 
@@ -994,6 +1045,7 @@ final class MixerViewModel: ObservableObject {
 
     func refreshApplications() {
         let previousProcessTapAppID = selectedProcessTapAppID
+        let previousApps = apps
         let existingStates = Dictionary(
             uniqueKeysWithValues: apps.map { app in
                 (app.id, (volume: app.volume, isMuted: app.isMuted))
@@ -1011,10 +1063,16 @@ final class MixerViewModel: ObservableObject {
             return updatedApp
         }
         refreshTwoAppReadinessEligibility()
+        invalidateCachedAudioTargetsForRemovedOrChangedApps(previousApps: previousApps, refreshedApps: apps)
 
         if let activeExperimentalAppID,
            !apps.contains(where: { $0.id == activeExperimentalAppID }) {
             stopProcessTapLiveControl(reason: .targetAppExited)
+        }
+
+        if let resolvingAppID = appAudioResolutionStateByAppID.keys.first,
+           !apps.contains(where: { $0.id == resolvingAppID }) {
+            cancelAppAudioTargetResolution(reason: .targetExited)
         }
 
         if let previousProcessTapAppID,
@@ -1082,6 +1140,20 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
+        if isResolvingExperimentalControl(for: app.id) {
+            return
+        }
+
+        if isAppAudioTargetResolving {
+            showStatus("Finish resolving app audio first", style: .warning)
+            return
+        }
+
+        if helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning {
+            showStatus("Stop helper probe first", style: .warning)
+            return
+        }
+
         if isExperimentalControlActive(for: app.id) {
             return
         }
@@ -1091,7 +1163,7 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        startExperimentalControl(for: app.id)
+        startResolvedExperimentalControl(for: app)
     }
 
     private func startExperimentalControl(for appID: MixerAppItem.ID) {
@@ -1100,7 +1172,8 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        guard !isProcessTapTesting else {
+        guard !isProcessTapTesting,
+              !isAppAudioTargetResolving else {
             showStatus("Process Tap is already busy", style: .warning)
             return
         }
@@ -1131,9 +1204,60 @@ final class MixerViewModel: ObservableObject {
             appName: app.name,
             processIdentifier: app.processIdentifier
         )
+        startExperimentalControl(for: app, target: target)
+    }
+
+    private func startResolvedExperimentalControl(
+        for app: MixerAppItem,
+        allowsCachedLookup: Bool = true
+    ) {
+        let request = app.appAudioTargetRequest
+        let visibleEligibility = ProcessTapCoreAudio.processTapEligibility(for: app.processIdentifier)
+
+        if visibleEligibility.isEligible {
+            startExperimentalControl(
+                for: app,
+                target: ProcessTapTarget(
+                    appID: app.id,
+                    appName: app.name,
+                    processIdentifier: app.processIdentifier
+                )
+            )
+            return
+        }
+
+        guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget) else {
+            showStatus("This app is not available for real app control", style: .warning)
+            return
+        }
+
+        appAudioResolutionStateByAppID = [app.id: .resolving]
+        appAudioResolutionTask?.cancel()
+        appAudioResolutionTask = Task { [weak self] in
+            let result = await self?.appAudioTargetResolver.resolveTarget(
+                for: request,
+                allowsCachedLookup: allowsCachedLookup
+            ) { _ in }
+
+            await MainActor.run {
+                self?.handleAppAudioTargetResolution(result, for: app.id)
+            }
+        }
+    }
+
+    private func startExperimentalControl(
+        for app: MixerAppItem,
+        target: ProcessTapTarget,
+        resolutionSource: ResolvedAppAudioTarget.Source? = nil
+    ) {
+        guard target.processIdentifier.map({ $0 > 0 }) == true else {
+            showStatus("This app is not available for live control", style: .warning)
+            return
+        }
+
         let gain = experimentalGainOption(for: app)
 
-        activeExperimentalAppID = appID
+        activeExperimentalAppID = app.id
         activeLiveControlAppName = app.name
         processTapTestResult = ProcessTapTestResult(
             outcome: .liveControlStarting,
@@ -1171,14 +1295,30 @@ final class MixerViewModel: ObservableObject {
 
                 if result.outcome == .liveControlStarted {
                     isProcessTapLiveControlActive = true
-                    activeExperimentalAppID = appID
+                    activeExperimentalAppID = app.id
                     activeLiveControlAppName = app.name
                 } else {
+                    if resolutionSource == .cachedHelper {
+                        appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
+                    }
+
                     activeExperimentalAppID = nil
                     activeLiveControlAppName = nil
                     processTapLiveDiagnostics = nil
                     processTapDiagnosticProgress = nil
-                    showStatus("Could not start live control for this app", style: .warning)
+
+                    if resolutionSource == .cachedHelper,
+                       isExperimentalRealAppControlEnabled,
+                       !isTwoAppReadinessRunning,
+                       !isProcessTapLiveControlActive,
+                       !isAppAudioTargetResolving {
+                        startResolvedExperimentalControl(for: app, allowsCachedLookup: false)
+                    } else {
+                        if resolutionSource == .discoveredHelper {
+                            appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
+                        }
+                        showStatus("Could not start live control for this app", style: .warning)
+                    }
                 }
             }
         }
@@ -1192,6 +1332,7 @@ final class MixerViewModel: ObservableObject {
         _ result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
     ) {
+        let stoppedAppID = activeExperimentalAppID
         processTapTestResult = result
         processTapLiveDiagnostics = diagnostics
         processTapDiagnosticProgress = diagnostics?.progress
@@ -1199,7 +1340,61 @@ final class MixerViewModel: ObservableObject {
         isProcessTapTesting = false
         activeExperimentalAppID = nil
         activeLiveControlAppName = nil
+        if result.outcome == .liveControlAppExited,
+           let stoppedAppID,
+           let stoppedApp = apps.first(where: { $0.id == stoppedAppID }) {
+            appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
+        }
+        if result.outcome == .liveControlOutputChanged {
+            appAudioTargetResolver.invalidateAllCachedTargets()
+        }
         showLiveControlWarningIfNeeded(for: result)
+    }
+
+    private func handleAppAudioTargetResolution(
+        _ result: AppAudioTargetResolutionResult?,
+        for appID: MixerAppItem.ID
+    ) {
+        guard appAudioResolutionStateByAppID[appID] != nil else {
+            return
+        }
+
+        appAudioResolutionStateByAppID[appID] = nil
+        appAudioResolutionTask = nil
+
+        guard let result else {
+            return
+        }
+
+        switch result {
+        case .resolved(let resolvedTarget):
+            guard let app = apps.first(where: { $0.id == resolvedTarget.visibleAppID }) else {
+                showStatus("This app is not available for real app control", style: .warning)
+                return
+            }
+
+            guard !isTwoAppReadinessRunning else {
+                showStatus("Stop two-app test first", style: .warning)
+                return
+            }
+
+            guard !isProcessTapLiveControlActive, !isProcessTapTesting else {
+                showStatus("Stop active live control first", style: .warning)
+                return
+            }
+
+            startExperimentalControl(
+                for: app,
+                target: resolvedTarget.target,
+                resolutionSource: resolvedTarget.source
+            )
+
+        case .unavailable(let reason):
+            showStatus(reason, style: .warning)
+
+        case .cancelled:
+            break
+        }
     }
 
     private func showLiveControlWarningIfNeeded(for result: ProcessTapTestResult) {
@@ -1255,6 +1450,17 @@ final class MixerViewModel: ObservableObject {
         helperProcessAutoDetectTask?.cancel()
         helperProcessAutoDetectTask = nil
         helperProcessAudioProbe.stopCurrentProbe(reason: reason)
+    }
+
+    private func cancelAppAudioTargetResolution(reason: ProcessTapCandidateProbeStopReason) {
+        guard isAppAudioTargetResolving else {
+            return
+        }
+
+        appAudioResolutionTask?.cancel()
+        appAudioResolutionTask = nil
+        appAudioResolutionStateByAppID = [:]
+        appAudioTargetResolver.cancelCurrentResolution(reason: reason)
     }
 
     private func runHelperProcessAutoDetect(candidates: [HelperProcessCandidate]) async {
@@ -1434,6 +1640,24 @@ final class MixerViewModel: ObservableObject {
         helperProcessProbeProgressByPID = [:]
     }
 
+    private func invalidateCachedAudioTargetsForRemovedOrChangedApps(
+        previousApps: [MixerAppItem],
+        refreshedApps: [MixerAppItem]
+    ) {
+        let refreshedAppsByID = Dictionary(uniqueKeysWithValues: refreshedApps.map { ($0.id, $0) })
+
+        for previousApp in previousApps {
+            guard let refreshedApp = refreshedAppsByID[previousApp.id] else {
+                appAudioTargetResolver.invalidateCachedTarget(for: previousApp.appAudioTargetRequest)
+                continue
+            }
+
+            if previousApp.processIdentifier != refreshedApp.processIdentifier {
+                appAudioTargetResolver.invalidateCachedTarget(for: previousApp.appAudioTargetRequest)
+            }
+        }
+    }
+
     private func refreshTwoAppReadinessEligibility() {
         twoAppReadinessEligibilityByAppID = Self.twoAppReadinessEligibility(for: apps)
     }
@@ -1480,8 +1704,7 @@ final class MixerViewModel: ObservableObject {
 
     private static func preferredHelperDiscoveryAppID(in apps: [MixerAppItem]) -> MixerAppItem.ID? {
         apps.first { app in
-            let searchableText = normalizedSearchText("\(app.name) \(app.id)")
-            return browserSearchKeywords.contains { searchableText.contains($0) }
+            HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget)
         }?.id ?? apps.first?.id
     }
 
@@ -1511,209 +1734,6 @@ final class MixerViewModel: ObservableObject {
             appAID: appA?.id,
             appBID: appB?.id
         )
-    }
-
-    private static let helperProcessCandidateDisplayLimit = 30
-
-    private static let browserSearchKeywords = [
-        "safari",
-        "chrome",
-        "chromium",
-        "youtube",
-        "browser",
-        "webkit",
-        "arc",
-        "brave",
-        "edge",
-        "opera"
-    ]
-
-    private static func helperProcessCandidates(
-        for app: MixerAppItem,
-        processes: [SystemProcessInfo]
-    ) -> [HelperProcessCandidate] {
-        guard let appPID = app.processIdentifier, appPID > 0 else {
-            return []
-        }
-
-        var processByPID = Dictionary(
-            uniqueKeysWithValues: processes.map { process in
-                (process.processIdentifier, process)
-            }
-        )
-
-        if processByPID[appPID] == nil {
-            processByPID[appPID] = SystemProcessInfo(
-                processIdentifier: appPID,
-                parentProcessIdentifier: nil,
-                name: app.name,
-                executablePath: nil
-            )
-        }
-
-        let candidates = processByPID.values.compactMap { process -> HelperProcessCandidate? in
-            guard let relation = helperProcessRelation(
-                for: process,
-                selectedApp: app,
-                processByPID: processByPID
-            ) else {
-                return nil
-            }
-
-            return HelperProcessCandidate(
-                process: process,
-                relation: relation,
-                eligibility: ProcessTapCoreAudio.processTapEligibility(for: process.processIdentifier)
-            )
-        }
-
-        return candidates
-            .sorted(by: helperProcessCandidateSort)
-            .prefix(helperProcessCandidateDisplayLimit)
-            .map { $0 }
-    }
-
-    private static func helperProcessRelation(
-        for process: SystemProcessInfo,
-        selectedApp: MixerAppItem,
-        processByPID: [Int32: SystemProcessInfo]
-    ) -> HelperProcessRelation? {
-        guard let selectedPID = selectedApp.processIdentifier else {
-            return nil
-        }
-
-        if process.processIdentifier == selectedPID {
-            return .directApp
-        }
-
-        if process.parentProcessIdentifier == selectedPID {
-            return .child
-        }
-
-        if isDescendant(process, of: selectedPID, processByPID: processByPID) {
-            return .descendant
-        }
-
-        if matchesHelperNameHeuristic(process, selectedApp: selectedApp) {
-            return .nameMatch
-        }
-
-        return nil
-    }
-
-    private static func isDescendant(
-        _ process: SystemProcessInfo,
-        of rootPID: Int32,
-        processByPID: [Int32: SystemProcessInfo]
-    ) -> Bool {
-        var visitedPIDs = Set<Int32>()
-        var parentPID = process.parentProcessIdentifier
-
-        for _ in 0..<64 {
-            guard let currentPID = parentPID,
-                  visitedPIDs.insert(currentPID).inserted else {
-                return false
-            }
-
-            if currentPID == rootPID {
-                return true
-            }
-
-            parentPID = processByPID[currentPID]?.parentProcessIdentifier
-        }
-
-        return false
-    }
-
-    private static func matchesHelperNameHeuristic(
-        _ process: SystemProcessInfo,
-        selectedApp: MixerAppItem
-    ) -> Bool {
-        let candidateText = normalizedSearchText(
-            "\(process.name) \(process.executablePath ?? "")"
-        )
-        let keywords = helperDiscoveryKeywords(for: selectedApp)
-
-        return keywords.contains { keyword in
-            candidateText.contains(keyword)
-        }
-    }
-
-    private static func helperDiscoveryKeywords(for app: MixerAppItem) -> [String] {
-        let selectedText = normalizedSearchText("\(app.name) \(app.id)")
-
-        if selectedText.contains("safari") || selectedText.contains("webkit") {
-            return ["safari", "webkit", "webcontent", "com.apple.webkit"]
-        }
-
-        if selectedText.contains("chrome") ||
-            selectedText.contains("chromium") ||
-            selectedText.contains("brave") ||
-            selectedText.contains("edge") ||
-            selectedText.contains("arc") ||
-            selectedText.contains("opera") {
-            return [
-                "chrome helper",
-                "chrome",
-                "chromium",
-                "renderer",
-                "gpu",
-                "utility",
-                "audio",
-                "brave",
-                "edge",
-                "arc",
-                "opera"
-            ]
-        }
-
-        if selectedText.contains("youtube") {
-            return [
-                "youtube",
-                "safari",
-                "webkit",
-                "webcontent",
-                "chrome helper",
-                "chrome",
-                "chromium",
-                "renderer",
-                "gpu",
-                "utility",
-                "audio"
-            ]
-        }
-
-        return selectedText
-            .split(separator: " ")
-            .map(String.init)
-            .filter { $0.count > 2 }
-            .prefix(3)
-            .map { $0 }
-    }
-
-    private static func helperProcessCandidateSort(
-        lhs: HelperProcessCandidate,
-        rhs: HelperProcessCandidate
-    ) -> Bool {
-        if lhs.relation.sortPriority != rhs.relation.sortPriority {
-            return lhs.relation.sortPriority < rhs.relation.sortPriority
-        }
-
-        if lhs.isTapEligible != rhs.isTapEligible {
-            return lhs.isTapEligible && !rhs.isTapEligible
-        }
-
-        let nameComparison = lhs.process.name.localizedCaseInsensitiveCompare(rhs.process.name)
-        if nameComparison != .orderedSame {
-            return nameComparison == .orderedAscending
-        }
-
-        return lhs.process.processIdentifier < rhs.process.processIdentifier
-    }
-
-    private static func normalizedSearchText(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .lowercased()
     }
 
     private static func twoAppReadinessEligibility(
@@ -1815,6 +1835,10 @@ final class MixerViewModel: ObservableObject {
         return apps.first { $0.id == selectedHelperDiscoveryAppID }
     }
 
+    private var isAppAudioTargetResolving: Bool {
+        !appAudioResolutionStateByAppID.isEmpty
+    }
+
     private func applyRequestedSystemVolume(_ volume: Double) -> Bool {
         let clampedVolume = volume.clamped(to: AppConstants.volumeRange)
         let volumeScalar = clampedVolume / AppConstants.volumeRange.upperBound
@@ -1876,6 +1900,24 @@ final class MixerViewModel: ObservableObject {
         if clampedVolume > AppConstants.volumeRange.lowerBound {
             lastNonZeroSystemVolume = clampedVolume
         }
+    }
+}
+
+private extension MixerAppItem {
+    var appAudioTargetRequest: AppAudioTargetRequest {
+        AppAudioTargetRequest(
+            appID: id,
+            appName: name,
+            processIdentifier: processIdentifier
+        )
+    }
+
+    var helperProcessDiscoveryTarget: HelperProcessDiscoveryTarget {
+        HelperProcessDiscoveryTarget(
+            id: id,
+            name: name,
+            processIdentifier: processIdentifier
+        )
     }
 }
 

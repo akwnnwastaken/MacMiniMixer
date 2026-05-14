@@ -3,6 +3,7 @@ import SwiftUI
 struct MixerAppRowView: View {
     let app: MixerAppItem
     let isExperimentalControlActive: Bool
+    let isExperimentalControlResolving: Bool
     let toggleExperimentalControl: () -> Void
     @Binding var volume: Double
     @Binding var isMuted: Bool
@@ -23,7 +24,7 @@ struct MixerAppRowView: View {
                 .frame(width: AppConstants.Layout.appNameWidth, alignment: .leading)
 
             Slider(value: $volume, in: AppConstants.volumeRange, step: 1)
-                .disabled(isMuted)
+                .disabled(isMuted || isExperimentalControlResolving)
 
             Text("\(Int(volume.rounded()))")
                 .font(.caption.monospacedDigit())
@@ -38,6 +39,7 @@ struct MixerAppRowView: View {
         .opacity(isMuted ? 0.68 : 1)
         .animation(.snappy(duration: 0.16), value: isMuted)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlActive)
+        .animation(.snappy(duration: 0.16), value: isExperimentalControlResolving)
     }
 
     private var appIcon: some View {
@@ -140,6 +142,8 @@ struct MixerAppRowView: View {
     private var experimentalControlAccessory: some View {
         if isExperimentalControlActive {
             realControlBadge
+        } else if isExperimentalControlResolving {
+            resolvingBadge
         } else {
             Color.clear
                 .frame(width: AppConstants.Layout.rowLiveButtonSize, height: AppConstants.Layout.rowLiveButtonSize)
@@ -164,5 +168,28 @@ struct MixerAppRowView: View {
         .buttonStyle(.plain)
         .help("Stop experimental real app control for \(app.name)")
         .accessibilityLabel(Text("Stop Real App Control"))
+    }
+
+    private var resolvingBadge: some View {
+        HStack(spacing: 4) {
+            ProgressView()
+                .controlSize(.mini)
+                .scaleEffect(0.55)
+                .frame(width: 10, height: 10)
+
+            Text("Resolving")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.orange.opacity(0.88))
+        }
+        .frame(width: AppConstants.Layout.rowLiveButtonSize + 36, height: AppConstants.Layout.rowLiveButtonSize)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.orange.opacity(0.1))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .help("Finding the audio helper for \(app.name)")
     }
 }
