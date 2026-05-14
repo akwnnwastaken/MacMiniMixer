@@ -61,9 +61,11 @@
 		9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */; };
 		9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */; };
 		9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */; };
+		9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */; };
 		9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */; };
 		9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */; };
 		9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */; };
+		9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -133,9 +135,11 @@
 		9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessCandidateDiscovery.swift; sourceTree = "<group>"; };
 		9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioTargetResolving.swift; sourceTree = "<group>"; };
 		9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopier.swift; sourceTree = "<group>"; };
 		9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComparableClampedTests.swift; sourceTree = "<group>"; };
 		9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayGainOptionTests.swift; sourceTree = "<group>"; };
 		9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulatorTests.swift; sourceTree = "<group>"; };
+		9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopierTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -278,6 +282,7 @@
 				9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */,
 				9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */,
 				9B7D1AA72C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift */,
+				9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */,
 				9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */,
 				9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */,
 				9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */,
@@ -331,6 +336,7 @@
 				9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */,
 				9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */,
 				9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */,
+				9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */,
 			);
 			path = MacMiniMixerTests;
 			sourceTree = "<group>";
@@ -476,6 +482,7 @@
 				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
 				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
 				9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */,
+				9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */,
 				9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */,
 				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
 				9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */,
@@ -497,6 +504,7 @@
 				9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */,
 				9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */,
 				9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */,
+				9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

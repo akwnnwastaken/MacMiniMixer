@@ -589,108 +589,20 @@ private final class ProcessTapReplayOutputQueue: @unchecked Sendable {
         format: ProcessTapReplayOutputFormat,
         gain: Float
     ) -> Bool {
-        let outputChannelCount = format.channelCount
-        guard outputChannelCount > 0 else {
-            return false
-        }
-
         let outputData = outputBuffer.pointee.mAudioData
-        let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inputData)
-        let inputBuffers = UnsafeMutableAudioBufferListPointer(mutableInputData)
-        guard !inputBuffers.isEmpty else {
-            return false
-        }
-
-        let maxFrames = Int(outputBuffer.pointee.mAudioDataBytesCapacity)
-            / (MemoryLayout<Float32>.stride * outputChannelCount)
-        guard maxFrames > 0 else {
-            return false
-        }
-
-        let frameCount = min(maxFrames, frameCount(in: inputBuffers))
-        guard frameCount > 0 else {
-            return false
-        }
-
         let outputSamples = outputData.assumingMemoryBound(to: Float32.self)
-
-        if inputBuffers.count == 1 {
-            copyInterleavedInput(
-                inputBuffers[0],
-                into: outputSamples,
-                frameCount: frameCount,
-                outputChannelCount: outputChannelCount,
-                gain: gain
-            )
-        } else {
-            copyPlanarInput(
-                inputBuffers,
-                into: outputSamples,
-                frameCount: frameCount,
-                outputChannelCount: outputChannelCount,
-                gain: gain
-            )
+        guard let result = ProcessTapOutputBufferCopier.copy(
+            inputData,
+            into: outputSamples,
+            outputByteCapacity: outputBuffer.pointee.mAudioDataBytesCapacity,
+            outputChannelCount: format.channelCount,
+            gain: gain
+        ) else {
+            return false
         }
 
-        outputBuffer.pointee.mAudioDataByteSize = UInt32(
-            frameCount * outputChannelCount * MemoryLayout<Float32>.stride
-        )
+        outputBuffer.pointee.mAudioDataByteSize = result.outputByteSize
         return true
-    }
-
-    private func frameCount(in inputBuffers: UnsafeMutableAudioBufferListPointer) -> Int {
-        if inputBuffers.count == 1 {
-            let channelCount = max(1, Int(inputBuffers[0].mNumberChannels))
-            return Int(inputBuffers[0].mDataByteSize) / (MemoryLayout<Float32>.stride * channelCount)
-        }
-
-        return inputBuffers.reduce(Int.max) { partialResult, buffer in
-            min(partialResult, Int(buffer.mDataByteSize) / MemoryLayout<Float32>.stride)
-        }
-    }
-
-    private func copyInterleavedInput(
-        _ inputBuffer: AudioBuffer,
-        into outputSamples: UnsafeMutablePointer<Float32>,
-        frameCount: Int,
-        outputChannelCount: Int,
-        gain: Float
-    ) {
-        guard let inputData = inputBuffer.mData else {
-            return
-        }
-
-        let inputChannelCount = max(1, Int(inputBuffer.mNumberChannels))
-        let inputSamples = inputData.assumingMemoryBound(to: Float32.self)
-
-        for frame in 0..<frameCount {
-            for outputChannel in 0..<outputChannelCount {
-                let inputChannel = min(outputChannel, inputChannelCount - 1)
-                outputSamples[(frame * outputChannelCount) + outputChannel] =
-                    inputSamples[(frame * inputChannelCount) + inputChannel] * gain
-            }
-        }
-    }
-
-    private func copyPlanarInput(
-        _ inputBuffers: UnsafeMutableAudioBufferListPointer,
-        into outputSamples: UnsafeMutablePointer<Float32>,
-        frameCount: Int,
-        outputChannelCount: Int,
-        gain: Float
-    ) {
-        for frame in 0..<frameCount {
-            for outputChannel in 0..<outputChannelCount {
-                let inputBuffer = inputBuffers[min(outputChannel, inputBuffers.count - 1)]
-                guard let inputData = inputBuffer.mData else {
-                    outputSamples[(frame * outputChannelCount) + outputChannel] = 0
-                    continue
-                }
-
-                let inputSamples = inputData.assumingMemoryBound(to: Float32.self)
-                outputSamples[(frame * outputChannelCount) + outputChannel] = inputSamples[frame] * gain
-            }
-        }
     }
 }
 
