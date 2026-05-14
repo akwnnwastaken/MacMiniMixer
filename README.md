@@ -253,4 +253,4 @@ Background Music and BlackHole may be studied architecturally later, but their c
 
 ## License
 
-License TBD.
+MIT License.
