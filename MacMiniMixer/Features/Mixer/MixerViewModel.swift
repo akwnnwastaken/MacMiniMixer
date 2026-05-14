@@ -812,7 +812,7 @@ final class MixerViewModel: ObservableObject {
             let result = await processTapLiveController.stopLiveControl(reason: reason)
 
             await MainActor.run {
-                if result.message == "Live control is not active" {
+                if result.outcome == .liveControlNotActive {
                     handleLiveControlStopped(result, diagnostics: processTapLiveDiagnostics)
                 }
             }
@@ -1423,7 +1423,7 @@ final class MixerViewModel: ObservableObject {
             let result = await twoAppReadinessTester.stopAll(reason: reason)
 
             await MainActor.run {
-                if result.message == "Two-app test is not running" {
+                if result.outcome == .notRunning {
                     handleTwoAppReadinessFinished(result, snapshot: twoAppReadinessSnapshot)
                 }
             }

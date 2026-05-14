@@ -26,7 +26,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
     func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
         await Task.detached(priority: .userInitiated) {
             self.stopLiveControlNow(reason: reason) ?? ProcessTapTestResult(
-                outcome: .liveControlStopped,
+                outcome: .liveControlNotActive,
                 message: "Live control is not active",
                 severity: .info
             )

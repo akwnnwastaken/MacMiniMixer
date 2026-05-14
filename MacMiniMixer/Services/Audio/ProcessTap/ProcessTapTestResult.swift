@@ -33,6 +33,7 @@ struct ProcessTapTestResult: Identifiable, Equatable, Sendable {
         case replayProbeTargetExited
         case liveControlStarting
         case liveControlStarted
+        case liveControlNotActive
         case liveControlStopped
         case liveControlTimedOut
         case liveControlOutputChanged

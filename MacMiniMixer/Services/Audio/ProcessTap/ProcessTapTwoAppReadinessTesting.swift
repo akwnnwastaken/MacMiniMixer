@@ -70,6 +70,7 @@ struct ProcessTapTwoAppReadinessResult: Equatable, Sendable {
         case idle
         case starting
         case running
+        case notRunning
         case stopped
         case timedOut
         case outputDeviceChanged
@@ -243,7 +244,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
     func stopAll(reason: ProcessTapLiveStopReason) async -> ProcessTapTwoAppReadinessResult {
         guard let run = currentRun() else {
             return ProcessTapTwoAppReadinessResult(
-                outcome: .stopped,
+                outcome: .notRunning,
                 message: "Two-app test is not running",
                 severity: .info
             )
@@ -269,7 +270,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
     private func stopAll(runID: UUID, reason: ProcessTapLiveStopReason) async -> ProcessTapTwoAppReadinessResult {
         guard let run = run(with: runID) else {
             return ProcessTapTwoAppReadinessResult(
-                outcome: .stopped,
+                outcome: .notRunning,
                 message: "Two-app test is not running",
                 severity: .info
             )

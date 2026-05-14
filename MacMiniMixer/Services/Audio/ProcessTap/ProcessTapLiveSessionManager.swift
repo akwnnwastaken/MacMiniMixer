@@ -100,14 +100,14 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         guard let controller = controller(for: id) else {
             removeSession(id)
             return ProcessTapTestResult(
-                outcome: .liveControlStopped,
+                outcome: .liveControlNotActive,
                 message: "Live control is not active",
                 severity: .info
             )
         }
 
         let result = await controller.stopLiveControl(reason: reason)
-        if result.message == "Live control is not active" {
+        if result.outcome == .liveControlNotActive {
             removeSession(id)
         }
 
@@ -170,7 +170,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
         guard let sessionID = currentCompatibilitySessionID() ?? activeSession?.id else {
             return ProcessTapTestResult(
-                outcome: .liveControlStopped,
+                outcome: .liveControlNotActive,
                 message: "Live control is not active",
                 severity: .info
             )
