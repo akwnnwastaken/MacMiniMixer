@@ -6,12 +6,15 @@ struct HelperProcessDiscoveryView: View {
     let candidates: [HelperProcessCandidate]
     let message: String?
     let isScanning: Bool
+    let isAutoDetectRunning: Bool
+    let autoDetectProgressText: String?
     let probeResultsByPID: [Int32: ProcessTapTestResult]
     let probeProgressByPID: [Int32: ProcessTapDiagnosticProgress]
     let runningProbePID: Int32?
     let advancedTarget: AdvancedProcessTapTarget?
     let selectApp: (MixerAppItem.ID) -> Void
     let scanHelpers: () -> Void
+    let autoDetectHelper: () -> Void
     let probeCandidate: (Int32) -> Void
     let useCandidateAsAdvancedTarget: (Int32) -> Void
 
@@ -46,7 +49,7 @@ struct HelperProcessDiscoveryView: View {
 
                     Spacer()
 
-                    if isScanning {
+                    if isScanning || isAutoDetectRunning {
                         ProgressView()
                             .controlSize(.mini)
                             .scaleEffect(0.58)
@@ -77,6 +80,7 @@ struct HelperProcessDiscoveryView: View {
                 )
         )
         .animation(.snappy(duration: 0.16), value: isScanning)
+        .animation(.snappy(duration: 0.16), value: isAutoDetectRunning)
         .animation(.snappy(duration: 0.16), value: candidates)
     }
 
@@ -92,8 +96,8 @@ struct HelperProcessDiscoveryView: View {
                         .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.plain)
-                .disabled(isScanning || runningProbePID != nil || selectedAppID == nil)
-                .opacity(isScanning || runningProbePID != nil || selectedAppID == nil ? 0.48 : 1)
+                .disabled(isBusy || selectedAppID == nil)
+                .opacity(isBusy || selectedAppID == nil ? 0.48 : 1)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -104,6 +108,10 @@ struct HelperProcessDiscoveryView: View {
                                 .stroke(Color.accentColor.opacity(0.17), lineWidth: 1)
                         )
                 )
+            }
+
+            if candidates.contains(where: \.isTapEligible) {
+                autoDetectButton
             }
 
             if let message {
@@ -121,6 +129,47 @@ struct HelperProcessDiscoveryView: View {
                 candidateList
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        }
+    }
+
+    private var autoDetectButton: some View {
+        HStack(spacing: 8) {
+            Button {
+                autoDetectHelper()
+            } label: {
+                Label(
+                    isAutoDetectRunning ? "Finding" : "Find audio helper",
+                    systemImage: isAutoDetectRunning ? "waveform.path.ecg" : "scope"
+                )
+                .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            .opacity(isBusy ? 0.48 : 1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.blue.opacity(0.1))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.blue.opacity(0.16), lineWidth: 1)
+                    )
+            )
+
+            if isAutoDetectRunning {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.58)
+                    .frame(width: 12, height: 12)
+
+                Text(autoDetectProgressText ?? "Testing")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
         }
     }
 
@@ -187,7 +236,7 @@ struct HelperProcessDiscoveryView: View {
             )
         }
         .menuStyle(.borderlessButton)
-        .disabled(isScanning || runningProbePID != nil || apps.isEmpty)
+        .disabled(isBusy || apps.isEmpty)
     }
 
     private func candidateRow(
@@ -221,8 +270,8 @@ struct HelperProcessDiscoveryView: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .disabled(runningProbePID != nil || isScanning)
-                    .opacity(runningProbePID == nil && !isScanning ? 1 : 0.55)
+                    .disabled(isBusy)
+                    .opacity(!isBusy ? 1 : 0.55)
                     .help("Listen briefly for audio callbacks from this helper process")
 
                     Button {
@@ -238,8 +287,8 @@ struct HelperProcessDiscoveryView: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .disabled(runningProbePID != nil || isScanning || isAdvancedTarget(candidate))
-                    .opacity(runningProbePID == nil && !isScanning ? 1 : 0.55)
+                    .disabled(isBusy || isAdvancedTarget(candidate))
+                    .opacity(!isBusy ? 1 : 0.55)
                     .help("Use this helper PID as the Advanced Process Tap Test target")
                 }
             }
@@ -385,6 +434,10 @@ struct HelperProcessDiscoveryView: View {
             CGFloat(max(0, candidates.count - 1)) * spacing
 
         return min(190, max(rowHeight, contentHeight))
+    }
+
+    private var isBusy: Bool {
+        isScanning || runningProbePID != nil || isAutoDetectRunning
     }
 
     private func formattedLevel(_ level: Double) -> String {

@@ -11,6 +11,7 @@ enum ProcessTapCandidateProbeStopReason: Sendable {
 protocol ProcessTapCandidateAudioProbing: Sendable {
     func probeAudio(
         for target: ProcessTapTarget,
+        duration: TimeInterval,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) async -> ProcessTapTestResult
 
@@ -24,10 +25,11 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
 
     func probeAudio(
         for target: ProcessTapTarget,
+        duration: TimeInterval = AppConstants.processTapDiagnosticDuration,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) async -> ProcessTapTestResult {
         await Task.detached(priority: .userInitiated) {
-            self.runProbe(for: target, onProgress: onProgress)
+            self.runProbe(for: target, duration: duration, onProgress: onProgress)
         }.value
     }
 
@@ -41,6 +43,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
 
     private func runProbe(
         for target: ProcessTapTarget,
+        duration: TimeInterval,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) -> ProcessTapTestResult {
         guard beginProbe() else {
@@ -76,6 +79,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
             return attemptProbe(
                 for: target,
                 processIdentifier: processIdentifier,
+                duration: duration,
                 onProgress: onProgress
             )
         } else {
@@ -92,6 +96,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
     private func attemptProbe(
         for target: ProcessTapTarget,
         processIdentifier: Int32,
+        duration: TimeInterval,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) -> ProcessTapTestResult {
         let pid = pid_t(processIdentifier)
@@ -187,7 +192,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         if let stopReason = publishProgress(
             from: accumulator,
             targetPID: pid,
-            duration: AppConstants.processTapDiagnosticDuration,
+            duration: duration,
             onProgress: onProgress
         ) {
             let cleanupErrors = resources.cleanup()
@@ -209,7 +214,7 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
             return cleanupWarningResult(cleanupErrors)
         }
 
-        return diagnosticResult(for: target, snapshot: snapshot)
+        return diagnosticResult(for: target, snapshot: snapshot, duration: duration)
     }
 
     private func beginProbe() -> Bool {
@@ -313,13 +318,14 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
 
     private func diagnosticResult(
         for target: ProcessTapTarget,
-        snapshot: HelperProbeDiagnosticsSnapshot
+        snapshot: HelperProbeDiagnosticsSnapshot,
+        duration: TimeInterval
     ) -> ProcessTapTestResult {
         guard snapshot.callbackCount > 0 else {
             return ProcessTapTestResult(
                 outcome: .streamDiagnosticsNoCallbacks,
                 message: "Tap created but no callbacks received",
-                detail: "Listened for \(formattedDuration). No audio was saved or modified.",
+                detail: "Listened for \(formattedDuration(duration)). No audio was saved or modified.",
                 severity: .warning
             )
         }
@@ -352,8 +358,8 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         )
     }
 
-    private var formattedDuration: String {
-        String(format: "%.1fs", AppConstants.processTapDiagnosticDuration)
+    private func formattedDuration(_ duration: TimeInterval) -> String {
+        String(format: "%.1fs", duration)
     }
 
     private func formatLevel(_ value: Double) -> String {

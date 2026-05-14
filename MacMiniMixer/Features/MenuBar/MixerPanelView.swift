@@ -359,12 +359,15 @@ struct MixerPanelView: View {
                         candidates: viewModel.helperProcessCandidates,
                         message: viewModel.helperProcessDiscoveryMessage,
                         isScanning: viewModel.isHelperProcessDiscoveryScanning,
+                        isAutoDetectRunning: viewModel.isHelperProcessAutoDetectRunning,
+                        autoDetectProgressText: viewModel.helperProcessAutoDetectProgressText,
                         probeResultsByPID: viewModel.helperProcessProbeResultsByPID,
                         probeProgressByPID: viewModel.helperProcessProbeProgressByPID,
                         runningProbePID: viewModel.helperProcessProbeRunningPID,
                         advancedTarget: viewModel.advancedProcessTapTarget,
                         selectApp: viewModel.selectHelperDiscoveryApp,
                         scanHelpers: viewModel.scanHelperProcesses,
+                        autoDetectHelper: viewModel.autoDetectHelperProcessCandidate,
                         probeCandidate: viewModel.probeHelperProcessCandidate,
                         useCandidateAsAdvancedTarget: viewModel.useHelperCandidateAsAdvancedTarget
                     )

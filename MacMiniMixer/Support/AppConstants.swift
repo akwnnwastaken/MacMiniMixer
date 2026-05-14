@@ -7,6 +7,7 @@ enum AppConstants {
     static let systemVolumeRefreshInterval: TimeInterval = 1
     static let statusMessageAutoClearDelay: TimeInterval = 2.5
     static let processTapDiagnosticDuration: TimeInterval = 2.5
+    static let processTapHelperAutoDetectDuration: TimeInterval = 1.25
     static let processTapReplayProbeDuration: TimeInterval = 2.5
     static let processTapLiveControlMaxDuration: TimeInterval = 60
     static let processTapTwoAppReadinessDuration: TimeInterval = 10
