@@ -47,3 +47,13 @@ struct HelperProcessAutoDetectScore: Comparable {
         return lhs.progress.callbackCount < rhs.progress.callbackCount
     }
 }
+
+extension MixerAppItem {
+    var helperProcessDiscoveryTarget: HelperProcessDiscoveryTarget {
+        HelperProcessDiscoveryTarget(
+            id: id,
+            name: name,
+            processIdentifier: processIdentifier
+        )
+    }
+}

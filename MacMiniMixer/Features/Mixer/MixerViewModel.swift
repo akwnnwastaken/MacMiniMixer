@@ -36,13 +36,6 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var twoAppReadinessSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
     @Published private(set) var twoAppReadinessResult: ProcessTapTwoAppReadinessResult?
     @Published private(set) var isTwoAppReadinessRunning = false
-    @Published private(set) var selectedHelperDiscoveryAppID: MixerAppItem.ID?
-    @Published private(set) var helperProcessCandidates: [HelperProcessCandidate] = []
-    @Published private(set) var helperProcessDiscoveryMessage: String?
-    @Published private(set) var isHelperProcessDiscoveryScanning = false
-    @Published private(set) var helperProcessProbeResultsByPID: [Int32: ProcessTapTestResult] = [:]
-    @Published private(set) var helperProcessProbeProgressByPID: [Int32: ProcessTapDiagnosticProgress] = [:]
-    @Published private(set) var helperProcessProbeRunningPID: Int32?
     @Published private(set) var isHelperProcessAutoDetectRunning = false
     @Published private(set) var helperProcessAutoDetectProgressText: String?
     @Published private(set) var advancedProcessTapTarget: AdvancedProcessTapTarget?
@@ -63,8 +56,8 @@ final class MixerViewModel: ObservableObject {
     private let processTapLiveController: ProcessTapLiveControlling
     private let twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
+    private let advancedHelperDiscovery: AdvancedHelperDiscoveryCoordinator
     private let appAudioTargetResolver: AppAudioTargetResolving
-    private let processLister: ProcessListing
     private var lastNonZeroSystemVolume: Double
     private var lastSliderVolumeSetSucceeded: Bool?
     private var isProcessTapReplayProbeRunning = false
@@ -100,11 +93,15 @@ final class MixerViewModel: ObservableObject {
         self.twoAppReadinessTester = twoAppReadinessTester
         self.helperProcessAudioProbe = helperProcessAudioProbe
         self.appAudioTargetResolver = appAudioTargetResolver
-        self.processLister = processLister
 
         let initialSystemVolume = audioController.systemVolume.clamped(to: AppConstants.volumeRange)
         let initialApps = applicationLister.listApplications()
         let initialTwoAppReadinessEligibility = Self.twoAppReadinessEligibility(for: initialApps)
+        self.advancedHelperDiscovery = AdvancedHelperDiscoveryCoordinator(
+            processLister: processLister,
+            helperProcessAudioProbe: helperProcessAudioProbe,
+            initialApps: initialApps
+        )
         self.systemVolume = initialSystemVolume
         self.isSystemOutputMuted = initialSystemVolume <= AppConstants.volumeRange.lowerBound
         self.lastNonZeroSystemVolume = initialSystemVolume > AppConstants.volumeRange.lowerBound
@@ -112,7 +109,6 @@ final class MixerViewModel: ObservableObject {
             : AppConstants.defaultSystemOutputRestoreVolume
         self.apps = initialApps
         self.selectedProcessTapAppID = Self.preferredProcessTapAppID(in: initialApps)
-        self.selectedHelperDiscoveryAppID = Self.preferredHelperDiscoveryAppID(in: initialApps)
         self.selectedProcessTapReplayGain = .defaultOption
         self.twoAppReadinessEligibilityByAppID = initialTwoAppReadinessEligibility
         self.selectedTwoAppReadinessAppAID = Self.preferredTwoAppReadinessAppIDs(
@@ -128,6 +124,10 @@ final class MixerViewModel: ObservableObject {
         let listedOutputDevices = outputDeviceLister.listOutputDevices()
         self.outputDevices = listedOutputDevices
         self.selectedOutputDeviceID = Self.preferredOutputDeviceID(in: listedOutputDevices)
+
+        advancedHelperDiscovery.setOnWillChange { [weak self] in
+            self?.objectWillChange.send()
+        }
 
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -157,6 +157,34 @@ final class MixerViewModel: ObservableObject {
 
     var selectedOutputDeviceName: String {
         outputDevices.first { $0.id == selectedOutputDeviceID }?.name ?? "Output"
+    }
+
+    var selectedHelperDiscoveryAppID: MixerAppItem.ID? {
+        advancedHelperDiscovery.selectedAppID
+    }
+
+    var helperProcessCandidates: [HelperProcessCandidate] {
+        advancedHelperDiscovery.candidates
+    }
+
+    var helperProcessDiscoveryMessage: String? {
+        advancedHelperDiscovery.message
+    }
+
+    var isHelperProcessDiscoveryScanning: Bool {
+        advancedHelperDiscovery.isScanning
+    }
+
+    var helperProcessProbeResultsByPID: [Int32: ProcessTapTestResult] {
+        advancedHelperDiscovery.probeResultsByPID
+    }
+
+    var helperProcessProbeProgressByPID: [Int32: ProcessTapDiagnosticProgress] {
+        advancedHelperDiscovery.probeProgressByPID
+    }
+
+    var helperProcessProbeRunningPID: Int32? {
+        advancedHelperDiscovery.runningProbePID
     }
 
     var visibleMixerApps: [MixerAppItem] {
@@ -399,70 +427,20 @@ final class MixerViewModel: ObservableObject {
     }
 
     func selectHelperDiscoveryApp(_ appID: MixerAppItem.ID) {
-        guard !isHelperProcessDiscoveryScanning,
-              helperProcessProbeRunningPID == nil,
-              !isHelperProcessAutoDetectRunning,
-              !isAppAudioTargetResolving,
-              apps.contains(where: { $0.id == appID }) else {
-            return
-        }
-
-        selectedHelperDiscoveryAppID = appID
-        helperProcessCandidates = []
-        helperProcessDiscoveryMessage = nil
-        helperProcessProbeResultsByPID = [:]
-        helperProcessProbeProgressByPID = [:]
+        advancedHelperDiscovery.selectApp(
+            appID,
+            apps: apps,
+            isAutoDetectRunning: isHelperProcessAutoDetectRunning,
+            isAppAudioTargetResolving: isAppAudioTargetResolving
+        )
     }
 
     func scanHelperProcesses() {
-        guard !isHelperProcessDiscoveryScanning,
-              helperProcessProbeRunningPID == nil,
-              !isHelperProcessAutoDetectRunning,
-              !isAppAudioTargetResolving else {
-            return
-        }
-
-        guard let app = selectedHelperDiscoveryApp else {
-            helperProcessDiscoveryMessage = "Select a visible app"
-            helperProcessCandidates = []
-            return
-        }
-
-        isHelperProcessDiscoveryScanning = true
-        helperProcessDiscoveryMessage = nil
-        helperProcessCandidates = []
-        helperProcessProbeResultsByPID = [:]
-        helperProcessProbeProgressByPID = [:]
-
-        let processLister = processLister
-        Task {
-            let processes = await Task.detached(priority: .userInitiated) {
-                processLister.listProcesses()
-            }.value
-            let candidates = HelperProcessCandidateDiscovery.candidates(
-                for: app.helperProcessDiscoveryTarget,
-                processes: processes
-            )
-            let eligibleCount = candidates.filter(\.isTapEligible).count
-
-            await MainActor.run {
-                guard self.selectedHelperDiscoveryAppID == app.id else {
-                    self.isHelperProcessDiscoveryScanning = false
-                    return
-                }
-
-                self.helperProcessCandidates = candidates
-                self.isHelperProcessDiscoveryScanning = false
-
-                if candidates.isEmpty {
-                    self.helperProcessDiscoveryMessage = "No related helper candidates found"
-                } else if eligibleCount == 0 {
-                    self.helperProcessDiscoveryMessage = "No tap-eligible helper processes found"
-                } else {
-                    self.helperProcessDiscoveryMessage = "\(eligibleCount) tap-eligible candidate\(eligibleCount == 1 ? "" : "s")"
-                }
-            }
-        }
+        advancedHelperDiscovery.scanHelperProcesses(
+            apps: apps,
+            isAutoDetectRunning: isHelperProcessAutoDetectRunning,
+            isAppAudioTargetResolving: isAppAudioTargetResolving
+        )
     }
 
     func useHelperCandidateAsAdvancedTarget(_ processIdentifier: Int32) {
@@ -516,62 +494,11 @@ final class MixerViewModel: ObservableObject {
     }
 
     func probeHelperProcessCandidate(_ processIdentifier: Int32) {
-        guard helperProcessProbeRunningPID == nil,
-              !isHelperProcessAutoDetectRunning,
-              !isAppAudioTargetResolving else {
-            return
-        }
-
-        guard let candidate = helperProcessCandidates.first(where: { $0.id == processIdentifier }),
-              candidate.isTapEligible else {
-            helperProcessProbeResultsByPID[processIdentifier] = ProcessTapTestResult(
-                outcome: .processNotFound,
-                message: "Core Audio process unavailable",
-                severity: .warning
-            )
-            return
-        }
-
-        let target = ProcessTapTarget(
-            appID: "process:\(candidate.process.processIdentifier)",
-            appName: candidate.process.name,
-            processIdentifier: candidate.process.processIdentifier
+        advancedHelperDiscovery.probeHelperProcessCandidate(
+            processIdentifier,
+            isAutoDetectRunning: isHelperProcessAutoDetectRunning,
+            isAppAudioTargetResolving: isAppAudioTargetResolving
         )
-        let initialProgress = ProcessTapDiagnosticProgress(
-            callbackCount: 0,
-            peakLevel: 0,
-            rmsLevel: 0,
-            audioDetected: false
-        )
-
-        helperProcessProbeRunningPID = processIdentifier
-        helperProcessProbeProgressByPID[processIdentifier] = initialProgress
-        helperProcessProbeResultsByPID[processIdentifier] = ProcessTapTestResult(
-            outcome: .helperProbeRunning,
-            message: "Probing...",
-            detail: "Listening briefly. No audio will be replayed, saved, or modified.",
-            severity: .info
-        )
-
-        Task {
-            let result = await helperProcessAudioProbe.probeAudio(
-                for: target,
-                duration: AppConstants.processTapDiagnosticDuration
-            ) { progress in
-                Task { @MainActor in
-                    guard self.helperProcessProbeRunningPID == processIdentifier else {
-                        return
-                    }
-
-                    self.helperProcessProbeProgressByPID[processIdentifier] = progress
-                }
-            }
-
-            await MainActor.run {
-                self.helperProcessProbeResultsByPID[processIdentifier] = result
-                self.helperProcessProbeRunningPID = nil
-            }
-        }
     }
 
     func autoDetectHelperProcessCandidate() {
@@ -584,18 +511,18 @@ final class MixerViewModel: ObservableObject {
 
         let eligibleCandidates = helperProcessCandidates.filter(\.isTapEligible)
         guard !eligibleCandidates.isEmpty else {
-            helperProcessDiscoveryMessage = "No tap-eligible helper processes found"
+            advancedHelperDiscovery.setMessage("No tap-eligible helper processes found")
             return
         }
 
         guard selectedHelperDiscoveryApp != nil else {
-            helperProcessDiscoveryMessage = "Select a visible app"
+            advancedHelperDiscovery.setMessage("Select a visible app")
             return
         }
 
         isHelperProcessAutoDetectRunning = true
         helperProcessAutoDetectProgressText = "Testing 1/\(eligibleCandidates.count)"
-        helperProcessDiscoveryMessage = "Testing 1/\(eligibleCandidates.count)"
+        advancedHelperDiscovery.setMessage("Testing 1/\(eligibleCandidates.count)")
         AppLogger.helperResolution.info("Advanced helper auto-detect started candidates=\(eligibleCandidates.count, privacy: .public)")
 
         helperProcessAutoDetectTask?.cancel()
@@ -783,12 +710,11 @@ final class MixerViewModel: ObservableObject {
         appAudioResolutionTask?.cancel()
         appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
         appAudioTargetResolver.invalidateAllCachedTargets()
-        helperProcessAudioProbe.stopCurrentProbe(reason: .userStopped)
+        advancedHelperDiscovery.stopProbe(reason: .userStopped)
         processTapReplayProbe.stopCurrentReplayProbe(reason: .userStopped)
         isProcessTapLiveControlActive = false
         isProcessTapTesting = false
         isProcessTapReplayProbeRunning = false
-        helperProcessProbeRunningPID = nil
         isHelperProcessAutoDetectRunning = false
         helperProcessAutoDetectProgressText = nil
         appAudioResolutionStateByAppID = [:]
@@ -1421,7 +1347,7 @@ final class MixerViewModel: ObservableObject {
             stopHelperProcessAutoDetect(reason: reason)
         }
 
-        helperProcessAudioProbe.stopCurrentProbe(reason: reason)
+        advancedHelperDiscovery.stopProbe(reason: reason)
     }
 
     private func stopHelperProcessAutoDetect(reason: ProcessTapCandidateProbeStopReason) {
@@ -1459,7 +1385,7 @@ final class MixerViewModel: ObservableObject {
 
             let progressText = "Testing \(index + 1)/\(candidates.count)"
             helperProcessAutoDetectProgressText = progressText
-            helperProcessDiscoveryMessage = progressText
+            advancedHelperDiscovery.setMessage(progressText)
 
             let processIdentifier = candidate.process.processIdentifier
             let target = ProcessTapTarget(
@@ -1474,13 +1400,15 @@ final class MixerViewModel: ObservableObject {
                 audioDetected: false
             )
 
-            helperProcessProbeRunningPID = processIdentifier
-            helperProcessProbeProgressByPID[processIdentifier] = initialProgress
-            helperProcessProbeResultsByPID[processIdentifier] = ProcessTapTestResult(
-                outcome: .helperProbeRunning,
-                message: "Auto-detecting...",
-                detail: "Listening briefly. No audio will be replayed, saved, or modified.",
-                severity: .info
+            advancedHelperDiscovery.beginProbe(
+                processIdentifier,
+                progress: initialProgress,
+                result: ProcessTapTestResult(
+                    outcome: .helperProbeRunning,
+                    message: "Auto-detecting...",
+                    detail: "Listening briefly. No audio will be replayed, saved, or modified.",
+                    severity: .info
+                )
             )
 
             let result = await helperProcessAudioProbe.probeAudio(
@@ -1493,13 +1421,12 @@ final class MixerViewModel: ObservableObject {
                         return
                     }
 
-                    self.helperProcessProbeProgressByPID[processIdentifier] = progress
+                    self.advancedHelperDiscovery.updateProbeProgress(processIdentifier, progress: progress)
                 }
             }
 
             let finalProgress = helperProcessProbeProgressByPID[processIdentifier] ?? initialProgress
-            helperProcessProbeResultsByPID[processIdentifier] = result
-            helperProcessProbeRunningPID = nil
+            advancedHelperDiscovery.finishProbe(processIdentifier, result: result)
 
             if result.outcome == .helperProbeTargetExited ||
                 result.outcome == .helperProbeOutputChanged ||
@@ -1535,25 +1462,24 @@ final class MixerViewModel: ObservableObject {
         wasCancelled: Bool
     ) {
         helperProcessAutoDetectTask = nil
-        helperProcessProbeRunningPID = nil
         isHelperProcessAutoDetectRunning = false
         helperProcessAutoDetectProgressText = nil
 
         guard !wasCancelled else {
-            helperProcessDiscoveryMessage = "Auto-detect stopped"
+            advancedHelperDiscovery.setMessage("Auto-detect stopped")
             AppLogger.helperResolution.info("Advanced helper auto-detect stopped")
             return
         }
 
         guard let bestScore,
               bestScore.hasDetectedAudio else {
-            helperProcessDiscoveryMessage = "No audio helper detected"
+            advancedHelperDiscovery.setMessage("No audio helper detected")
             AppLogger.helperResolution.info("Advanced helper auto-detect found no audio helper")
             return
         }
 
         useHelperCandidateAsAdvancedTarget(bestScore.processIdentifier)
-        helperProcessDiscoveryMessage = "Selected audio helper"
+        advancedHelperDiscovery.setMessage("Selected audio helper")
         AppLogger.helperResolution.info("Advanced helper auto-detect selected helperPID=\(bestScore.processIdentifier, privacy: .public) rms=\(bestScore.progress.rmsLevel, privacy: .public) peak=\(bestScore.progress.peakLevel, privacy: .public)")
     }
 
@@ -1611,18 +1537,11 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func refreshHelperDiscoverySelectionAfterAppRefresh() {
-        let appIDs = Set(apps.map(\.id))
-
-        guard selectedHelperDiscoveryAppID.map({ appIDs.contains($0) }) != true else {
-            return
+        if selectedHelperDiscoveryAppID.map({ appID in apps.contains { $0.id == appID } }) != true {
+            stopHelperProcessAutoDetect(reason: .targetExited)
         }
 
-        stopHelperProcessAutoDetect(reason: .targetExited)
-        selectedHelperDiscoveryAppID = Self.preferredHelperDiscoveryAppID(in: apps)
-        helperProcessCandidates = []
-        helperProcessDiscoveryMessage = nil
-        helperProcessProbeResultsByPID = [:]
-        helperProcessProbeProgressByPID = [:]
+        advancedHelperDiscovery.refreshSelectionAfterAppRefresh(apps: apps)
     }
 
     private func invalidateCachedAudioTargetsForRemovedOrChangedApps(
@@ -1685,12 +1604,6 @@ final class MixerViewModel: ObservableObject {
 
     private static func preferredProcessTapAppID(in apps: [MixerAppItem]) -> MixerAppItem.ID? {
         apps.first { $0.isEligibleForExperimentalLiveControl }?.id ?? apps.first?.id
-    }
-
-    private static func preferredHelperDiscoveryAppID(in apps: [MixerAppItem]) -> MixerAppItem.ID? {
-        apps.first { app in
-            HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget)
-        }?.id ?? apps.first?.id
     }
 
     private static func preferredTwoAppReadinessAppIDs(
@@ -1813,11 +1726,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     private var selectedHelperDiscoveryApp: MixerAppItem? {
-        guard let selectedHelperDiscoveryAppID else {
-            return nil
-        }
-
-        return apps.first { $0.id == selectedHelperDiscoveryAppID }
+        advancedHelperDiscovery.selectedHelperDiscoveryApp(in: apps)
     }
 
     private var isAppAudioTargetResolving: Bool {
@@ -1893,14 +1802,6 @@ private extension MixerAppItem {
         AppAudioTargetRequest(
             appID: id,
             appName: name,
-            processIdentifier: processIdentifier
-        )
-    }
-
-    var helperProcessDiscoveryTarget: HelperProcessDiscoveryTarget {
-        HelperProcessDiscoveryTarget(
-            id: id,
-            name: name,
             processIdentifier: processIdentifier
         )
     }
