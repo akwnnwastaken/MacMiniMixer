@@ -13,6 +13,7 @@
 		9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */; };
 		9B7D1AD92C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */; };
 		9B7D1ADB2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1ADA2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift */; };
+		9B7D1ADE2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */; };
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
@@ -73,6 +74,7 @@
 		9B7D1AD52C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD42C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift */; };
 		9B7D1AD72C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD62C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift */; };
 		9B7D1ADD2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1ADC2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift */; };
+		9B7D1AE02C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE12C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +95,7 @@
 		9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModel.swift; sourceTree = "<group>"; };
 		9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryState.swift; sourceTree = "<group>"; };
 		9B7D1ADA2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryCoordinator.swift; sourceTree = "<group>"; };
+		9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemOutputCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
@@ -154,6 +157,7 @@
 		9B7D1AD42C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapPermissionMessageTests.swift; sourceTree = "<group>"; };
 		9B7D1AD62C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManagerTests.swift; sourceTree = "<group>"; };
 		9B7D1ADC2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryCoordinatorTests.swift; sourceTree = "<group>"; };
+		9B7D1AE12C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemOutputCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -261,6 +265,7 @@
 				9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */,
 				9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */,
 				9B7D1ADA2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift */,
+				9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */,
 				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
 				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
 				9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */,
@@ -358,6 +363,7 @@
 				9B7D1AD42C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift */,
 				9B7D1AD62C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift */,
 				9B7D1ADC2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift */,
+				9B7D1AE12C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift */,
 			);
 			path = MacMiniMixerTests;
 			sourceTree = "<group>";
@@ -466,6 +472,7 @@
 				9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */,
 				9B7D1AD92C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift in Sources */,
 				9B7D1ADB2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift in Sources */,
+				9B7D1ADE2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
@@ -533,6 +540,7 @@
 				9B7D1AD52C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift in Sources */,
 				9B7D1AD72C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift in Sources */,
 				9B7D1ADD2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift in Sources */,
+				9B7D1AE02C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

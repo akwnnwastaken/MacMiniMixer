@@ -16,11 +16,7 @@ struct TwoAppReadinessTargetOption: Identifiable, Equatable, Sendable {
 
 @MainActor
 final class MixerViewModel: ObservableObject {
-    @Published private(set) var systemVolume: Double
     @Published private(set) var apps: [MixerAppItem]
-    @Published private(set) var outputDevices: [OutputDeviceItem]
-    @Published private(set) var selectedOutputDeviceID: OutputDeviceItem.ID
-    @Published private(set) var isSystemOutputMuted: Bool
     @Published private(set) var statusMessage: MixerStatusMessage?
     @Published private(set) var selectedProcessTapAppID: MixerAppItem.ID?
     @Published private(set) var processTapTestResult: ProcessTapTestResult?
@@ -44,10 +40,7 @@ final class MixerViewModel: ObservableObject {
 
     private let applicationLister: ApplicationListing
     private let audioController: AudioControlling
-    private let outputDeviceLister: OutputDeviceListing
-    private let outputDeviceController: OutputDeviceControlling
-    private let systemVolumeReader: SystemVolumeReading
-    private let systemVolumeController: SystemVolumeControlling
+    private let systemOutput: SystemOutputCoordinator
     private let processTapTester: ProcessTapTesting
     private let processTapReplayProbe: ProcessTapReplayProbing
     private let processTapLiveController: ProcessTapLiveControlling
@@ -55,8 +48,6 @@ final class MixerViewModel: ObservableObject {
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
     private let advancedHelperDiscovery: AdvancedHelperDiscoveryCoordinator
     private let appAudioTargetResolver: AppAudioTargetResolving
-    private var lastNonZeroSystemVolume: Double
-    private var lastSliderVolumeSetSucceeded: Bool?
     private var isProcessTapReplayProbeRunning = false
     private var appAudioResolutionTask: Task<Void, Never>?
     private var statusClearTask: Task<Void, Never>?
@@ -79,10 +70,6 @@ final class MixerViewModel: ObservableObject {
     ) {
         self.applicationLister = applicationLister
         self.audioController = audioController
-        self.outputDeviceLister = outputDeviceLister
-        self.outputDeviceController = outputDeviceController
-        self.systemVolumeReader = systemVolumeReader
-        self.systemVolumeController = systemVolumeController
         self.processTapTester = processTapTester
         self.processTapReplayProbe = processTapReplayProbe
         self.processTapLiveController = processTapLiveController
@@ -90,19 +77,20 @@ final class MixerViewModel: ObservableObject {
         self.helperProcessAudioProbe = helperProcessAudioProbe
         self.appAudioTargetResolver = appAudioTargetResolver
 
-        let initialSystemVolume = audioController.systemVolume.clamped(to: AppConstants.volumeRange)
         let initialApps = applicationLister.listApplications()
         let initialTwoAppReadinessEligibility = Self.twoAppReadinessEligibility(for: initialApps)
+        self.systemOutput = SystemOutputCoordinator(
+            audioController: audioController,
+            outputDeviceLister: outputDeviceLister,
+            outputDeviceController: outputDeviceController,
+            systemVolumeReader: systemVolumeReader,
+            systemVolumeController: systemVolumeController
+        )
         self.advancedHelperDiscovery = AdvancedHelperDiscoveryCoordinator(
             processLister: processLister,
             helperProcessAudioProbe: helperProcessAudioProbe,
             initialApps: initialApps
         )
-        self.systemVolume = initialSystemVolume
-        self.isSystemOutputMuted = initialSystemVolume <= AppConstants.volumeRange.lowerBound
-        self.lastNonZeroSystemVolume = initialSystemVolume > AppConstants.volumeRange.lowerBound
-            ? initialSystemVolume
-            : AppConstants.defaultSystemOutputRestoreVolume
         self.apps = initialApps
         self.selectedProcessTapAppID = Self.preferredProcessTapAppID(in: initialApps)
         self.selectedProcessTapReplayGain = .defaultOption
@@ -117,10 +105,9 @@ final class MixerViewModel: ObservableObject {
         ).appBID
         self.selectedTwoAppReadinessGain = .defaultOption
 
-        let listedOutputDevices = outputDeviceLister.listOutputDevices()
-        self.outputDevices = listedOutputDevices
-        self.selectedOutputDeviceID = Self.preferredOutputDeviceID(in: listedOutputDevices)
-
+        systemOutput.setOnWillChange { [weak self] in
+            self?.objectWillChange.send()
+        }
         advancedHelperDiscovery.setOnWillChange { [weak self] in
             self?.objectWillChange.send()
         }
@@ -155,8 +142,24 @@ final class MixerViewModel: ObservableObject {
         processTapReplayProbe.stopCurrentReplayProbe(reason: .userStopped)
     }
 
+    var systemVolume: Double {
+        systemOutput.systemVolume
+    }
+
+    var outputDevices: [OutputDeviceItem] {
+        systemOutput.outputDevices
+    }
+
+    var selectedOutputDeviceID: OutputDeviceItem.ID {
+        systemOutput.selectedOutputDeviceID
+    }
+
+    var isSystemOutputMuted: Bool {
+        systemOutput.isSystemOutputMuted
+    }
+
     var selectedOutputDeviceName: String {
-        outputDevices.first { $0.id == selectedOutputDeviceID }?.name ?? "Output"
+        systemOutput.selectedOutputDeviceName
     }
 
     var selectedHelperDiscoveryAppID: MixerAppItem.ID? {
@@ -281,116 +284,74 @@ final class MixerViewModel: ObservableObject {
     }
 
     func setSystemVolume(_ volume: Double) {
-        lastSliderVolumeSetSucceeded = applyRequestedSystemVolume(volume)
+        systemOutput.setSystemVolume(volume)
     }
 
     func finishSystemVolumeEditing() {
-        defer {
-            lastSliderVolumeSetSucceeded = nil
-            refreshSystemOutputVolume()
-        }
-
-        guard let didUpdateVolume = lastSliderVolumeSetSucceeded else {
-            return
-        }
-
-        if !didUpdateVolume {
-            showStatus("This device does not expose writable volume", style: .warning)
+        if let message = systemOutput.finishSystemVolumeEditing() {
+            showStatus(message, style: .warning)
         }
     }
 
     func toggleSystemOutputMuted() {
-        let willRestoreOutput = isSystemOutputMuted || systemVolume <= AppConstants.volumeRange.lowerBound
-        let targetVolume: Double
-
-        if willRestoreOutput {
-            targetVolume = restoredSystemOutputVolume
-        } else {
-            rememberNonZeroSystemVolume(systemVolume)
-            targetVolume = AppConstants.volumeRange.lowerBound
-        }
-
-        if !applyRequestedSystemVolume(targetVolume) {
-            showStatus(
-                willRestoreOutput ? "Could not restore system output" : "Could not mute system output",
-                style: .warning
-            )
-            refreshSystemOutputVolume()
+        if let message = systemOutput.toggleSystemOutputMuted() {
+            showStatus(message, style: .warning)
         }
     }
 
     func selectOutputDevice(_ deviceID: OutputDeviceItem.ID) {
-        guard let device = outputDevices.first(where: { $0.id == deviceID }) else {
+        switch systemOutput.selectOutputDevice(deviceID) {
+        case .selected:
+            refreshOutputDevices()
+            refreshSystemOutputVolume()
+        case .failed(let message):
+            showStatus(message, style: .warning)
+        case .notFound:
             return
         }
-
-        let previousDeviceID = selectedOutputDeviceID
-        selectedOutputDeviceID = deviceID
-
-        guard outputDeviceController.setDefaultOutputDevice(device) else {
-            selectedOutputDeviceID = previousDeviceID
-            showStatus("Could not switch output device", style: .warning)
-            return
-        }
-
-        refreshOutputDevices()
-        refreshSystemOutputVolume()
     }
 
     func refreshOutputDevices() {
-        let previousDeviceID = selectedOutputDeviceID
-        let previousDefaultDeviceID = outputDevices.first { $0.isSystemDefault }?.id
-        let refreshedDevices = outputDeviceLister.listOutputDevices()
-
-        outputDevices = refreshedDevices
-        let didSelectionChange = syncSelectedOutputDeviceWithDefault(fallbackDeviceID: previousDeviceID)
-        let refreshedDefaultDeviceID = refreshedDevices.first { $0.isSystemDefault }?.id
+        let refreshResult = systemOutput.refreshOutputDevices()
 
         if isProcessTapLiveControlActive,
-           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
-            AppLogger.audio.warning("Output device change stopping live control previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
+           refreshResult.didOutputDeviceChange {
+            AppLogger.audio.warning("Output device change stopping live control previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
             stopProcessTapLiveControl(reason: .outputDeviceChanged)
         }
 
         if isTwoAppReadinessRunning,
-           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
-            AppLogger.audio.warning("Output device change stopping two-app readiness previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
+           refreshResult.didOutputDeviceChange {
+            AppLogger.audio.warning("Output device change stopping two-app readiness previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
             stopTwoAppReadiness(reason: .outputDeviceChanged)
         }
 
         if (helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning),
-           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
-            AppLogger.audio.warning("Output device change stopping helper probe previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
+           refreshResult.didOutputDeviceChange {
+            AppLogger.audio.warning("Output device change stopping helper probe previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
             stopHelperProcessProbe(reason: .outputDeviceChanged)
         }
 
         if isAppAudioTargetResolving,
-           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
-            AppLogger.audio.warning("Output device change cancelling app audio resolution previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
+           refreshResult.didOutputDeviceChange {
+            AppLogger.audio.warning("Output device change cancelling app audio resolution previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
             cancelAppAudioTargetResolution(reason: .outputDeviceChanged)
         }
 
         if isProcessTapReplayProbeRunning,
-           didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
-            AppLogger.audio.warning("Output device change stopping replay probe previousDefault=\(previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshedDefaultDeviceID ?? "none", privacy: .public)")
+           refreshResult.didOutputDeviceChange {
+            AppLogger.audio.warning("Output device change stopping replay probe previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
             processTapReplayProbe.stopCurrentReplayProbe(reason: .outputDeviceChanged)
         }
 
-        if didSelectionChange || refreshedDefaultDeviceID != previousDefaultDeviceID {
+        if refreshResult.didOutputDeviceChange {
             appAudioTargetResolver.invalidateAllCachedTargets()
             refreshSystemOutputVolume()
         }
     }
 
     func refreshSystemOutputVolume() {
-        guard let volumeScalar = systemVolumeReader.readCurrentOutputVolumeScalar() else {
-            return
-        }
-
-        let refreshedVolume = (volumeScalar * AppConstants.volumeRange.upperBound)
-            .clamped(to: AppConstants.volumeRange)
-
-        applySystemVolume(refreshedVolume)
+        systemOutput.refreshSystemOutputVolume()
     }
 
     func selectProcessTapApp(_ appID: MixerAppItem.ID) {
@@ -1187,10 +1148,6 @@ final class MixerViewModel: ObservableObject {
         }
     }
 
-    private static func preferredOutputDeviceID(in devices: [OutputDeviceItem]) -> OutputDeviceItem.ID {
-        devices.first { $0.isSystemDefault }?.id ?? devices.first?.id ?? "output:none"
-    }
-
     private func handleLiveControlStopped(
         _ result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
@@ -1429,22 +1386,6 @@ final class MixerViewModel: ObservableObject {
         )
     }
 
-    @discardableResult
-    private func syncSelectedOutputDeviceWithDefault(fallbackDeviceID: OutputDeviceItem.ID?) -> Bool {
-        let previousSelectedDeviceID = selectedOutputDeviceID
-
-        if let defaultDevice = outputDevices.first(where: { $0.isSystemDefault }) {
-            selectedOutputDeviceID = defaultDevice.id
-        } else if let fallbackDeviceID,
-                  outputDevices.contains(where: { $0.id == fallbackDeviceID }) {
-            selectedOutputDeviceID = fallbackDeviceID
-        } else {
-            selectedOutputDeviceID = Self.preferredOutputDeviceID(in: outputDevices)
-        }
-
-        return selectedOutputDeviceID != previousSelectedDeviceID
-    }
-
     private static func preferredProcessTapAppID(in apps: [MixerAppItem]) -> MixerAppItem.ID? {
         apps.first { $0.isEligibleForExperimentalLiveControl }?.id ?? apps.first?.id
     }
@@ -1576,20 +1517,6 @@ final class MixerViewModel: ObservableObject {
         !appAudioResolutionStateByAppID.isEmpty
     }
 
-    private func applyRequestedSystemVolume(_ volume: Double) -> Bool {
-        let clampedVolume = volume.clamped(to: AppConstants.volumeRange)
-        let volumeScalar = clampedVolume / AppConstants.volumeRange.upperBound
-
-        applySystemVolume(clampedVolume)
-
-        let didSetVolume = systemVolumeController.setCurrentOutputVolumeScalar(volumeScalar)
-        if didSetVolume {
-            audioController.setSystemVolume(clampedVolume)
-        }
-
-        return didSetVolume
-    }
-
     private func showStatus(_ text: String, style: MixerStatusMessage.Style) {
         let message = MixerStatusMessage(text: text, style: style)
         statusMessage = message
@@ -1613,31 +1540,6 @@ final class MixerViewModel: ObservableObject {
         }
     }
 
-    private var restoredSystemOutputVolume: Double {
-        let restoredVolume = lastNonZeroSystemVolume.clamped(to: AppConstants.volumeRange)
-        return restoredVolume > AppConstants.volumeRange.lowerBound
-            ? restoredVolume
-            : AppConstants.defaultSystemOutputRestoreVolume
-    }
-
-    private func applySystemVolume(_ volume: Double) {
-        let clampedVolume = volume.clamped(to: AppConstants.volumeRange)
-
-        systemVolume = clampedVolume
-        isSystemOutputMuted = clampedVolume <= AppConstants.volumeRange.lowerBound
-
-        if clampedVolume > AppConstants.volumeRange.lowerBound {
-            rememberNonZeroSystemVolume(clampedVolume)
-        }
-    }
-
-    private func rememberNonZeroSystemVolume(_ volume: Double) {
-        let clampedVolume = volume.clamped(to: AppConstants.volumeRange)
-
-        if clampedVolume > AppConstants.volumeRange.lowerBound {
-            lastNonZeroSystemVolume = clampedVolume
-        }
-    }
 }
 
 private extension MixerAppItem {
