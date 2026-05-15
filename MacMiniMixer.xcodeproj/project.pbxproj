@@ -11,6 +11,7 @@
 		9B7D1A302C8F4A9A8B2D0101 /* MenuBarRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */; };
 		9B7D1A322C8F4A9A8B2D0101 /* MixerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */; };
 		9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */; };
+		9B7D1AD92C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */; };
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
@@ -88,6 +89,7 @@
 		9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRootView.swift; sourceTree = "<group>"; };
 		9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerPanelView.swift; sourceTree = "<group>"; };
 		9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModel.swift; sourceTree = "<group>"; };
+		9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryState.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
@@ -253,6 +255,7 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */,
+				9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */,
 				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
 				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
 				9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */,
@@ -455,6 +458,7 @@
 				9B7D1A302C8F4A9A8B2D0101 /* MenuBarRootView.swift in Sources */,
 				9B7D1A322C8F4A9A8B2D0101 /* MixerPanelView.swift in Sources */,
 				9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */,
+				9B7D1AD92C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
