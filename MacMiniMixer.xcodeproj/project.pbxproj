@@ -69,6 +69,7 @@
 		9B7D1AD12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift */; };
 		9B7D1AD32C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD22C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift */; };
 		9B7D1AD52C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD42C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift */; };
+		9B7D1AD72C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD62C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -146,6 +147,7 @@
 		9B7D1AD02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessCandidateDiscoveryTests.swift; sourceTree = "<group>"; };
 		9B7D1AD22C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperAudioTargetResolverTests.swift; sourceTree = "<group>"; };
 		9B7D1AD42C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapPermissionMessageTests.swift; sourceTree = "<group>"; };
+		9B7D1AD62C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManagerTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -346,6 +348,7 @@
 				9B7D1AD02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift */,
 				9B7D1AD22C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift */,
 				9B7D1AD42C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift */,
+				9B7D1AD62C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift */,
 			);
 			path = MacMiniMixerTests;
 			sourceTree = "<group>";
@@ -517,6 +520,7 @@
 				9B7D1AD12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift in Sources */,
 				9B7D1AD32C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift in Sources */,
 				9B7D1AD52C8F4A9A8B2D0101 /* ProcessTapPermissionMessageTests.swift in Sources */,
+				9B7D1AD72C8F4A9A8B2D0101 /* ProcessTapLiveSessionManagerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
