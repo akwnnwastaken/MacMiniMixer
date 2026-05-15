@@ -148,6 +148,147 @@ final class AdvancedHelperDiscoveryCoordinatorTests: XCTestCase {
         XCTAssertEqual(probe.stopReasons, [.outputDeviceChanged])
     }
 
+    func testAutoDetectSelectsBestAudioHelperCandidate() async {
+        let apps = [makeApp(id: "safari", name: "Safari", pid: 100)]
+        let probe = FakeHelperAudioProbe()
+        probe.resultsByPID = [
+            101: (
+                ProcessTapDiagnosticProgress(callbackCount: 4, peakLevel: 0.01, rmsLevel: 0.004, audioDetected: false),
+                ProcessTapTestResult(outcome: .streamDiagnosticsNoAudio, message: "No audio detected", severity: .info)
+            ),
+            102: (
+                ProcessTapDiagnosticProgress(callbackCount: 12, peakLevel: 0.5, rmsLevel: 0.2, audioDetected: true),
+                ProcessTapTestResult(outcome: .streamDiagnosticsDetectedAudio, message: "Audio detected", severity: .info)
+            )
+        ]
+        var targetChangeCount = 0
+        let coordinator = makeCoordinator(
+            apps: apps,
+            processes: [
+                makeProcess(pid: 100, parentPID: nil, name: "Safari"),
+                makeProcess(pid: 101, parentPID: 100, name: "com.apple.WebKit.Networking"),
+                makeProcess(pid: 102, parentPID: 100, name: "com.apple.WebKit.GPU")
+            ],
+            probe: probe
+        )
+        coordinator.setOnAdvancedTargetChanged { _ in
+            targetChangeCount += 1
+        }
+        await coordinator.scanHelperProcessesNow(
+            apps: apps,
+            isAutoDetectRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        await coordinator.autoDetectHelperProcessCandidateNow(isAppAudioTargetResolving: false)
+
+        XCTAssertEqual(Set(probe.probedTargets.compactMap(\.processIdentifier)), Set([100, 101, 102]))
+        XCTAssertEqual(probe.probedTargets.count, 3)
+        XCTAssertEqual(coordinator.advancedTarget?.target.processIdentifier, 102)
+        XCTAssertEqual(coordinator.advancedTarget?.parentAppName, "Safari")
+        XCTAssertEqual(coordinator.message, "Selected audio helper")
+        XCTAssertFalse(coordinator.isAutoDetectRunning)
+        XCTAssertNil(coordinator.autoDetectProgressText)
+        XCTAssertEqual(targetChangeCount, 1)
+    }
+
+    func testAutoDetectNoAudioLeavesTargetNilAndSetsMessage() async {
+        let apps = [makeApp(id: "safari", name: "Safari", pid: 100)]
+        let probe = FakeHelperAudioProbe()
+        probe.result = ProcessTapTestResult(
+            outcome: .streamDiagnosticsNoAudio,
+            message: "No audio detected",
+            severity: .info
+        )
+        probe.progress = ProcessTapDiagnosticProgress(
+            callbackCount: 3,
+            peakLevel: 0,
+            rmsLevel: 0,
+            audioDetected: false
+        )
+        let coordinator = makeCoordinator(
+            apps: apps,
+            processes: [
+                makeProcess(pid: 100, parentPID: nil, name: "Safari"),
+                makeProcess(pid: 101, parentPID: 100, name: "com.apple.WebKit.GPU")
+            ],
+            probe: probe
+        )
+        await coordinator.scanHelperProcessesNow(
+            apps: apps,
+            isAutoDetectRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        await coordinator.autoDetectHelperProcessCandidateNow(isAppAudioTargetResolving: false)
+
+        XCTAssertNil(coordinator.advancedTarget)
+        XCTAssertEqual(coordinator.message, "No audio helper detected")
+        XCTAssertFalse(coordinator.isAutoDetectRunning)
+        XCTAssertNil(coordinator.autoDetectProgressText)
+    }
+
+    func testUseCandidateAsAdvancedTargetStoresTargetAndClearRemovesIt() async {
+        let apps = [makeApp(id: "safari", name: "Safari", pid: 100)]
+        var removedTargetID: String?
+        let coordinator = makeCoordinator(
+            apps: apps,
+            processes: [
+                makeProcess(pid: 100, parentPID: nil, name: "Safari"),
+                makeProcess(pid: 101, parentPID: 100, name: "com.apple.WebKit.GPU")
+            ]
+        )
+        coordinator.setOnAdvancedTargetChanged { removedID in
+            removedTargetID = removedID
+        }
+        await coordinator.scanHelperProcessesNow(
+            apps: apps,
+            isAutoDetectRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertTrue(coordinator.useCandidateAsAdvancedTarget(101))
+        let targetID = coordinator.advancedTarget?.id
+        XCTAssertEqual(coordinator.advancedTarget?.target.processIdentifier, 101)
+        XCTAssertEqual(coordinator.advancedTarget?.displayName, "Safari helper")
+
+        let clearedID = coordinator.clearAdvancedTarget()
+
+        XCTAssertEqual(clearedID, targetID)
+        XCTAssertEqual(removedTargetID, targetID)
+        XCTAssertNil(coordinator.advancedTarget)
+    }
+
+    func testStopAutoDetectForwardsStopReasonWhileRunning() async {
+        let apps = [makeApp(id: "safari", name: "Safari", pid: 100)]
+        let probeStarted = expectation(description: "Probe started")
+        let probe = FakeHelperAudioProbe()
+        probe.waitForStopBeforeReturning = true
+        probe.onProbeStarted = {
+            probeStarted.fulfill()
+        }
+        let coordinator = makeCoordinator(
+            apps: apps,
+            processes: [
+                makeProcess(pid: 100, parentPID: nil, name: "Safari"),
+                makeProcess(pid: 101, parentPID: 100, name: "com.apple.WebKit.GPU")
+            ],
+            probe: probe
+        )
+        await coordinator.scanHelperProcessesNow(
+            apps: apps,
+            isAutoDetectRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        coordinator.autoDetectHelperProcessCandidate(isAppAudioTargetResolving: false)
+        await fulfillment(of: [probeStarted], timeout: 1)
+        coordinator.stopAutoDetect(reason: .outputDeviceChanged)
+        await Task.yield()
+
+        XCTAssertEqual(probe.stopReasons, [.outputDeviceChanged])
+    }
+
     func testRefreshSelectionAfterSelectedAppDisappearsPicksFallbackAndClearsState() async {
         let originalApps = [
             makeApp(id: "safari", name: "Safari", pid: 100),
@@ -241,27 +382,82 @@ private final class FakeHelperAudioProbe: ProcessTapCandidateAudioProbing, @unch
         message: "Audio detected",
         severity: .info
     )
+    var resultsByPID: [Int32: (ProcessTapDiagnosticProgress, ProcessTapTestResult)] = [:]
+    var waitForStopBeforeReturning = false
+    var onProbeStarted: (@Sendable () -> Void)?
     private(set) var probedTargets: [ProcessTapTarget] = []
     private(set) var stopReasons: [ProcessTapCandidateProbeStopReason] = []
+    private var pendingContinuation: CheckedContinuation<ProcessTapTestResult, Never>?
 
     func probeAudio(
         for target: ProcessTapTarget,
         duration: TimeInterval,
         onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
     ) async -> ProcessTapTestResult {
-        lock.lock()
-        probedTargets.append(target)
-        let progress = progress
-        let result = result
-        lock.unlock()
+        let probeState = recordProbeStart(target)
+        onProgress(probeState.progress)
 
-        onProgress(progress)
-        return result
+        guard probeState.waitForStop else {
+            probeState.onStarted?()
+            return probeState.result
+        }
+
+        return await withCheckedContinuation { continuation in
+            storeContinuation(continuation, onStarted: probeState.onStarted)
+        }
     }
 
     func stopCurrentProbe(reason: ProcessTapCandidateProbeStopReason) {
+        let continuation = recordStop(reason: reason)
+        continuation?.resume(
+            returning: ProcessTapTestResult(
+                outcome: .helperProbeStopped,
+                message: "Probe stopped",
+                severity: .warning
+            )
+        )
+    }
+
+    private func recordProbeStart(
+        _ target: ProcessTapTarget
+    ) -> (
+        progress: ProcessTapDiagnosticProgress,
+        result: ProcessTapTestResult,
+        waitForStop: Bool,
+        onStarted: (@Sendable () -> Void)?
+    ) {
+        lock.lock()
+        probedTargets.append(target)
+        let pid = target.processIdentifier
+        let configuredResult = pid.flatMap { resultsByPID[$0] }
+        let progress = configuredResult?.0 ?? progress
+        let result = configuredResult?.1 ?? result
+        let waitForStop = waitForStopBeforeReturning
+        let onStarted = onProbeStarted
+        lock.unlock()
+
+        return (progress, result, waitForStop, onStarted)
+    }
+
+    private func storeContinuation(
+        _ continuation: CheckedContinuation<ProcessTapTestResult, Never>,
+        onStarted: (@Sendable () -> Void)?
+    ) {
+        lock.lock()
+        pendingContinuation = continuation
+        lock.unlock()
+        onStarted?()
+    }
+
+    private func recordStop(
+        reason: ProcessTapCandidateProbeStopReason
+    ) -> CheckedContinuation<ProcessTapTestResult, Never>? {
         lock.lock()
         stopReasons.append(reason)
+        let continuation = pendingContinuation
+        pendingContinuation = nil
         lock.unlock()
+
+        return continuation
     }
 }
