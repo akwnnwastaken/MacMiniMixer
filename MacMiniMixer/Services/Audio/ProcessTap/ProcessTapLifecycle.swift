@@ -12,6 +12,34 @@ struct ProcessTapProcessEligibility: Equatable, Sendable {
     }
 }
 
+enum ProcessTapPermissionMessage {
+    static let permissionRequired = "System Audio Recording permission is required for Process Tap."
+    static let permissionSettingsHint = "Enable it in System Settings → Privacy & Security → System Audio Recording."
+    static let missingUsageDescription = "System Audio Recording permission is not configured."
+    static let missingUsageDescriptionDetail = "NSAudioCaptureUsageDescription is missing from the app bundle."
+    static let missingUsageDescriptionReason = "Missing audio capture usage description"
+
+    static func isPermissionDeniedStatus(_ status: OSStatus) -> Bool {
+        status == kAudioDevicePermissionsError
+    }
+
+    static func message(forCreateStatus status: OSStatus, fallback: String) -> String {
+        isPermissionDeniedStatus(status) ? permissionRequired : fallback
+    }
+
+    static func detail(forCreateStatus status: OSStatus, fallback: String) -> String {
+        isPermissionDeniedStatus(status) ? permissionSettingsHint : fallback
+    }
+
+    static func message(forEligibilityReason reason: String?, fallback: String) -> String {
+        reason == missingUsageDescriptionReason ? missingUsageDescription : fallback
+    }
+
+    static func detail(forEligibilityReason reason: String?) -> String? {
+        reason == missingUsageDescriptionReason ? missingUsageDescriptionDetail : reason
+    }
+}
+
 enum ProcessTapCoreAudio {
     static var isProcessTapAvailable: Bool {
         if #available(macOS 14.2, *) {
@@ -70,7 +98,7 @@ enum ProcessTapCoreAudio {
         }
 
         guard hasAudioCaptureUsageDescription else {
-            return .unavailable("Missing audio capture usage description")
+            return .unavailable(ProcessTapPermissionMessage.missingUsageDescriptionReason)
         }
 
         guard let processIdentifier, processIdentifier > 0 else {

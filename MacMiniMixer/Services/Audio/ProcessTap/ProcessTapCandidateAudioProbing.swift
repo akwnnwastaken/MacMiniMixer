@@ -73,8 +73,8 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
                 AppLogger.processTap.warning("Helper probe rejected: missing usage description app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
                 return ProcessTapTestResult(
                     outcome: .missingUsageDescription,
-                    message: "Missing audio capture usage description",
-                    detail: "Add NSAudioCaptureUsageDescription before real tap setup.",
+                    message: ProcessTapPermissionMessage.missingUsageDescription,
+                    detail: ProcessTapPermissionMessage.missingUsageDescriptionDetail,
                     severity: .warning
                 )
             }
@@ -133,11 +133,15 @@ final class CoreAudioProcessTapCandidateAudioProbe: ProcessTapCandidateAudioProb
         guard createStatus == noErr, resources.tapID != kAudioObjectUnknown else {
             AppLogger.processTap.error("Helper probe setup failed: create tap status=\(ProcessTapCoreAudio.formatOSStatus(createStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
-                outcome: createStatus == kAudioDevicePermissionsError ? .permissionDenied : .tapSetupFailed,
-                message: createStatus == kAudioDevicePermissionsError
-                    ? "Audio capture permission was denied"
-                    : "Could not create helper probe tap",
-                detail: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)). No audio was replayed, saved, or modified.",
+                outcome: ProcessTapPermissionMessage.isPermissionDeniedStatus(createStatus) ? .permissionDenied : .tapSetupFailed,
+                message: ProcessTapPermissionMessage.message(
+                    forCreateStatus: createStatus,
+                    fallback: "Could not create helper probe tap"
+                ),
+                detail: ProcessTapPermissionMessage.detail(
+                    forCreateStatus: createStatus,
+                    fallback: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)). No audio was replayed, saved, or modified."
+                ),
                 severity: .warning
             )
         }

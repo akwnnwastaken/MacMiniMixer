@@ -695,7 +695,8 @@ final class MixerViewModel: ObservableObject {
                 processTapTestResult = ProcessTapTestResult(
                     outcome: .processNotFound,
                     message: "Advanced target unavailable",
-                    detail: eligibility.reason ?? "Core Audio process unavailable",
+                    detail: ProcessTapPermissionMessage.detail(forEligibilityReason: eligibility.reason)
+                        ?? "Core Audio process unavailable",
                     severity: .warning
                 )
                 return
@@ -909,10 +910,13 @@ final class MixerViewModel: ObservableObject {
                 .first
             twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
                 outcome: .setupFailed,
-                message: reason == ProcessTapCoreAudio.unsupportedOSMessage
-                    ? "Process Tap is not available"
-                    : "Core Audio process unavailable",
-                detail: reason,
+                message: ProcessTapPermissionMessage.message(
+                    forEligibilityReason: reason,
+                    fallback: reason == ProcessTapCoreAudio.unsupportedOSMessage
+                        ? "Process Tap is not available"
+                        : "Core Audio process unavailable"
+                ),
+                detail: ProcessTapPermissionMessage.detail(forEligibilityReason: reason),
                 severity: .warning
             )
             return
@@ -1016,7 +1020,8 @@ final class MixerViewModel: ObservableObject {
                 processTapTestResult = ProcessTapTestResult(
                     outcome: .processNotFound,
                     message: "Advanced target unavailable",
-                    detail: eligibility.reason ?? "Core Audio process unavailable",
+                    detail: ProcessTapPermissionMessage.detail(forEligibilityReason: eligibility.reason)
+                        ?? "Core Audio process unavailable",
                     severity: .warning
                 )
                 return
@@ -1236,8 +1241,14 @@ final class MixerViewModel: ObservableObject {
         }
 
         if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
-            visibleEligibility.reason == "Missing audio capture usage description" {
-            showStatus(visibleEligibility.reason ?? "Process Tap is unavailable", style: .warning)
+            visibleEligibility.reason == ProcessTapPermissionMessage.missingUsageDescriptionReason {
+            showStatus(
+                ProcessTapPermissionMessage.message(
+                    forEligibilityReason: visibleEligibility.reason,
+                    fallback: visibleEligibility.reason ?? "Process Tap is unavailable"
+                ),
+                style: .warning
+            )
             return
         }
 
@@ -1424,6 +1435,10 @@ final class MixerViewModel: ObservableObject {
             showStatus("Live control stopped: app exited", style: .warning)
         case .liveControlSetupFailed:
             showStatus("Could not start live control", style: .warning)
+        case .missingUsageDescription:
+            showStatus(ProcessTapPermissionMessage.missingUsageDescription, style: .warning)
+        case .permissionDenied:
+            showStatus(ProcessTapPermissionMessage.permissionRequired, style: .warning)
         case .unsupportedOS:
             showStatus(ProcessTapCoreAudio.unsupportedOSMessage, style: .warning)
         default:

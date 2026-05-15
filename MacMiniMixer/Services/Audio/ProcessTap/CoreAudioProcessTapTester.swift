@@ -30,8 +30,8 @@ struct CoreAudioProcessTapTester: ProcessTapTesting {
             guard ProcessTapCoreAudio.hasAudioCaptureUsageDescription else {
                 return ProcessTapTestResult(
                     outcome: .missingUsageDescription,
-                    message: "Missing audio capture usage description",
-                    detail: "Add NSAudioCaptureUsageDescription before real tap setup.",
+                    message: ProcessTapPermissionMessage.missingUsageDescription,
+                    detail: ProcessTapPermissionMessage.missingUsageDescriptionDetail,
                     severity: .warning
                 )
             }
@@ -85,7 +85,10 @@ struct CoreAudioProcessTapTester: ProcessTapTesting {
             return ProcessTapTestResult(
                 outcome: outcome(forCreateStatus: createStatus),
                 message: message(forCreateStatus: createStatus),
-                detail: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)). No audio was replayed, saved, or modified.",
+                detail: ProcessTapPermissionMessage.detail(
+                    forCreateStatus: createStatus,
+                    fallback: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)). No audio was replayed, saved, or modified."
+                ),
                 severity: .warning
             )
         }
@@ -167,15 +170,11 @@ struct CoreAudioProcessTapTester: ProcessTapTesting {
     }
 
     private func outcome(forCreateStatus status: OSStatus) -> ProcessTapTestResult.Outcome {
-        status == kAudioDevicePermissionsError ? .permissionDenied : .tapSetupFailed
+        ProcessTapPermissionMessage.isPermissionDeniedStatus(status) ? .permissionDenied : .tapSetupFailed
     }
 
     private func message(forCreateStatus status: OSStatus) -> String {
-        if status == kAudioDevicePermissionsError {
-            return "Audio capture permission was denied"
-        }
-
-        return "Could not create process tap"
+        ProcessTapPermissionMessage.message(forCreateStatus: status, fallback: "Could not create process tap")
     }
 
     private func diagnosticResult(

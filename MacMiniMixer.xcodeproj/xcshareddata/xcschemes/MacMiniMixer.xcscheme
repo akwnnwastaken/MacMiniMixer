@@ -29,6 +29,15 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "9B7D1A232C8F4A9A8B2D0101"
+            BuildableName = "MacMiniMixer.app"
+            BlueprintName = "MacMiniMixer"
+            ReferencedContainer = "container:MacMiniMixer.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
          <TestableReference
             skipped = "NO"
@@ -42,15 +51,6 @@
             </BuildableReference>
          </TestableReference>
       </Testables>
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "9B7D1A232C8F4A9A8B2D0101"
-            BuildableName = "MacMiniMixer.app"
-            BlueprintName = "MacMiniMixer"
-            ReferencedContainer = "container:MacMiniMixer.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

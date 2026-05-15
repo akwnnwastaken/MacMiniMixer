@@ -115,9 +115,14 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
         }
 
         if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
-            visibleEligibility.reason == "Missing audio capture usage description" {
+            visibleEligibility.reason == ProcessTapPermissionMessage.missingUsageDescriptionReason {
             AppLogger.helperResolution.warning("Visible app PID unavailable for platform/config app=\(request.appName, privacy: .public) reason=\(visibleEligibility.reason ?? "unknown", privacy: .public)")
-            return .unavailable(visibleEligibility.reason ?? "Process Tap is unavailable")
+            return .unavailable(
+                ProcessTapPermissionMessage.message(
+                    forEligibilityReason: visibleEligibility.reason,
+                    fallback: visibleEligibility.reason ?? "Process Tap is unavailable"
+                )
+            )
         }
 
         guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(request.helperDiscoveryTarget) else {

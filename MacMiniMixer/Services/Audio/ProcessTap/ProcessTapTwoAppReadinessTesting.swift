@@ -499,7 +499,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
         ProcessTapTwoAppReadinessResult(
             outcome: result.outcome == .permissionDenied ? .setupFailed : .setupFailed,
             message: "Two-app setup failed",
-            detail: result.message,
+            detail: result.detail ?? result.message,
             severity: .warning
         )
     }

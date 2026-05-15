@@ -88,8 +88,8 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
                 AppLogger.processTap.warning("Live control start rejected: missing usage description app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
                 return ProcessTapTestResult(
                     outcome: .missingUsageDescription,
-                    message: "Missing audio capture usage description",
-                    detail: "Add NSAudioCaptureUsageDescription before real tap setup.",
+                    message: ProcessTapPermissionMessage.missingUsageDescription,
+                    detail: ProcessTapPermissionMessage.missingUsageDescriptionDetail,
                     severity: .warning
                 )
             }
@@ -167,11 +167,15 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         guard createStatus == noErr, resources.tapID != kAudioObjectUnknown else {
             AppLogger.processTap.error("Live control setup failed: create tap status=\(ProcessTapCoreAudio.formatOSStatus(createStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
             return ProcessTapTestResult(
-                outcome: createStatus == kAudioDevicePermissionsError ? .permissionDenied : .liveControlSetupFailed,
-                message: createStatus == kAudioDevicePermissionsError
-                    ? "Audio capture permission was denied"
-                    : "Could not create live process tap",
-                detail: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)).",
+                outcome: ProcessTapPermissionMessage.isPermissionDeniedStatus(createStatus) ? .permissionDenied : .liveControlSetupFailed,
+                message: ProcessTapPermissionMessage.message(
+                    forCreateStatus: createStatus,
+                    fallback: "Could not create live process tap"
+                ),
+                detail: ProcessTapPermissionMessage.detail(
+                    forCreateStatus: createStatus,
+                    fallback: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus))."
+                ),
                 severity: .warning
             )
         }

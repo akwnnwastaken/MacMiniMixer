@@ -56,8 +56,8 @@ final class CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked 
             guard ProcessTapCoreAudio.hasAudioCaptureUsageDescription else {
                 return ProcessTapReplayResult(
                     outcome: .missingUsageDescription,
-                    message: "Missing audio capture usage description",
-                    detail: "Add NSAudioCaptureUsageDescription before real tap setup.",
+                    message: ProcessTapPermissionMessage.missingUsageDescription,
+                    detail: ProcessTapPermissionMessage.missingUsageDescriptionDetail,
                     severity: .warning
                 )
             }
@@ -140,11 +140,15 @@ final class CoreAudioProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked 
         )
         guard createStatus == noErr, resources.tapID != kAudioObjectUnknown else {
             return ProcessTapReplayResult(
-                outcome: createStatus == kAudioDevicePermissionsError ? .permissionDenied : .tapSetupFailed,
-                message: createStatus == kAudioDevicePermissionsError
-                    ? "Audio capture permission was denied"
-                    : "Could not create replay process tap",
-                detail: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)). No audio was replayed or saved.",
+                outcome: ProcessTapPermissionMessage.isPermissionDeniedStatus(createStatus) ? .permissionDenied : .tapSetupFailed,
+                message: ProcessTapPermissionMessage.message(
+                    forCreateStatus: createStatus,
+                    fallback: "Could not create replay process tap"
+                ),
+                detail: ProcessTapPermissionMessage.detail(
+                    forCreateStatus: createStatus,
+                    fallback: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus)). No audio was replayed or saved."
+                ),
                 severity: .warning
             )
         }
