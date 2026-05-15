@@ -9,7 +9,10 @@ struct HelperProcessDiscoveryTarget: Equatable, Sendable {
 enum HelperProcessCandidateDiscovery {
     static func candidates(
         for target: HelperProcessDiscoveryTarget,
-        processes: [SystemProcessInfo]
+        processes: [SystemProcessInfo],
+        eligibilityChecker: (Int32) -> ProcessTapProcessEligibility = {
+            ProcessTapCoreAudio.processTapEligibility(for: $0)
+        }
     ) -> [HelperProcessCandidate] {
         guard let appPID = target.processIdentifier, appPID > 0 else {
             return []
@@ -42,7 +45,7 @@ enum HelperProcessCandidateDiscovery {
             return HelperProcessCandidate(
                 process: process,
                 relation: relation,
-                eligibility: ProcessTapCoreAudio.processTapEligibility(for: process.processIdentifier)
+                eligibility: eligibilityChecker(process.processIdentifier)
             )
         }
 
