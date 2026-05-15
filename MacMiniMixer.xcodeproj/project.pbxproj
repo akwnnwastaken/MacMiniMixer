@@ -67,6 +67,7 @@
 		9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */; };
 		9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */; };
 		9B7D1AD12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift */; };
+		9B7D1AD32C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD22C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +143,7 @@
 		9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopierTests.swift; sourceTree = "<group>"; };
 		9B7D1AD02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProcessCandidateDiscoveryTests.swift; sourceTree = "<group>"; };
+		9B7D1AD22C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperAudioTargetResolverTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -340,6 +342,7 @@
 				9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */,
 				9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */,
 				9B7D1AD02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift */,
+				9B7D1AD22C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift */,
 			);
 			path = MacMiniMixerTests;
 			sourceTree = "<group>";
@@ -509,6 +512,7 @@
 				9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */,
 				9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */,
 				9B7D1AD12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscoveryTests.swift in Sources */,
+				9B7D1AD32C8F4A9A8B2D0101 /* HelperAudioTargetResolverTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

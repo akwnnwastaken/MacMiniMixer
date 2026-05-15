@@ -63,16 +63,21 @@ protocol AppAudioTargetResolving: Sendable {
 final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
     private let processLister: ProcessListing
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
+    private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private let lock = NSLock()
     private var currentResolutionID: UUID?
     private var cachedHelpersByKey: [AppAudioHelperResolutionCacheKey: AppAudioHelperResolutionCacheEntry] = [:]
 
     init(
         processLister: ProcessListing,
-        helperProcessAudioProbe: ProcessTapCandidateAudioProbing
+        helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
+        processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
+            ProcessTapCoreAudio.processTapEligibility(for: $0)
+        }
     ) {
         self.processLister = processLister
         self.helperProcessAudioProbe = helperProcessAudioProbe
+        self.processTapEligibility = processTapEligibility
     }
 
     func resolveTarget(
@@ -91,9 +96,7 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
             finishResolution(id: resolutionID)
         }
 
-        let visibleEligibility = ProcessTapCoreAudio.processTapEligibility(
-            for: request.processIdentifier
-        )
+        let visibleEligibility = processTapEligibility(request.processIdentifier)
         if visibleEligibility.isEligible {
             AppLogger.helperResolution.info("Visible app PID is Process Tap eligible app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public)")
             return .resolved(
@@ -143,7 +146,11 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
         }
 
         let eligibleCandidates = HelperProcessCandidateDiscovery
-            .candidates(for: request.helperDiscoveryTarget, processes: processes)
+            .candidates(
+                for: request.helperDiscoveryTarget,
+                processes: processes,
+                eligibilityChecker: { processTapEligibility($0) }
+            )
             .filter(\.isTapEligible)
 
         guard !eligibleCandidates.isEmpty else {
@@ -305,7 +312,7 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
             return nil
         }
 
-        let eligibility = ProcessTapCoreAudio.processTapEligibility(for: process.processIdentifier)
+        let eligibility = processTapEligibility(process.processIdentifier)
         guard eligibility.isEligible else {
             AppLogger.helperResolution.warning("Helper cache invalid: helper not tap-eligible app=\(request.appName, privacy: .public) helperPID=\(process.processIdentifier, privacy: .public) reason=\(eligibility.reason ?? "unknown", privacy: .public)")
             removeCachedHelper(for: key)
