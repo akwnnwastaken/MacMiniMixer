@@ -181,13 +181,192 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isRunningDiagnostics)
     }
 
+    func testVisibleAppReplayProbeUsesSelectedVisibleApp() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let apps = [makeDiagnosticsApp(id: "spotify", name: "Spotify", pid: 100)]
+        let coordinator = makeCoordinator(apps: apps, replayProbe: replayProbe)
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: apps,
+            advancedTarget: nil,
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertEqual(replayProbe.targets.map(\.appName), ["Spotify"])
+        XCTAssertEqual(replayProbe.targets.map(\.processIdentifier), [100])
+        XCTAssertEqual(replayProbe.gains, [.defaultOption])
+        XCTAssertEqual(coordinator.result?.outcome, .replayProbeCompleted)
+        XCTAssertNil(coordinator.progress)
+        XCTAssertFalse(coordinator.isRunningDiagnostics)
+        XCTAssertFalse(coordinator.isReplayProbeRunning)
+    }
+
+    func testAdvancedHelperTargetIsUsedForReplayProbe() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let apps = [makeDiagnosticsApp(id: "youtube", name: "YouTube", pid: 100)]
+        let coordinator = makeCoordinator(apps: apps, replayProbe: replayProbe)
+        let helperTarget = makeAdvancedTarget(parentName: "YouTube", pid: 201)
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: apps,
+            advancedTarget: helperTarget,
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertEqual(replayProbe.targets.map(\.appName), ["com.apple.WebKit.GPU"])
+        XCTAssertEqual(replayProbe.targets.map(\.processIdentifier), [201])
+    }
+
+    func testReplayGainSelectionUpdatesStateAndClearsResultAndProgress() {
+        let coordinator = makeCoordinator(apps: [makeDiagnosticsApp(id: "spotify", name: "Spotify", pid: 100)])
+        coordinator.setResult(ProcessTapTestResult(outcome: .streamDiagnosticsDetectedAudio, message: "Audio detected", severity: .info))
+        coordinator.setProgress(ProcessTapDiagnosticProgress(callbackCount: 3, peakLevel: 0.2, rmsLevel: 0.1, audioDetected: true))
+
+        let didSelect = coordinator.selectReplayGain(
+            ProcessTapReplayGainOption.options[0],
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false
+        )
+
+        XCTAssertTrue(didSelect)
+        XCTAssertEqual(coordinator.selectedReplayGain, ProcessTapReplayGainOption.options[0])
+        XCTAssertNil(coordinator.result)
+        XCTAssertNil(coordinator.progress)
+    }
+
+    func testNoVisibleAppOrHelperTargetReturnsReplayInvalidTargetResult() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let coordinator = makeCoordinator(apps: [], replayProbe: replayProbe)
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: [],
+            advancedTarget: nil,
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertTrue(replayProbe.targets.isEmpty)
+        XCTAssertEqual(coordinator.result?.outcome, .invalidTarget)
+        XCTAssertEqual(coordinator.result?.message, "Select a running app or Advanced target")
+    }
+
+    func testUnavailableHelperTargetDoesNotStartReplayProbe() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let apps = [makeDiagnosticsApp(id: "youtube", name: "YouTube", pid: 100)]
+        let coordinator = makeCoordinator(
+            apps: apps,
+            replayProbe: replayProbe,
+            eligibility: { _ in .unavailable("Core Audio process unavailable") }
+        )
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: apps,
+            advancedTarget: makeAdvancedTarget(parentName: "YouTube", pid: 201),
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertTrue(replayProbe.targets.isEmpty)
+        XCTAssertEqual(coordinator.result?.outcome, .processNotFound)
+        XCTAssertEqual(coordinator.result?.message, "Advanced target unavailable")
+    }
+
+    func testReplayStartSetsRunningStateAndInitialProgress() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let apps = [makeDiagnosticsApp(id: "spotify", name: "Spotify", pid: 100)]
+        let coordinator = makeCoordinator(apps: apps, replayProbe: replayProbe)
+        var observedRunningState = false
+        var observedInitialProgress: ProcessTapDiagnosticProgress?
+
+        replayProbe.onRun = {
+            observedRunningState = coordinator.isRunningDiagnostics && coordinator.isReplayProbeRunning
+            observedInitialProgress = coordinator.progress
+        }
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: apps,
+            advancedTarget: nil,
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertTrue(observedRunningState)
+        XCTAssertEqual(observedInitialProgress?.callbackCount, 0)
+        XCTAssertEqual(observedInitialProgress?.audioDetected, false)
+    }
+
+    func testReplayProgressCallbackUpdatesStateBeforeCompletion() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        replayProbe.progress = ProcessTapDiagnosticProgress(
+            callbackCount: 7,
+            peakLevel: 0.3,
+            rmsLevel: 0.12,
+            audioDetected: true
+        )
+        let apps = [makeDiagnosticsApp(id: "spotify", name: "Spotify", pid: 100)]
+        let coordinator = makeCoordinator(apps: apps, replayProbe: replayProbe)
+        var observedProgress: ProcessTapDiagnosticProgress?
+
+        replayProbe.onProgressSent = {
+            observedProgress = coordinator.progress
+        }
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: apps,
+            advancedTarget: nil,
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertEqual(observedProgress, replayProbe.progress)
+    }
+
+    func testStopReplayProbeForwardsReason() {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let coordinator = makeCoordinator(apps: [], replayProbe: replayProbe)
+
+        coordinator.stopReplayProbe(reason: .outputDeviceChanged)
+
+        XCTAssertEqual(replayProbe.stopReasons.count, 1)
+        guard case .outputDeviceChanged? = replayProbe.stopReasons.first else {
+            return XCTFail("Expected output-device-change stop reason")
+        }
+    }
+
+    func testReplayProbeBusyStateBlocksStart() async {
+        let replayProbe = FakeProcessTapReplayProbe()
+        let apps = [makeDiagnosticsApp(id: "spotify", name: "Spotify", pid: 100)]
+        let coordinator = makeCoordinator(apps: apps, replayProbe: replayProbe)
+        coordinator.setRunning(true)
+
+        await coordinator.testSelectedReplayProbeNow(
+            apps: apps,
+            advancedTarget: nil,
+            isLiveControlActive: false,
+            isTwoAppReadinessRunning: false,
+            isAppAudioTargetResolving: false
+        )
+
+        XCTAssertTrue(replayProbe.targets.isEmpty)
+    }
+
     private func makeCoordinator(
         apps: [MixerAppItem],
         tester: FakeProcessTapDiagnosticsTester = FakeProcessTapDiagnosticsTester(),
+        replayProbe: FakeProcessTapReplayProbe = FakeProcessTapReplayProbe(),
         eligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = { _ in .eligible }
     ) -> AdvancedProcessTapDiagnosticsCoordinator {
         AdvancedProcessTapDiagnosticsCoordinator(
             processTapTester: tester,
+            processTapReplayProbe: replayProbe,
             initialApps: apps,
             processTapEligibility: eligibility
         )
@@ -220,6 +399,46 @@ private final class FakeProcessTapDiagnosticsTester: ProcessTapTesting, @uncheck
         observedProgress = progress
         onProgress(progress)
         return result
+    }
+}
+
+private final class FakeProcessTapReplayProbe: ProcessTapReplayProbing, @unchecked Sendable {
+    var result = ProcessTapReplayResult(
+        outcome: .replayCompleted,
+        message: "Replay probe completed",
+        severity: .info
+    )
+    var progress = ProcessTapDiagnosticProgress(
+        callbackCount: 1,
+        peakLevel: 0,
+        rmsLevel: 0,
+        audioDetected: false
+    )
+    var onRun: (@MainActor () -> Void)?
+    var onProgressSent: (@MainActor () -> Void)?
+    private(set) var targets: [ProcessTapTarget] = []
+    private(set) var gains: [ProcessTapReplayGainOption] = []
+    private(set) var stopReasons: [ProcessTapReplayProbeStopReason] = []
+
+    func runReplayProbe(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void
+    ) async -> ProcessTapReplayResult {
+        targets.append(target)
+        gains.append(gain)
+        await MainActor.run {
+            onRun?()
+        }
+        onProgress(progress)
+        await MainActor.run {
+            onProgressSent?()
+        }
+        return result
+    }
+
+    func stopCurrentReplayProbe(reason: ProcessTapReplayProbeStopReason) {
+        stopReasons.append(reason)
     }
 }
 

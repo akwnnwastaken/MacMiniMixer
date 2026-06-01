@@ -3,16 +3,20 @@ import Foundation
 @MainActor
 final class AdvancedProcessTapDiagnosticsCoordinator {
     private let processTapTester: ProcessTapTesting
+    nonisolated private let processTapReplayProbe: ProcessTapReplayProbing
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private var onWillChange: (@MainActor () -> Void)?
 
     private(set) var selectedAppID: MixerAppItem.ID?
+    private(set) var selectedReplayGain: ProcessTapReplayGainOption
     private(set) var result: ProcessTapTestResult?
     private(set) var progress: ProcessTapDiagnosticProgress?
     private(set) var isRunningDiagnostics = false
+    private(set) var isReplayProbeRunning = false
 
     init(
         processTapTester: ProcessTapTesting,
+        processTapReplayProbe: ProcessTapReplayProbing,
         initialApps: [MixerAppItem],
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
             ProcessTapCoreAudio.processTapEligibility(for: $0)
@@ -20,9 +24,11 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         onWillChange: (@MainActor () -> Void)? = nil
     ) {
         self.processTapTester = processTapTester
+        self.processTapReplayProbe = processTapReplayProbe
         self.processTapEligibility = processTapEligibility
         self.onWillChange = onWillChange
         self.selectedAppID = Self.preferredProcessTapAppID(in: initialApps)
+        self.selectedReplayGain = .defaultOption
     }
 
     func setOnWillChange(_ onWillChange: (@MainActor () -> Void)?) {
@@ -121,6 +127,108 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         )
     }
 
+    @discardableResult
+    func selectReplayGain(
+        _ gain: ProcessTapReplayGainOption,
+        isLiveControlActive: Bool,
+        isTwoAppReadinessRunning: Bool
+    ) -> Bool {
+        guard !isRunningDiagnostics,
+              !isLiveControlActive,
+              !isTwoAppReadinessRunning else {
+            return false
+        }
+
+        sendWillChange()
+        selectedReplayGain = gain
+        clearResultAndProgress(sendChange: false)
+        return true
+    }
+
+    func testSelectedReplayProbe(
+        apps: [MixerAppItem],
+        advancedTarget: AdvancedProcessTapTarget?,
+        isLiveControlActive: Bool,
+        isTwoAppReadinessRunning: Bool,
+        isAppAudioTargetResolving: Bool
+    ) {
+        Task {
+            await testSelectedReplayProbeNow(
+                apps: apps,
+                advancedTarget: advancedTarget,
+                isLiveControlActive: isLiveControlActive,
+                isTwoAppReadinessRunning: isTwoAppReadinessRunning,
+                isAppAudioTargetResolving: isAppAudioTargetResolving
+            )
+        }
+    }
+
+    func testSelectedReplayProbeNow(
+        apps: [MixerAppItem],
+        advancedTarget: AdvancedProcessTapTarget?,
+        isLiveControlActive: Bool,
+        isTwoAppReadinessRunning: Bool,
+        isAppAudioTargetResolving: Bool
+    ) async {
+        guard !isRunningDiagnostics,
+              !isLiveControlActive,
+              !isTwoAppReadinessRunning,
+              !isAppAudioTargetResolving else {
+            return
+        }
+
+        guard let target = replayProbeTarget(apps: apps, advancedTarget: advancedTarget) else {
+            setResult(
+                ProcessTapTestResult(
+                    outcome: .invalidTarget,
+                    message: "Select a running app or Advanced target",
+                    severity: .warning
+                )
+            )
+            return
+        }
+
+        if advancedTarget != nil {
+            let eligibility = processTapEligibility(target.processIdentifier)
+            guard eligibility.isEligible else {
+                setResult(
+                    ProcessTapTestResult(
+                        outcome: .processNotFound,
+                        message: "Advanced target unavailable",
+                        detail: ProcessTapPermissionMessage.detail(forEligibilityReason: eligibility.reason)
+                            ?? "Core Audio process unavailable",
+                        severity: .warning
+                    )
+                )
+                return
+            }
+        }
+
+        beginRunningReplayProbe(for: target, advancedTarget: advancedTarget)
+
+        let replayGain = selectedReplayGain
+        let result = await processTapReplayProbe.runReplayProbe(for: target, gain: replayGain) { [weak self] progress in
+            Task { @MainActor in
+                self?.setProgress(progress)
+            }
+        }
+
+        setResult(result.testResult)
+        setProgress(nil)
+        setRunning(false)
+        setReplayProbeRunning(false)
+    }
+
+    nonisolated func stopReplayProbe(reason: ProcessTapReplayProbeStopReason) {
+        processTapReplayProbe.stopCurrentReplayProbe(reason: reason)
+    }
+
+    func stopReplayProbeForTermination() {
+        processTapReplayProbe.stopCurrentReplayProbe(reason: .userStopped)
+        setReplayProbeRunning(false)
+        setRunning(false)
+    }
+
     func setResult(_ result: ProcessTapTestResult?) {
         sendWillChange()
         self.result = result
@@ -217,6 +325,24 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         isRunningDiagnostics = true
     }
 
+    private func beginRunningReplayProbe(for target: ProcessTapTarget, advancedTarget: AdvancedProcessTapTarget?) {
+        sendWillChange()
+        result = ProcessTapTestResult(
+            outcome: .replayProbeRunning,
+            message: "Replay testing \(target.appName)...",
+            detail: replayProbeRunningDetail(advancedTarget: advancedTarget),
+            severity: .info
+        )
+        progress = ProcessTapDiagnosticProgress(
+            callbackCount: 0,
+            peakLevel: 0,
+            rmsLevel: 0,
+            audioDetected: false
+        )
+        isRunningDiagnostics = true
+        isReplayProbeRunning = true
+    }
+
     private func processTapTarget(
         for mode: ProcessTapTestMode,
         apps: [MixerAppItem],
@@ -237,6 +363,33 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         )
     }
 
+    private func replayProbeTarget(
+        apps: [MixerAppItem],
+        advancedTarget: AdvancedProcessTapTarget?
+    ) -> ProcessTapTarget? {
+        if let advancedTarget {
+            return advancedTarget.target
+        }
+
+        guard let selectedApp = selectedProcessTapApp(in: apps) else {
+            return nil
+        }
+
+        return ProcessTapTarget(
+            appID: selectedApp.id,
+            appName: selectedApp.name,
+            processIdentifier: selectedApp.processIdentifier
+        )
+    }
+
+    private func replayProbeRunningDetail(advancedTarget: AdvancedProcessTapTarget?) -> String {
+        if advancedTarget != nil {
+            return "Experimental: may briefly mute/replay selected helper audio. Gain \(selectedReplayGain.percentLabel)."
+        }
+
+        return "Experimental: may briefly mute/replay selected app audio. Gain \(selectedReplayGain.percentLabel)."
+    }
+
     private func selectedProcessTapApp(in apps: [MixerAppItem]) -> MixerAppItem? {
         guard let selectedAppID else {
             return nil
@@ -251,6 +404,11 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         }
         result = nil
         progress = nil
+    }
+
+    private func setReplayProbeRunning(_ isRunning: Bool) {
+        sendWillChange()
+        isReplayProbeRunning = isRunning
     }
 
     private func sendWillChange() {
