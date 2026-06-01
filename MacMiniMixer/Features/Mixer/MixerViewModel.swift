@@ -18,13 +18,9 @@ struct TwoAppReadinessTargetOption: Identifiable, Equatable, Sendable {
 final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
     @Published private(set) var statusMessage: MixerStatusMessage?
-    @Published private(set) var selectedProcessTapAppID: MixerAppItem.ID?
-    @Published private(set) var processTapTestResult: ProcessTapTestResult?
-    @Published private(set) var processTapDiagnosticProgress: ProcessTapDiagnosticProgress?
     @Published private(set) var selectedProcessTapReplayGain: ProcessTapReplayGainOption
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
     @Published private(set) var isProcessTapLiveControlActive = false
-    @Published private(set) var isProcessTapTesting = false
     @Published private(set) var selectedTwoAppReadinessAppAID: MixerAppItem.ID?
     @Published private(set) var selectedTwoAppReadinessAppBID: MixerAppItem.ID?
     @Published private(set) var selectedTwoAppReadinessGain: ProcessTapReplayGainOption
@@ -41,7 +37,7 @@ final class MixerViewModel: ObservableObject {
     private let applicationLister: ApplicationListing
     private let audioController: AudioControlling
     private let systemOutput: SystemOutputCoordinator
-    private let processTapTester: ProcessTapTesting
+    private let advancedProcessTapDiagnostics: AdvancedProcessTapDiagnosticsCoordinator
     private let processTapReplayProbe: ProcessTapReplayProbing
     private let processTapLiveController: ProcessTapLiveControlling
     private let twoAppReadinessTester: ProcessTapTwoAppReadinessTesting
@@ -70,7 +66,6 @@ final class MixerViewModel: ObservableObject {
     ) {
         self.applicationLister = applicationLister
         self.audioController = audioController
-        self.processTapTester = processTapTester
         self.processTapReplayProbe = processTapReplayProbe
         self.processTapLiveController = processTapLiveController
         self.twoAppReadinessTester = twoAppReadinessTester
@@ -86,13 +81,16 @@ final class MixerViewModel: ObservableObject {
             systemVolumeReader: systemVolumeReader,
             systemVolumeController: systemVolumeController
         )
+        self.advancedProcessTapDiagnostics = AdvancedProcessTapDiagnosticsCoordinator(
+            processTapTester: processTapTester,
+            initialApps: initialApps
+        )
         self.advancedHelperDiscovery = AdvancedHelperDiscoveryCoordinator(
             processLister: processLister,
             helperProcessAudioProbe: helperProcessAudioProbe,
             initialApps: initialApps
         )
         self.apps = initialApps
-        self.selectedProcessTapAppID = Self.preferredProcessTapAppID(in: initialApps)
         self.selectedProcessTapReplayGain = .defaultOption
         self.twoAppReadinessEligibilityByAppID = initialTwoAppReadinessEligibility
         self.selectedTwoAppReadinessAppAID = Self.preferredTwoAppReadinessAppIDs(
@@ -108,12 +106,14 @@ final class MixerViewModel: ObservableObject {
         systemOutput.setOnWillChange { [weak self] in
             self?.objectWillChange.send()
         }
+        advancedProcessTapDiagnostics.setOnWillChange { [weak self] in
+            self?.objectWillChange.send()
+        }
         advancedHelperDiscovery.setOnWillChange { [weak self] in
             self?.objectWillChange.send()
         }
         advancedHelperDiscovery.setOnAdvancedTargetChanged { [weak self] removedTargetID in
-            self?.processTapTestResult = nil
-            self?.processTapDiagnosticProgress = nil
+            self?.advancedProcessTapDiagnostics.clearResultAndProgress()
             self?.refreshTwoAppReadinessSelectionsAfterTargetChange(removedTargetID: removedTargetID)
         }
 
@@ -160,6 +160,22 @@ final class MixerViewModel: ObservableObject {
 
     var selectedOutputDeviceName: String {
         systemOutput.selectedOutputDeviceName
+    }
+
+    var selectedProcessTapAppID: MixerAppItem.ID? {
+        advancedProcessTapDiagnostics.selectedAppID
+    }
+
+    var processTapTestResult: ProcessTapTestResult? {
+        advancedProcessTapDiagnostics.result
+    }
+
+    var processTapDiagnosticProgress: ProcessTapDiagnosticProgress? {
+        advancedProcessTapDiagnostics.progress
+    }
+
+    var isProcessTapTesting: Bool {
+        advancedProcessTapDiagnostics.isRunningDiagnostics
     }
 
     var selectedHelperDiscoveryAppID: MixerAppItem.ID? {
@@ -355,19 +371,16 @@ final class MixerViewModel: ObservableObject {
     }
 
     func selectProcessTapApp(_ appID: MixerAppItem.ID) {
-        guard !isProcessTapLiveControlActive,
-              !isAppAudioTargetResolving else {
+        guard advancedProcessTapDiagnostics.selectApp(
+            appID,
+            apps: apps,
+            isLiveControlActive: isProcessTapLiveControlActive,
+            isAppAudioTargetResolving: isAppAudioTargetResolving
+        ) else {
             return
         }
 
-        guard apps.contains(where: { $0.id == appID }) else {
-            return
-        }
-
-        selectedProcessTapAppID = appID
         _ = advancedHelperDiscovery.clearAdvancedTarget(notify: false)
-        processTapTestResult = nil
-        processTapDiagnosticProgress = nil
     }
 
     func selectTwoAppReadinessAppA(_ appID: MixerAppItem.ID) {
@@ -436,8 +449,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         _ = advancedHelperDiscovery.clearAdvancedTarget(notify: false)
-        processTapTestResult = nil
-        processTapDiagnosticProgress = nil
+        advancedProcessTapDiagnostics.clearResultAndProgress()
         refreshTwoAppReadinessSelectionsAfterTargetChange(removedTargetID: removedTargetID)
     }
 
@@ -456,11 +468,22 @@ final class MixerViewModel: ObservableObject {
     }
 
     func testSelectedProcessTapApp() {
-        startProcessTapTest(mode: .diagnostics)
+        advancedProcessTapDiagnostics.testSelectedProcessTapApp(
+            apps: apps,
+            advancedTarget: advancedProcessTapTarget,
+            isLiveControlActive: isProcessTapLiveControlActive,
+            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
+            isAppAudioTargetResolving: isAppAudioTargetResolving
+        )
     }
 
     func testSelectedProcessTapMuteProbe() {
-        startProcessTapTest(mode: .muteBehaviorProbe)
+        advancedProcessTapDiagnostics.testSelectedProcessTapMuteProbe(
+            apps: apps,
+            isLiveControlActive: isProcessTapLiveControlActive,
+            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
+            isAppAudioTargetResolving: isAppAudioTargetResolving
+        )
     }
 
     func selectProcessTapReplayGain(_ gain: ProcessTapReplayGainOption) {
@@ -469,8 +492,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         selectedProcessTapReplayGain = gain
-        processTapTestResult = nil
-        processTapDiagnosticProgress = nil
+        advancedProcessTapDiagnostics.clearResultAndProgress()
     }
 
     func testSelectedProcessTapReplayProbe() {
@@ -482,10 +504,12 @@ final class MixerViewModel: ObservableObject {
         }
 
         guard let target = replayProbeTarget else {
-            processTapTestResult = ProcessTapTestResult(
-                outcome: .invalidTarget,
-                message: "Select a running app or Advanced target",
-                severity: .warning
+            advancedProcessTapDiagnostics.setResult(
+                ProcessTapTestResult(
+                    outcome: .invalidTarget,
+                    message: "Select a running app or Advanced target",
+                    severity: .warning
+                )
             )
             return
         }
@@ -493,44 +517,50 @@ final class MixerViewModel: ObservableObject {
         if advancedProcessTapTarget != nil {
             let eligibility = ProcessTapCoreAudio.processTapEligibility(for: target.processIdentifier)
             guard eligibility.isEligible else {
-                processTapTestResult = ProcessTapTestResult(
-                    outcome: .processNotFound,
-                    message: "Advanced target unavailable",
-                    detail: ProcessTapPermissionMessage.detail(forEligibilityReason: eligibility.reason)
-                        ?? "Core Audio process unavailable",
-                    severity: .warning
+                advancedProcessTapDiagnostics.setResult(
+                    ProcessTapTestResult(
+                        outcome: .processNotFound,
+                        message: "Advanced target unavailable",
+                        detail: ProcessTapPermissionMessage.detail(forEligibilityReason: eligibility.reason)
+                            ?? "Core Audio process unavailable",
+                        severity: .warning
+                    )
                 )
                 return
             }
         }
 
-        processTapTestResult = ProcessTapTestResult(
-            outcome: .replayProbeRunning,
-            message: "Replay testing \(target.appName)...",
-            detail: replayProbeRunningDetail,
-            severity: .info
+        advancedProcessTapDiagnostics.setResult(
+            ProcessTapTestResult(
+                outcome: .replayProbeRunning,
+                message: "Replay testing \(target.appName)...",
+                detail: replayProbeRunningDetail,
+                severity: .info
+            )
         )
-        processTapDiagnosticProgress = ProcessTapDiagnosticProgress(
-            callbackCount: 0,
-            peakLevel: 0,
-            rmsLevel: 0,
-            audioDetected: false
+        advancedProcessTapDiagnostics.setProgress(
+            ProcessTapDiagnosticProgress(
+                callbackCount: 0,
+                peakLevel: 0,
+                rmsLevel: 0,
+                audioDetected: false
+            )
         )
-        isProcessTapTesting = true
+        advancedProcessTapDiagnostics.setRunning(true)
         isProcessTapReplayProbeRunning = true
 
         let replayGain = selectedProcessTapReplayGain
         Task {
             let result = await processTapReplayProbe.runReplayProbe(for: target, gain: replayGain) { progress in
                 Task { @MainActor in
-                    self.processTapDiagnosticProgress = progress
+                    self.advancedProcessTapDiagnostics.setProgress(progress)
                 }
             }
 
             await MainActor.run {
-                processTapTestResult = result.testResult
-                processTapDiagnosticProgress = nil
-                isProcessTapTesting = false
+                advancedProcessTapDiagnostics.setResult(result.testResult)
+                advancedProcessTapDiagnostics.setProgress(nil)
+                advancedProcessTapDiagnostics.setRunning(false)
                 isProcessTapReplayProbeRunning = false
             }
         }
@@ -545,10 +575,12 @@ final class MixerViewModel: ObservableObject {
         }
 
         guard let app = selectedProcessTapApp else {
-            processTapTestResult = ProcessTapTestResult(
-                outcome: .invalidTarget,
-                message: "Select a running app",
-                severity: .warning
+            advancedProcessTapDiagnostics.setResult(
+                ProcessTapTestResult(
+                    outcome: .invalidTarget,
+                    message: "Select a running app",
+                    severity: .warning
+                )
             )
             return
         }
@@ -560,20 +592,24 @@ final class MixerViewModel: ObservableObject {
         )
         let gain = selectedProcessTapReplayGain
 
-        processTapTestResult = ProcessTapTestResult(
-            outcome: .liveControlStarting,
-            message: "Starting live control for \(app.name)...",
-            detail: "Experimental: original output is suppressed and replayed with gain \(gain.percentLabel).",
-            severity: .info
+        advancedProcessTapDiagnostics.setResult(
+            ProcessTapTestResult(
+                outcome: .liveControlStarting,
+                message: "Starting live control for \(app.name)...",
+                detail: "Experimental: original output is suppressed and replayed with gain \(gain.percentLabel).",
+                severity: .info
+            )
         )
-        processTapDiagnosticProgress = ProcessTapDiagnosticProgress(
-            callbackCount: 0,
-            peakLevel: 0,
-            rmsLevel: 0,
-            audioDetected: false
+        advancedProcessTapDiagnostics.setProgress(
+            ProcessTapDiagnosticProgress(
+                callbackCount: 0,
+                peakLevel: 0,
+                rmsLevel: 0,
+                audioDetected: false
+            )
         )
         processTapLiveDiagnostics = nil
-        isProcessTapTesting = true
+        advancedProcessTapDiagnostics.setRunning(true)
 
         Task {
             let result = await processTapLiveController.startLiveControl(
@@ -582,7 +618,7 @@ final class MixerViewModel: ObservableObject {
             ) { diagnostics in
                 Task { @MainActor in
                     self.processTapLiveDiagnostics = diagnostics
-                    self.processTapDiagnosticProgress = diagnostics.progress
+                    self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
                 }
             } onStopped: { result, diagnostics in
                 Task { @MainActor in
@@ -591,15 +627,15 @@ final class MixerViewModel: ObservableObject {
             }
 
             await MainActor.run {
-                processTapTestResult = result
-                isProcessTapTesting = false
+                advancedProcessTapDiagnostics.setResult(result)
+                advancedProcessTapDiagnostics.setRunning(false)
 
                 if result.outcome == .liveControlStarted {
                     isProcessTapLiveControlActive = true
                     activeLiveControlAppName = app.name
                 } else {
                     processTapLiveDiagnostics = nil
-                    processTapDiagnosticProgress = nil
+                    advancedProcessTapDiagnostics.setProgress(nil)
                     activeLiveControlAppName = nil
                     showLiveControlWarningIfNeeded(for: result)
                 }
@@ -637,7 +673,7 @@ final class MixerViewModel: ObservableObject {
         advancedHelperDiscovery.stopProbe(reason: .userStopped)
         processTapReplayProbe.stopCurrentReplayProbe(reason: .userStopped)
         isProcessTapLiveControlActive = false
-        isProcessTapTesting = false
+        advancedProcessTapDiagnostics.setRunning(false)
         isProcessTapReplayProbeRunning = false
         appAudioResolutionStateByAppID = [:]
         activeExperimentalAppID = nil
@@ -795,66 +831,6 @@ final class MixerViewModel: ObservableObject {
         startExperimentalControl(for: appID)
     }
 
-    private func startProcessTapTest(mode: ProcessTapTestMode) {
-        guard !isProcessTapTesting,
-              !isProcessTapLiveControlActive,
-              !isTwoAppReadinessRunning,
-              !isAppAudioTargetResolving else {
-            return
-        }
-
-        guard let target = processTapTarget(for: mode) else {
-            processTapTestResult = ProcessTapTestResult(
-                outcome: .invalidTarget,
-                message: "Select a running app or Advanced target",
-                severity: .warning
-            )
-            return
-        }
-
-        if mode == .diagnostics, advancedProcessTapTarget != nil {
-            let eligibility = ProcessTapCoreAudio.processTapEligibility(for: target.processIdentifier)
-            guard eligibility.isEligible else {
-                processTapTestResult = ProcessTapTestResult(
-                    outcome: .processNotFound,
-                    message: "Advanced target unavailable",
-                    detail: ProcessTapPermissionMessage.detail(forEligibilityReason: eligibility.reason)
-                        ?? "Core Audio process unavailable",
-                    severity: .warning
-                )
-                return
-            }
-        }
-
-        processTapTestResult = ProcessTapTestResult(
-            outcome: .streamDiagnosticsRunning,
-            message: mode.runningMessage(for: target.appName),
-            detail: mode.runningDetail,
-            severity: .info
-        )
-        processTapDiagnosticProgress = ProcessTapDiagnosticProgress(
-            callbackCount: 0,
-            peakLevel: 0,
-            rmsLevel: 0,
-            audioDetected: false
-        )
-        isProcessTapTesting = true
-
-        Task {
-            let result = await processTapTester.testProcessTap(for: target, mode: mode) { progress in
-                Task { @MainActor in
-                    self.processTapDiagnosticProgress = progress
-                }
-            }
-
-            await MainActor.run {
-                processTapTestResult = result
-                processTapDiagnosticProgress = nil
-                isProcessTapTesting = false
-            }
-        }
-    }
-
     func refreshApplications() {
         let previousProcessTapAppID = selectedProcessTapAppID
         let previousApps = apps
@@ -889,15 +865,13 @@ final class MixerViewModel: ObservableObject {
 
         if let previousProcessTapAppID,
            apps.contains(where: { $0.id == previousProcessTapAppID }) {
-            selectedProcessTapAppID = previousProcessTapAppID
+            // Keep the existing diagnostic selection and result state when the selected app survived refresh.
         } else {
             if isProcessTapLiveControlActive {
                 stopProcessTapLiveControl(reason: .targetAppExited)
             }
 
-            selectedProcessTapAppID = Self.preferredProcessTapAppID(in: apps)
-            processTapTestResult = nil
-            processTapDiagnosticProgress = nil
+            advancedProcessTapDiagnostics.selectPreferredAppAfterAppRefresh(apps: apps)
             processTapLiveDiagnostics = nil
         }
 
@@ -1083,20 +1057,24 @@ final class MixerViewModel: ObservableObject {
 
         activeExperimentalAppID = app.id
         activeLiveControlAppName = app.name
-        processTapTestResult = ProcessTapTestResult(
-            outcome: .liveControlStarting,
-            message: "Starting experimental live control for \(app.name)...",
-            detail: "This may affect real audio for this app only. Gain \(gain.percentLabel).",
-            severity: .info
+        advancedProcessTapDiagnostics.setResult(
+            ProcessTapTestResult(
+                outcome: .liveControlStarting,
+                message: "Starting experimental live control for \(app.name)...",
+                detail: "This may affect real audio for this app only. Gain \(gain.percentLabel).",
+                severity: .info
+            )
         )
-        processTapDiagnosticProgress = ProcessTapDiagnosticProgress(
-            callbackCount: 0,
-            peakLevel: 0,
-            rmsLevel: 0,
-            audioDetected: false
+        advancedProcessTapDiagnostics.setProgress(
+            ProcessTapDiagnosticProgress(
+                callbackCount: 0,
+                peakLevel: 0,
+                rmsLevel: 0,
+                audioDetected: false
+            )
         )
         processTapLiveDiagnostics = nil
-        isProcessTapTesting = true
+        advancedProcessTapDiagnostics.setRunning(true)
 
         Task {
             let result = await processTapLiveController.startLiveControl(
@@ -1105,7 +1083,7 @@ final class MixerViewModel: ObservableObject {
             ) { diagnostics in
                 Task { @MainActor in
                     self.processTapLiveDiagnostics = diagnostics
-                    self.processTapDiagnosticProgress = diagnostics.progress
+                    self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
                 }
             } onStopped: { result, diagnostics in
                 Task { @MainActor in
@@ -1114,8 +1092,8 @@ final class MixerViewModel: ObservableObject {
             }
 
             await MainActor.run {
-                processTapTestResult = result
-                isProcessTapTesting = false
+                advancedProcessTapDiagnostics.setResult(result)
+                advancedProcessTapDiagnostics.setRunning(false)
 
                 if result.outcome == .liveControlStarted {
                     isProcessTapLiveControlActive = true
@@ -1129,7 +1107,7 @@ final class MixerViewModel: ObservableObject {
                     activeExperimentalAppID = nil
                     activeLiveControlAppName = nil
                     processTapLiveDiagnostics = nil
-                    processTapDiagnosticProgress = nil
+                    advancedProcessTapDiagnostics.setProgress(nil)
 
                     if resolutionSource == .cachedHelper,
                        isExperimentalRealAppControlEnabled,
@@ -1153,11 +1131,11 @@ final class MixerViewModel: ObservableObject {
         diagnostics: ProcessTapLiveDiagnostics?
     ) {
         let stoppedAppID = activeExperimentalAppID
-        processTapTestResult = result
+        advancedProcessTapDiagnostics.setResult(result)
         processTapLiveDiagnostics = diagnostics
-        processTapDiagnosticProgress = diagnostics?.progress
+        advancedProcessTapDiagnostics.setProgress(diagnostics?.progress)
         isProcessTapLiveControlActive = false
-        isProcessTapTesting = false
+        advancedProcessTapDiagnostics.setRunning(false)
         activeExperimentalAppID = nil
         activeLiveControlAppName = nil
         if result.outcome == .liveControlAppExited,
@@ -1386,10 +1364,6 @@ final class MixerViewModel: ObservableObject {
         )
     }
 
-    private static func preferredProcessTapAppID(in apps: [MixerAppItem]) -> MixerAppItem.ID? {
-        apps.first { $0.isEligibleForExperimentalLiveControl }?.id ?? apps.first?.id
-    }
-
     private static func preferredTwoAppReadinessAppIDs(
         in apps: [MixerAppItem],
         eligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
@@ -1434,22 +1408,6 @@ final class MixerViewModel: ObservableObject {
         }
 
         return apps.first { $0.id == selectedProcessTapAppID }
-    }
-
-    private func processTapTarget(for mode: ProcessTapTestMode) -> ProcessTapTarget? {
-        if mode == .diagnostics, let advancedProcessTapTarget {
-            return advancedProcessTapTarget.target
-        }
-
-        guard let selectedProcessTapApp else {
-            return nil
-        }
-
-        return ProcessTapTarget(
-            appID: selectedProcessTapApp.id,
-            appName: selectedProcessTapApp.name,
-            processIdentifier: selectedProcessTapApp.processIdentifier
-        )
     }
 
     private var replayProbeTarget: ProcessTapTarget? {
@@ -1549,25 +1507,5 @@ private extension MixerAppItem {
             appName: name,
             processIdentifier: processIdentifier
         )
-    }
-}
-
-private extension ProcessTapTestMode {
-    func runningMessage(for appName: String) -> String {
-        switch self {
-        case .diagnostics:
-            return "Testing Process Tap for \(appName)..."
-        case .muteBehaviorProbe:
-            return "Running mute probe for \(appName)..."
-        }
-    }
-
-    var runningDetail: String {
-        switch self {
-        case .diagnostics:
-            return "Listening briefly for callbacks. No audio will be saved or modified."
-        case .muteBehaviorProbe:
-            return "This may briefly mute the selected app. No audio will be replayed or saved."
-        }
     }
 }
