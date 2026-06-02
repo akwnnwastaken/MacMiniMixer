@@ -42,6 +42,7 @@ final class MixerViewModel: ObservableObject {
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
     private let advancedHelperDiscovery: AdvancedHelperDiscoveryCoordinator
     private let appAudioTargetResolver: AppAudioTargetResolving
+    private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private var appAudioResolutionTask: Task<Void, Never>?
     private var statusClearTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
@@ -59,7 +60,10 @@ final class MixerViewModel: ObservableObject {
         twoAppReadinessTester: ProcessTapTwoAppReadinessTesting,
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
         appAudioTargetResolver: AppAudioTargetResolving,
-        processLister: ProcessListing
+        processLister: ProcessListing,
+        processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
+            ProcessTapCoreAudio.processTapEligibility(for: $0)
+        }
     ) {
         self.applicationLister = applicationLister
         self.audioController = audioController
@@ -67,9 +71,13 @@ final class MixerViewModel: ObservableObject {
         self.twoAppReadinessTester = twoAppReadinessTester
         self.helperProcessAudioProbe = helperProcessAudioProbe
         self.appAudioTargetResolver = appAudioTargetResolver
+        self.processTapEligibility = processTapEligibility
 
         let initialApps = applicationLister.listApplications()
-        let initialTwoAppReadinessEligibility = Self.twoAppReadinessEligibility(for: initialApps)
+        let initialTwoAppReadinessEligibility = Self.twoAppReadinessEligibility(
+            for: initialApps,
+            processTapEligibility: processTapEligibility
+        )
         self.systemOutput = SystemOutputCoordinator(
             audioController: audioController,
             outputDeviceLister: outputDeviceLister,
@@ -80,12 +88,14 @@ final class MixerViewModel: ObservableObject {
         self.advancedProcessTapDiagnostics = AdvancedProcessTapDiagnosticsCoordinator(
             processTapTester: processTapTester,
             processTapReplayProbe: processTapReplayProbe,
-            initialApps: initialApps
+            initialApps: initialApps,
+            processTapEligibility: processTapEligibility
         )
         self.advancedHelperDiscovery = AdvancedHelperDiscoveryCoordinator(
             processLister: processLister,
             helperProcessAudioProbe: helperProcessAudioProbe,
-            initialApps: initialApps
+            initialApps: initialApps,
+            processTapEligibility: { processTapEligibility($0) }
         )
         self.apps = initialApps
         self.twoAppReadinessEligibilityByAppID = initialTwoAppReadinessEligibility
@@ -254,9 +264,7 @@ final class MixerViewModel: ObservableObject {
             return appTargets
         }
 
-        let helperEligibility = ProcessTapCoreAudio.processTapEligibility(
-            for: advancedProcessTapTarget.target.processIdentifier
-        )
+        let helperEligibility = processTapEligibility(advancedProcessTapTarget.target.processIdentifier)
         guard helperEligibility.isEligible else {
             return appTargets
         }
@@ -671,8 +679,8 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        let appAEligibility = ProcessTapCoreAudio.processTapEligibility(for: appA.processIdentifier)
-        let appBEligibility = ProcessTapCoreAudio.processTapEligibility(for: appB.processIdentifier)
+        let appAEligibility = processTapEligibility(appA.processIdentifier)
+        let appBEligibility = processTapEligibility(appB.processIdentifier)
         guard appAEligibility.isEligible,
               appBEligibility.isEligible else {
             let reason = [appAEligibility.reason, appBEligibility.reason]
@@ -934,7 +942,7 @@ final class MixerViewModel: ObservableObject {
         allowsCachedLookup: Bool = true
     ) {
         let request = app.appAudioTargetRequest
-        let visibleEligibility = ProcessTapCoreAudio.processTapEligibility(for: app.processIdentifier)
+        let visibleEligibility = processTapEligibility(app.processIdentifier)
 
         if visibleEligibility.isEligible {
             startExperimentalControl(
@@ -1277,7 +1285,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func refreshTwoAppReadinessEligibility() {
-        twoAppReadinessEligibilityByAppID = Self.twoAppReadinessEligibility(for: apps)
+        twoAppReadinessEligibilityByAppID = Self.twoAppReadinessEligibility(
+            for: apps,
+            processTapEligibility: processTapEligibility
+        )
     }
 
     private func updateExperimentalGainIfActive(for app: MixerAppItem) {
@@ -1329,11 +1340,12 @@ final class MixerViewModel: ObservableObject {
     }
 
     private static func twoAppReadinessEligibility(
-        for apps: [MixerAppItem]
+        for apps: [MixerAppItem],
+        processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     ) -> [MixerAppItem.ID: ProcessTapProcessEligibility] {
         Dictionary(
             uniqueKeysWithValues: apps.map { app in
-                (app.id, ProcessTapCoreAudio.processTapEligibility(for: app.processIdentifier))
+                (app.id, processTapEligibility(app.processIdentifier))
             }
         )
     }

@@ -77,6 +77,7 @@
 		9B7D1ADD2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1ADC2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift */; };
 		9B7D1AE02C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE12C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift */; };
 		9B7D1AE42C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE52C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift */; };
+		9B7D1AE62C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -162,6 +163,7 @@
 		9B7D1ADC2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AE12C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemOutputCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AE52C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedProcessTapDiagnosticsCoordinatorTests.swift; sourceTree = "<group>"; };
+		9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModelLiveControlTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -370,6 +372,7 @@
 				9B7D1ADC2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift */,
 				9B7D1AE12C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift */,
 				9B7D1AE52C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift */,
+				9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */,
 			);
 			path = MacMiniMixerTests;
 			sourceTree = "<group>";
@@ -549,6 +552,7 @@
 				9B7D1ADD2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinatorTests.swift in Sources */,
 				9B7D1AE02C8F4A9A8B2D0101 /* SystemOutputCoordinatorTests.swift in Sources */,
 				9B7D1AE42C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift in Sources */,
+				9B7D1AE62C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
