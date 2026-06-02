@@ -31,7 +31,9 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Advanced Helper Process Discovery + Find audio helper auto-detect.
 - Two-App Readiness diagnostic (Advanced only, 10s, isolated from main product).
 - macOS 14.2 availability guard; deployment target remains macOS 13.0.
-- GitHub Actions CI, XCTest target (4 test classes).
+- GitHub Actions build/test CI, XCTest target, and fake-backed characterization tests
+  for helper discovery, helper resolution, live control, coordinators, and Two-App
+  Readiness.
 
 ---
 
@@ -71,7 +73,11 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 | File | Why |
 |---|---|
 | `MacMiniMixer/App/MacMiniMixerApp.swift` | Entry point, all DI wiring |
-| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | All app logic, ~1900 lines |
+| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central traffic controller for product Real Control, Two-App Readiness, app list/mock rows, lifecycle cleanup, and status |
+| `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryCoordinator.swift` | Advanced helper scan, probe, auto-detect, and Advanced helper target |
+| `MacMiniMixer/Features/Mixer/SystemOutputCoordinator.swift` | System volume/device state and pure volume/device operations |
+| `MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift` | Advanced Process Tap Test, Mute Probe, and Replay Probe |
+| `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live Control implementation |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLifecycle.swift` | Core Audio resource management |
 | `MacMiniMixer/Services/Audio/ProcessTap/AppAudioTargetResolving.swift` | Helper resolution + cache |
@@ -85,16 +91,17 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 
 ## Safest Next Technical Steps
 
-1. **Add unit tests** for `HelperAudioTargetResolver` cache logic and
-   `HelperProcessCandidateDiscovery` — both are pure logic, no real Core Audio needed.
-2. **Improve permission-denied UX** — show a button pointing to System Settings when
-   `kAudioDevicePermissionsError` occurs. Low risk, high user value.
-3. **Add unit tests for MixerViewModel pure state** — mute/restore arithmetic,
-   `preferredProcessTapAppID`, `experimentalGainOption`.
-4. **Plan MixerViewModel split** — extract one coordinator (helper discovery or Two-App
-   Readiness) first to validate the pattern before splitting live-control logic.
-5. **Confirm CI runs XCTest** — verify `xcodebuild test` runs `MacMiniMixerTests` in the
-   GitHub Actions workflow.
+1. **Extract Two-App Readiness in stages** — start with state/model extraction, then a
+   coordinator once characterization tests make behavior safe to preserve.
+2. **Plan product Real Control extraction read-only** — keep implementation centralized
+   until direct PID, helper PID, cache invalidation, and lifecycle cleanup boundaries are
+   fully understood.
+3. **Improve non-writable output volume UX** — make unwritable-device failures clearer
+   without changing Core Audio behavior.
+4. **Add accessibility labels** for app rows, sliders, mute buttons, Advanced controls,
+   and output-device controls.
+5. **Harden helper PID-change handling** and document behavior across browser reloads,
+   navigation, and helper restarts.
 
 ---
 
@@ -109,7 +116,7 @@ After touching the audio path or MixerViewModel, at minimum verify:
 - Live control stops on 60s timeout and on output device change.
 - App quit during live control stops session cleanly (check Console for cleanup logs).
 - Two-App Readiness runs 10s with zero drops for Spotify + Music.
-- All four XCTest classes pass.
+- The full XCTest suite passes.
 
 Full checklist: `docs/MANUAL_TEST_CHECKLIST.md`
 

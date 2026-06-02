@@ -1,6 +1,6 @@
 # MacMiniMixer — Technical Roadmap
 
-Based on README v0.12 + current code state (May 2026).
+Based on README v0.12 + current code state.
 
 Each item lists: **priority**, **risk**, likely files, and a short explanation.
 
@@ -21,10 +21,22 @@ Each item lists: **priority**, **risk**, likely files, and a short explanation.
 - macOS 14.2 Process Tap availability guards (deployment target stays macOS 13.0).
 - MIT License.
 - GitHub Actions build/test CI.
-- Initial XCTest target with `ProcessTapOutputBufferCopierTests` and
-  `ProcessTapDiagnosticsAccumulatorTests`.
+- XCTest target with fake-backed tests for helper discovery, helper resolver/cache/fast
+  path, permission messaging, live session management, live control behavior,
+  coordinators, Two-App Readiness characterization, diagnostics accumulation, and output
+  buffer copying.
 - `ProcessTapDiagnosticsAccumulator` shared between Replay Probe and Live Control.
 - `ProcessTapOutputBufferCopier` extracted and covered by unit tests.
+- `AdvancedHelperDiscoveryCoordinator` extracted for helper discovery, manual probe,
+  auto-detect, and Advanced helper target ownership.
+- `SystemOutputCoordinator` extracted for system volume/device state and pure
+  volume/device operations.
+- `AdvancedProcessTapDiagnosticsCoordinator` extracted for Process Tap Test, Mute Probe,
+  and Replay Probe.
+- `AdvancedLiveControlCoordinator` extracted for manual Advanced Live start/stop
+  orchestration.
+- Fake-backed characterization tests for product/manual live-control busy gating and
+  Two-App Readiness behavior.
 
 ---
 
@@ -44,22 +56,6 @@ auto-clearing message.
 
 **Action**: Consider making writable-volume failure a persistent row state indicator,
 or add a tooltip that explains the device does not expose a volume API.
-
----
-
-### Improve Process Tap permission failure messaging
-
-**Priority**: High | **Risk**: Low
-
-When `kAudioDevicePermissionsError` is returned or System Audio Recording permission is
-denied, the user sees a short warning message. There is no guidance on how to grant the
-permission in System Settings.
-
-**Files**: `CoreAudioProcessTapLiveController.swift`, `CoreAudioProcessTapReplayProbe.swift`,
-`ProcessTapTestView.swift (UI)`
-
-**Action**: Show a button or link pointing to System Settings > Privacy > Screen & System
-Audio Recording when permission-denied outcomes occur.
 
 ---
 
@@ -83,24 +79,68 @@ is called after a cached-helper start failure.
 
 ## Short-Term Safe Refactors
 
-### MixerViewModel split
+### Continue MixerViewModel split
 
 **Priority**: High | **Risk**: Medium
 
-`MixerViewModel.swift` is ~1900 lines and handles system volume, output devices, running
-apps, Process Tap tests, Replay Probe, Live Control, Two-App Readiness, helper discovery,
-and helper auto-detect. This makes it difficult to reason about individual flows in isolation.
+`MixerViewModel.swift` is now about 1,370 lines and is no longer fully monolithic.
+Advanced helper discovery, system output, Advanced Process Tap diagnostics, and manual
+Advanced Live orchestration have been extracted into coordinators. The view model still
+owns app list/mock row state, product Real App Control, Two-App Readiness, lifecycle
+cleanup, cross-feature coordination, and status messages.
 
 **Files**: `MixerViewModel.swift` and likely new files such as:
-- `ProcessTapDiagnosticsCoordinator.swift`
-- `HelperDiscoveryCoordinator.swift`
 - `TwoAppReadinessCoordinator.swift`
-- `SystemAudioCoordinator.swift`
+- possible Two-App Readiness state/model file
 
-**Approach**: Extract each Advanced sub-feature into a coordinator that owns its local
-state and exposes a narrow interface to `MixerViewModel`. The split should preserve all
-existing behavior exactly. Start with the most self-contained subsystem (e.g., helper
-discovery) to validate the pattern before splitting the larger live-control logic.
+**Approach**: Continue incrementally. Extract Two-App Readiness state/model first, then a
+Two-App Readiness coordinator if the shape stays clean. Keep product Real App Control in
+`MixerViewModel` until a separate read-only plan confirms safe boundaries for helper
+resolution, cache invalidation, live session state, and lifecycle cleanup.
+
+---
+
+### Product Real Control read-only extraction plan
+
+**Priority**: High | **Risk**: Low
+
+Product Real App Control is the highest-risk remaining cluster because it combines direct
+visible PID control, browser/helper resolution, cache invalidation, one-active-session
+rules, app-row slider/mute behavior, timeout cleanup, app/helper exit handling, output
+device change cleanup, and menu bar/banner state.
+
+**Files**: `MixerViewModel.swift`, `AppAudioTargetResolving.swift`,
+`ProcessTapLiveSessionManager.swift`, `MixerAppRowView.swift`.
+
+**Action**: Do a read-only boundary assessment before any extraction. Do not move product
+Real Control until the plan identifies stable APIs and the required characterization
+tests.
+
+---
+
+### Two-App Readiness state/model extraction
+
+**Priority**: High | **Risk**: Low
+
+Two-App Readiness still lives in `MixerViewModel`, but it now has fake-backed
+characterization tests. A small preparatory extraction can move pure target option/state
+types before moving orchestration.
+
+**Files**: `MixerViewModel.swift`, `ProcessTapTwoAppReadinessTesting.swift`, likely new
+state/model file under `Features/Mixer`.
+
+---
+
+### Two-App Readiness coordinator extraction
+
+**Priority**: Medium | **Risk**: Medium
+
+After the state/model extraction, move selection, target option construction, start/stop,
+snapshot/result state, and selection refresh into a coordinator while leaving
+cross-feature lifecycle orchestration in `MixerViewModel` until proven safe.
+
+**Files**: `MixerViewModel.swift`, `TwoAppReadinessTestView.swift`, new
+`TwoAppReadinessCoordinator.swift`.
 
 ---
 
@@ -138,62 +178,15 @@ code grows.
 
 ## Testing and CI Improvements
 
-### Add unit tests for HelperAudioTargetResolver cache logic
-
-**Priority**: High | **Risk**: Low
-
-The validation-first cache (`AppAudioHelperResolutionCacheKey`, `validatedCachedTarget`)
-is pure logic that can be tested with synthetic `SystemProcessInfo` lists without any real
-Core Audio interaction.
-
-**Files**: `AppAudioTargetResolving.swift`, new test file.
-
----
-
-### Add unit tests for HelperProcessCandidateDiscovery
-
-**Priority**: High | **Risk**: Low
-
-`HelperProcessCandidateDiscovery.candidates(for:, processes:)` is pure logic.
-Tests can verify that child/descendant/nameMatch relations are found correctly,
-the 30-candidate cap is applied, and `isLikelyHelperResolvable` keyword matching works.
-
-**Files**: `HelperProcessCandidateDiscovery.swift`, new test file.
-
----
-
-### Add unit tests for MixerViewModel pure state logic
+### Add more targeted unit tests around remaining MixerViewModel clusters
 
 **Priority**: Medium | **Risk**: Low
 
-`MixerViewModel` has pure state-transition logic (e.g., mute/restore volume arithmetic,
-`preferredProcessTapAppID`, `experimentalGainOption`) that can be unit tested without
-any service dependencies.
+The remaining `MixerViewModel` clusters are product Real App Control, app list/mock row
+state, Two-App Readiness, lifecycle cleanup, and status messages. Add narrow tests before
+moving any of these responsibilities.
 
 **Files**: `MixerViewModel.swift`, new test file using mock implementations.
-
----
-
-### Add unit tests for ProcessTapLiveSessionManager
-
-**Priority**: Medium | **Risk**: Low
-
-`ProcessTapLiveSessionManager` session lifecycle (reserve, start, stop, max enforcement,
-compatibility session tracking) can be tested with a mock `ProcessTapLiveControlling`.
-
-**Files**: `ProcessTapLiveSessionManager.swift`, `MockProcessTapTester.swift` (exists),
-new test file.
-
----
-
-### CI: add test scheme to GitHub Actions
-
-**Priority**: Medium | **Risk**: Low
-
-The current workflow builds the app but may not run the XCTest target in CI. Confirm
-the `xcodebuild test` command runs the `MacMiniMixerTests` scheme on the Actions runner.
-
-**Files**: `.github/workflows/build.yml` (or equivalent).
 
 ---
 
@@ -376,6 +369,6 @@ extension, no persistent virtual device), uninstalling is as simple as deleting 
 | Priority | Items |
 |---|---|
 | Critical | — |
-| High | Writable-volume UX, permission failure messaging, helper PID change handling, helper resolver confidence, MixerViewModel split, HelperAudioTargetResolver cache tests, HelperProcessCandidateDiscovery tests |
-| Medium | OutputQueue evaluation, session manager tests, CI test scheme, accessibility labels, helper resolution UX feedback, multi-session architecture evaluation, GitHub release packaging |
+| High | Writable-volume UX, helper PID change handling, helper resolver confidence, continue MixerViewModel split, Product Real Control read-only plan, Two-App Readiness state/model extraction |
+| Medium | Two-App Readiness coordinator extraction, OutputQueue evaluation, accessibility labels, helper resolution UX feedback, multi-session architecture evaluation, GitHub release packaging |
 | Low | Unified stop-reason enum, configurable timeout, settings window, CHANGELOG, centralized renderer, HAL evaluation, installer |

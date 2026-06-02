@@ -345,16 +345,14 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 - **Expected**: Build succeeds, zero warnings that are errors.
 
 ### 14.2 Tests pass
-- `xcodebuild test -scheme MacMiniMixerTests` (or run in Xcode).
-- **Expected**: All four test classes pass:
-  - `ComparableClampedTests`
-  - `ProcessTapDiagnosticsAccumulatorTests`
-  - `ProcessTapOutputBufferCopierTests`
-  - `ProcessTapReplayGainOptionTests`
+- `xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS'`
+- **Expected**: The full XCTest suite passes, including fake-backed coordinator,
+  helper discovery/resolver, live-control, Two-App Readiness, diagnostics accumulator,
+  and output buffer copier tests.
 
 ### 14.3 GitHub Actions build passes
 - Push to main or open a PR.
-- **Expected**: CI build workflow passes. Check Actions tab.
+- **Expected**: CI build/test workflow passes. Check Actions tab.
 
 ---
 

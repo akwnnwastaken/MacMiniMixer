@@ -41,6 +41,31 @@ to `MixerPanelView`.
 
 ---
 
+## Mixer Coordination Model
+
+`MacMiniMixer/Features/Mixer/MixerViewModel.swift`
+
+`MixerViewModel` is no longer fully monolithic, but it remains the central `@MainActor`
+traffic controller for cross-feature behavior. It still owns product Real App Control,
+Two-App Readiness, app list/mock row state, lifecycle cleanup, cross-feature busy gating,
+and status messages.
+
+Extracted coordinators:
+
+| Coordinator | Owns |
+|---|---|
+| `AdvancedHelperDiscoveryCoordinator` | Advanced helper discovery selection, scan, manual probe, Find audio helper, and Advanced helper target |
+| `SystemOutputCoordinator` | System volume/device state and pure volume/device operations |
+| `AdvancedProcessTapDiagnosticsCoordinator` | Process Tap Test, Mute Probe, Replay Probe, diagnostic target selection, and replay gain/result state |
+| `AdvancedLiveControlCoordinator` | Manual Advanced Live start/stop orchestration |
+
+`MixerViewModel` forwards coordinator state and methods to keep the existing SwiftUI view
+surface stable. It also preserves centralized cleanup orchestration: output device
+changes, panel close, app termination, active live sessions, helper tasks, Advanced tools,
+and Two-App Readiness are still coordinated from one place.
+
+---
+
 ## Main UI Structure
 
 ### MenuBarExtra
@@ -125,9 +150,10 @@ to write `kAudioDevicePropertyVolumeScalar` for output scope main element first,
 global scope, then per-channel. Returns `false` if the device does not expose a writable
 volume property (e.g., HDMI or some external displays).
 
-**Mute**: MixerViewModel implements mute as set-to-zero + restore. `lastNonZeroSystemVolume`
-remembers the pre-mute value. On unmute, `restoredSystemOutputVolume` returns that value
-or `defaultSystemOutputRestoreVolume` (50) as fallback.
+**Mute**: `SystemOutputCoordinator` implements mute as set-to-zero + restore.
+`lastNonZeroSystemVolume` remembers the pre-mute value. On unmute,
+`restoredSystemOutputVolume` returns that value or `defaultSystemOutputRestoreVolume`
+(50) as fallback.
 
 **Live sync**: `MixerPanelView` runs a background loop that refreshes volume every 1 second
 while the panel is open, so external changes (e.g., physical keyboard keys) stay in sync.
@@ -150,8 +176,10 @@ device is always included even if virtual. Icons are heuristically assigned by n
 `AudioObjectSetPropertyData` with `kAudioHardwarePropertyDefaultOutputDevice`.
 
 **Live refresh**: Panel runs a background loop that refreshes devices every 2 seconds.
-If the default output changes externally (AirPods auto-connect), `refreshOutputDevices`
-detects this and stops any active Live Control, Two-App Readiness, or helper probe.
+`SystemOutputCoordinator` refreshes device state. If the default output changes externally
+(AirPods auto-connect), `MixerViewModel.refreshOutputDevices()` preserves the existing
+cross-feature cleanup behavior and stops any active Live Control, Two-App Readiness, or
+helper probe.
 
 ---
 
@@ -300,7 +328,7 @@ The concrete implementation (`CoreAudioProcessTapCandidateAudioProbe`) runs a sh
 diagnostic Process Tap with `muteBehavior: .unmuted`. It does not suppress or replay
 audio. It accumulates callbacks, peak, and RMS, then returns a `ProcessTapTestResult`.
 
-**Auto-detect flow** (`MixerViewModel.autoDetectHelperProcessCandidate()`):
+**Auto-detect flow** (`AdvancedHelperDiscoveryCoordinator.autoDetectHelperProcessCandidate()`):
 1. Gets tap-eligible candidates from `helperProcessCandidates`.
 2. Iterates candidates sequentially.
 3. Probes each for `processTapHelperAutoDetectDuration` (1.25s).
@@ -314,24 +342,29 @@ mechanism with the same duration, but adds early-accept logic and caching.
 
 ## Advanced Helper Target
 
-`AdvancedProcessTapTarget` struct (defined in `MixerViewModel.swift`):
+`AdvancedProcessTapTarget` struct (defined in `AdvancedHelperDiscoveryState.swift`):
 - `target: ProcessTapTarget` (appID, appName, processIdentifier).
 - `parentAppName: String` — the visible browser app's name.
 - `relation: HelperProcessRelation`.
 - `eligibility: ProcessTapProcessEligibility`.
 - `probeResult: ProcessTapTestResult?` — result from last manual probe, if any.
 
-Set by `useHelperCandidateAsAdvancedTarget(_:)`. Cleared by `clearAdvancedProcessTapTarget()`.
+Set by `AdvancedHelperDiscoveryCoordinator.useHelperCandidateAsAdvancedTarget(_:)`.
+Cleared by `AdvancedHelperDiscoveryCoordinator.clearAdvancedProcessTapTarget()`.
 
 When `advancedProcessTapTarget` is set, Process Tap Test, Replay Probe, and Two-App
-Readiness operate against this target's PID instead of the main selected app. The UI
-shows the visible parent app name + `" helper"` label.
+Readiness can operate against this target's PID from Advanced. The UI shows the visible
+parent app name + `" helper"` label. `MixerViewModel` forwards the target to Process Tap
+diagnostics and Two-App Readiness.
 
 ---
 
 ## Replay Probe
 
 `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapReplayProbe.swift`
+
+Replay Probe UI orchestration is owned by
+`MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift`.
 
 `CoreAudioProcessTapReplayProbe.runReplayProbe(for: target, gain:, onProgress:)` runs on a
 detached task and:
@@ -604,7 +637,12 @@ On macOS < 14.2:
 | File | Purpose |
 |---|---|
 | `MacMiniMixer/App/MacMiniMixerApp.swift` | Entry point, DI wiring |
-| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central `@MainActor` state + logic |
+| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central `@MainActor` traffic controller for product Real Control, Two-App Readiness, app list/mock state, lifecycle cleanup, and status |
+| `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryCoordinator.swift` | Advanced helper discovery, probe, auto-detect, and Advanced helper target |
+| `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryState.swift` | Advanced helper target and auto-detect score value types |
+| `MacMiniMixer/Features/Mixer/SystemOutputCoordinator.swift` | System volume/device state and pure operations |
+| `MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift` | Process Tap Test, Mute Probe, and Replay Probe orchestration |
+| `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
 | `MacMiniMixer/Features/MenuBar/MixerPanelView.swift` | Panel UI layout |
 | `MacMiniMixer/Features/MenuBar/MenuBarRootView.swift` | Thin root wrapper |
 | `MacMiniMixer/Features/Mixer/MixerAppRowView.swift` | Per-app row UI |

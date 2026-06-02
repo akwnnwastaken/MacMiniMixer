@@ -156,18 +156,25 @@ understood and can be expressed as a clean configuration struct.
 
 ---
 
-## Why `MixerViewModel` is not yet split
+## Why `MixerViewModel` is being split incrementally
 
-**Decision**: All coordinator logic lives in one `@MainActor` class.
+**Decision**: `MixerViewModel` remains the central `@MainActor` traffic controller, but
+self-contained subsystems are being extracted one coordinator at a time.
 
 **Reasoning**:
-- A split was not attempted yet because the boundaries between subsystems are still
-  shifting as features are added (e.g., helper resolution interacts with live control
-  state in several places).
-- An incorrect split creates inter-coordinator dependencies that are harder to reason
-  about than a single monolithic class.
-- The current size (~1900 lines) is large but still navigable with good naming.
+- The initial monolithic model made cross-feature cleanup easy to audit while Process Tap
+  behavior was changing quickly.
+- Several boundaries are now stable enough to extract safely:
+  `AdvancedHelperDiscoveryCoordinator`, `SystemOutputCoordinator`,
+  `AdvancedProcessTapDiagnosticsCoordinator`, and `AdvancedLiveControlCoordinator`.
+- Product Real App Control remains intentionally centralized because it combines direct
+  visible-PID control, browser/helper resolution, cache invalidation, one-active-session
+  rules, row slider/mute behavior, timeout handling, app/helper exit handling, output
+  device cleanup, and menu bar/banner state.
+- Two-App Readiness still lives in `MixerViewModel`, but fake-backed characterization
+  tests now make a staged future extraction safer.
 
-**Would revisit**: This is explicitly on the roadmap. The plan is to extract one
-coordinator at a time, starting with the most self-contained subsystem (helper discovery
-or Two-App Readiness), validate the pattern, then proceed.
+**Would revisit**: Continue the split in small steps. The next likely candidates are
+Two-App Readiness state/model extraction and then a Two-App Readiness coordinator. Product
+Real App Control should only move after a read-only boundary plan and more characterization
+tests confirm the safest interface.
