@@ -1295,14 +1295,6 @@ final class MixerViewModel: ObservableObject {
         )
     }
 
-    private var selectedProcessTapApp: MixerAppItem? {
-        guard let selectedProcessTapAppID else {
-            return nil
-        }
-
-        return apps.first { $0.id == selectedProcessTapAppID }
-    }
-
     private var selectedTwoAppReadinessTargetA: TwoAppReadinessTargetOption? {
         guard let selectedTwoAppReadinessAppAID else {
             return nil
@@ -1334,10 +1326,6 @@ final class MixerViewModel: ObservableObject {
         }
 
         return processIdentifier > 0
-    }
-
-    private var selectedHelperDiscoveryApp: MixerAppItem? {
-        advancedHelperDiscovery.selectedHelperDiscoveryApp(in: apps)
     }
 
     private var isAppAudioTargetResolving: Bool {
