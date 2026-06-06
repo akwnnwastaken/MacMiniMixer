@@ -1,19 +1,6 @@
 import AppKit
 import Foundation
 
-struct TwoAppReadinessTargetOption: Identifiable, Equatable, Sendable {
-    let id: String
-    let title: String
-    let detail: String?
-    let target: ProcessTapTarget
-    let eligibility: ProcessTapProcessEligibility
-    let isHelper: Bool
-
-    var processIdentifier: Int32? {
-        target.processIdentifier
-    }
-}
-
 @MainActor
 final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
@@ -75,7 +62,7 @@ final class MixerViewModel: ObservableObject {
         self.processTapEligibility = processTapEligibility
 
         let initialApps = applicationLister.listApplications()
-        let initialTwoAppReadinessEligibility = Self.twoAppReadinessEligibility(
+        let initialTwoAppReadinessEligibility = TwoAppReadinessState.eligibilityByAppID(
             for: initialApps,
             processTapEligibility: processTapEligibility
         )
@@ -104,11 +91,11 @@ final class MixerViewModel: ObservableObject {
         )
         self.apps = initialApps
         self.twoAppReadinessEligibilityByAppID = initialTwoAppReadinessEligibility
-        self.selectedTwoAppReadinessAppAID = Self.preferredTwoAppReadinessAppIDs(
+        self.selectedTwoAppReadinessAppAID = TwoAppReadinessState.preferredAppIDs(
             in: initialApps,
             eligibilityByAppID: initialTwoAppReadinessEligibility
         ).appAID
-        self.selectedTwoAppReadinessAppBID = Self.preferredTwoAppReadinessAppIDs(
+        self.selectedTwoAppReadinessAppBID = TwoAppReadinessState.preferredAppIDs(
             in: initialApps,
             eligibilityByAppID: initialTwoAppReadinessEligibility
         ).appBID
@@ -246,48 +233,12 @@ final class MixerViewModel: ObservableObject {
     }
 
     var twoAppReadinessTargets: [TwoAppReadinessTargetOption] {
-        let appTargets = apps.compactMap { app -> TwoAppReadinessTargetOption? in
-            guard twoAppReadinessEligibilityByAppID[app.id]?.isEligible == true else {
-                return nil
-            }
-
-            return TwoAppReadinessTargetOption(
-                id: app.id,
-                title: app.name,
-                detail: app.processIdentifier.map { "PID \($0)" },
-                target: ProcessTapTarget(
-                    appID: app.id,
-                    appName: app.name,
-                    processIdentifier: app.processIdentifier
-                ),
-                eligibility: twoAppReadinessEligibilityByAppID[app.id] ?? .unavailable("Core Audio process unavailable"),
-                isHelper: false
-            )
-        }
-
-        guard let advancedProcessTapTarget else {
-            return appTargets
-        }
-
-        let helperEligibility = processTapEligibility(advancedProcessTapTarget.target.processIdentifier)
-        guard helperEligibility.isEligible else {
-            return appTargets
-        }
-
-        let helperTarget = TwoAppReadinessTargetOption(
-            id: advancedProcessTapTarget.id,
-            title: advancedProcessTapTarget.twoAppReadinessTitle,
-            detail: advancedProcessTapTarget.detail,
-            target: ProcessTapTarget(
-                appID: advancedProcessTapTarget.target.appID,
-                appName: advancedProcessTapTarget.twoAppReadinessTitle,
-                processIdentifier: advancedProcessTapTarget.target.processIdentifier
-            ),
-            eligibility: helperEligibility,
-            isHelper: true
+        TwoAppReadinessState.targetOptions(
+            apps: apps,
+            eligibilityByAppID: twoAppReadinessEligibilityByAppID,
+            advancedProcessTapTarget: advancedProcessTapTarget,
+            processTapEligibility: processTapEligibility
         )
-
-        return appTargets + [helperTarget]
     }
 
     func setShowAllApps(_ showAllApps: Bool) {
@@ -605,8 +556,8 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        guard validProcessIdentifier(appA.processIdentifier),
-              validProcessIdentifier(appB.processIdentifier) else {
+        guard TwoAppReadinessState.validProcessIdentifier(appA.processIdentifier),
+              TwoAppReadinessState.validProcessIdentifier(appB.processIdentifier) else {
             twoAppReadinessResult = ProcessTapTwoAppReadinessResult(
                 outcome: .invalidTarget,
                 message: "Both apps need valid processes",
@@ -656,11 +607,10 @@ final class MixerViewModel: ObservableObject {
             detail: "Gain \(gain.percentLabel).",
             severity: .info
         )
-        twoAppReadinessSnapshot = ProcessTapTwoAppReadinessSnapshot(
-            sessions: [
-                .starting(slot: .appA, target: targetA, gain: gain),
-                .starting(slot: .appB, target: targetB, gain: gain)
-            ]
+        twoAppReadinessSnapshot = TwoAppReadinessState.startingSnapshot(
+            appA: targetA,
+            appB: targetB,
+            gain: gain
         )
 
         Task {
@@ -1165,7 +1115,7 @@ final class MixerViewModel: ObservableObject {
 
     private func refreshTwoAppReadinessSelectionsAfterAppRefresh() {
         let targetIDs = Set(twoAppReadinessTargets.map(\.id))
-        let preferredIDs = Self.preferredTwoAppReadinessTargetIDs(in: twoAppReadinessTargets)
+        let preferredIDs = TwoAppReadinessState.preferredTargetIDs(in: twoAppReadinessTargets)
 
         if isTwoAppReadinessRunning {
             if selectedTwoAppReadinessAppAID.map({ !targetIDs.contains($0) }) == true ||
@@ -1230,7 +1180,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func refreshTwoAppReadinessEligibility() {
-        twoAppReadinessEligibilityByAppID = Self.twoAppReadinessEligibility(
+        twoAppReadinessEligibilityByAppID = TwoAppReadinessState.eligibilityByAppID(
             for: apps,
             processTapEligibility: processTapEligibility
         )
@@ -1256,45 +1206,6 @@ final class MixerViewModel: ObservableObject {
         )
     }
 
-    private static func preferredTwoAppReadinessAppIDs(
-        in apps: [MixerAppItem],
-        eligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
-    ) -> (appAID: MixerAppItem.ID?, appBID: MixerAppItem.ID?) {
-        let eligibleApps = apps.filter { app in
-            eligibilityByAppID[app.id]?.isEligible == true
-        }
-
-        return (
-            appAID: eligibleApps.first?.id,
-            appBID: eligibleApps.dropFirst().first?.id
-        )
-    }
-
-    private static func preferredTwoAppReadinessTargetIDs(
-        in targets: [TwoAppReadinessTargetOption]
-    ) -> (appAID: String?, appBID: String?) {
-        let appA = targets.first
-        let appB = targets.first { target in
-            target.id != appA?.id && target.processIdentifier != appA?.processIdentifier
-        }
-
-        return (
-            appAID: appA?.id,
-            appBID: appB?.id
-        )
-    }
-
-    private static func twoAppReadinessEligibility(
-        for apps: [MixerAppItem],
-        processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
-    ) -> [MixerAppItem.ID: ProcessTapProcessEligibility] {
-        Dictionary(
-            uniqueKeysWithValues: apps.map { app in
-                (app.id, processTapEligibility(app.processIdentifier))
-            }
-        )
-    }
-
     private var selectedTwoAppReadinessTargetA: TwoAppReadinessTargetOption? {
         guard let selectedTwoAppReadinessAppAID else {
             return nil
@@ -1312,20 +1223,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     private var selectedTwoAppReadinessTargetsUseSameProcess: Bool {
-        guard let targetA = selectedTwoAppReadinessTargetA,
-              let targetB = selectedTwoAppReadinessTargetB else {
-            return false
-        }
-
-        return targetA.processIdentifier == targetB.processIdentifier
-    }
-
-    private func validProcessIdentifier(_ processIdentifier: Int32?) -> Bool {
-        guard let processIdentifier else {
-            return false
-        }
-
-        return processIdentifier > 0
+        TwoAppReadinessState.targetsUseSameProcess(
+            selectedTwoAppReadinessTargetA,
+            selectedTwoAppReadinessTargetB
+        )
     }
 
     private var isAppAudioTargetResolving: Bool {
