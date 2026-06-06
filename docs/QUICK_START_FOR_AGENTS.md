@@ -73,11 +73,12 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 | File | Why |
 |---|---|
 | `MacMiniMixer/App/MacMiniMixerApp.swift` | Entry point, all DI wiring |
-| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central traffic controller for product Real Control, Two-App Readiness, app list/mock rows, lifecycle cleanup, and status |
+| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central traffic controller for product Real Control, app list/mock rows, lifecycle cleanup, cross-feature busy gating, and status |
 | `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryCoordinator.swift` | Advanced helper scan, probe, auto-detect, and Advanced helper target |
 | `MacMiniMixer/Features/Mixer/SystemOutputCoordinator.swift` | System volume/device state and pure volume/device operations |
 | `MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift` | Advanced Process Tap Test, Mute Probe, and Replay Probe |
 | `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
+| `MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift` | Advanced Two-App Readiness selection, target options, start/stop, snapshot/result state |
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live Control implementation |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLifecycle.swift` | Core Audio resource management |
 | `MacMiniMixer/Services/Audio/ProcessTap/AppAudioTargetResolving.swift` | Helper resolution + cache |
@@ -91,17 +92,17 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 
 ## Safest Next Technical Steps
 
-1. **Extract Two-App Readiness in stages** — start with state/model extraction, then a
-   coordinator once characterization tests make behavior safe to preserve.
-2. **Plan product Real Control extraction read-only** — keep implementation centralized
+1. **Plan product Real Control extraction read-only** — keep implementation centralized
    until direct PID, helper PID, cache invalidation, and lifecycle cleanup boundaries are
    fully understood.
-3. **Improve non-writable output volume UX** — make unwritable-device failures clearer
+2. **Improve non-writable output volume UX** — make unwritable-device failures clearer
    without changing Core Audio behavior.
-4. **Add accessibility labels** for app rows, sliders, mute buttons, Advanced controls,
+3. **Add accessibility labels** for app rows, sliders, mute buttons, Advanced controls,
    and output-device controls.
-5. **Harden helper PID-change handling** and document behavior across browser reloads,
+4. **Harden helper PID-change handling** and document behavior across browser reloads,
    navigation, and helper restarts.
+5. **Add more lifecycle/status characterization tests** before moving more of
+   `MixerViewModel`.
 
 ---
 

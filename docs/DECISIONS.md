@@ -166,15 +166,16 @@ self-contained subsystems are being extracted one coordinator at a time.
   behavior was changing quickly.
 - Several boundaries are now stable enough to extract safely:
   `AdvancedHelperDiscoveryCoordinator`, `SystemOutputCoordinator`,
-  `AdvancedProcessTapDiagnosticsCoordinator`, and `AdvancedLiveControlCoordinator`.
+  `AdvancedProcessTapDiagnosticsCoordinator`, `AdvancedLiveControlCoordinator`, and
+  `TwoAppReadinessCoordinator`.
 - Product Real App Control remains intentionally centralized because it combines direct
   visible-PID control, browser/helper resolution, cache invalidation, one-active-session
   rules, row slider/mute behavior, timeout handling, app/helper exit handling, output
   device cleanup, and menu bar/banner state.
-- Two-App Readiness still lives in `MixerViewModel`, but fake-backed characterization
-  tests now make a staged future extraction safer.
+- Two-App Readiness orchestration moved into a coordinator after fake-backed
+  characterization tests covered target selection, helper-target use, start/stop,
+  completion, output-change stop, and selection repair behavior.
 
-**Would revisit**: Continue the split in small steps. The next likely candidates are
-Two-App Readiness state/model extraction and then a Two-App Readiness coordinator. Product
-Real App Control should only move after a read-only boundary plan and more characterization
-tests confirm the safest interface.
+**Would revisit**: Continue the split in small steps. Product Real App Control should only
+move after a read-only boundary plan and more characterization tests confirm the safest
+interface.

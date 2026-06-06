@@ -47,8 +47,8 @@ to `MixerPanelView`.
 
 `MixerViewModel` is no longer fully monolithic, but it remains the central `@MainActor`
 traffic controller for cross-feature behavior. It still owns product Real App Control,
-Two-App Readiness, app list/mock row state, lifecycle cleanup, cross-feature busy gating,
-and status messages.
+app list/mock row state, lifecycle cleanup, cross-feature busy gating, and status
+messages.
 
 Extracted coordinators:
 
@@ -58,11 +58,12 @@ Extracted coordinators:
 | `SystemOutputCoordinator` | System volume/device state and pure volume/device operations |
 | `AdvancedProcessTapDiagnosticsCoordinator` | Process Tap Test, Mute Probe, Replay Probe, diagnostic target selection, and replay gain/result state |
 | `AdvancedLiveControlCoordinator` | Manual Advanced Live start/stop orchestration |
+| `TwoAppReadinessCoordinator` | Advanced Two-App Readiness selection, target options, start/stop orchestration, snapshot/result state, and selection repair |
 
 `MixerViewModel` forwards coordinator state and methods to keep the existing SwiftUI view
 surface stable. It also preserves centralized cleanup orchestration: output device
 changes, panel close, app termination, active live sessions, helper tasks, Advanced tools,
-and Two-App Readiness are still coordinated from one place.
+and readiness cleanup triggers are still coordinated from one place.
 
 ---
 
@@ -388,6 +389,15 @@ Gain is a constant scalar applied per-sample via `ProcessTapOutputBufferCopier`.
 
 ## Two-App Readiness
 
+`MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift`
+
+`TwoAppReadinessCoordinator` owns the Advanced UI-facing readiness state: selected App A,
+selected App B, gain, tap eligibility, target options including one selected Advanced
+helper target, running flag, snapshots, results, selection repair, and start/stop calls.
+`MixerViewModel` forwards this state to existing views and still triggers cross-feature
+cleanup for panel close, output-device changes, app termination, and Advanced helper
+target removal.
+
 `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapTwoAppReadinessTesting.swift`
 
 `CoreAudioProcessTapTwoAppReadinessTester.startTest(appA:, appB:, gain:, onUpdate:, onFinished:)`:
@@ -639,12 +649,13 @@ On macOS < 14.2:
 | File | Purpose |
 |---|---|
 | `MacMiniMixer/App/MacMiniMixerApp.swift` | Entry point, DI wiring |
-| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central `@MainActor` traffic controller for product Real Control, Two-App Readiness, app list/mock state, lifecycle cleanup, and status |
+| `MacMiniMixer/Features/Mixer/MixerViewModel.swift` | Central `@MainActor` traffic controller for product Real Control, app list/mock state, lifecycle cleanup, cross-feature busy gating, and status |
 | `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryCoordinator.swift` | Advanced helper discovery, probe, auto-detect, and Advanced helper target |
 | `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryState.swift` | Advanced helper target and auto-detect score value types |
 | `MacMiniMixer/Features/Mixer/SystemOutputCoordinator.swift` | System volume/device state and pure operations |
 | `MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift` | Process Tap Test, Mute Probe, and Replay Probe orchestration |
 | `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
+| `MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift` | Advanced Two-App Readiness orchestration |
 | `MacMiniMixer/Features/MenuBar/MixerPanelView.swift` | Panel UI layout |
 | `MacMiniMixer/Features/MenuBar/MenuBarRootView.swift` | Thin root wrapper |
 | `MacMiniMixer/Features/Mixer/MixerAppRowView.swift` | Per-app row UI |

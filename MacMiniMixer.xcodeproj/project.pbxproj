@@ -16,6 +16,7 @@
 		9B7D1ADE2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */; };
 		9B7D1AE22C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */; };
 		9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */; };
+		9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */; };
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
@@ -82,6 +83,7 @@
 		9B7D1AEA2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AEB2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift */; };
 		9B7D1AEC2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AED2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift */; };
 		9B7D1AEE2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AEF2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift */; };
+		9B7D1AF22C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF32C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -105,6 +107,7 @@
 		9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemOutputCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedProcessTapDiagnosticsCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinator.swift; sourceTree = "<group>"; };
+		9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
@@ -172,6 +175,7 @@
 		9B7D1AEB2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AED2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModelTwoAppReadinessTests.swift; sourceTree = "<group>"; };
 		9B7D1AEF2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessState.swift; sourceTree = "<group>"; };
+		9B7D1AF32C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -283,6 +287,7 @@
 				9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */,
 				9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */,
 				9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */,
+				9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */,
 				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
 				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
 				9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */,
@@ -385,6 +390,7 @@
 				9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */,
 				9B7D1AEB2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift */,
 				9B7D1AED2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift */,
+				9B7D1AF32C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift */,
 			);
 			path = MacMiniMixerTests;
 			sourceTree = "<group>";
@@ -496,6 +502,7 @@
 				9B7D1ADE2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift in Sources */,
 				9B7D1AE22C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift in Sources */,
 				9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */,
+				9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
@@ -569,6 +576,7 @@
 				9B7D1AE62C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift in Sources */,
 				9B7D1AEA2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift in Sources */,
 				9B7D1AEC2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift in Sources */,
+				9B7D1AF22C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

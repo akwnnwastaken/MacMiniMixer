@@ -85,18 +85,17 @@ is called after a cached-helper start failure.
 
 `MixerViewModel.swift` is now about 1,370 lines and is no longer fully monolithic.
 Advanced helper discovery, system output, Advanced Process Tap diagnostics, and manual
-Advanced Live orchestration have been extracted into coordinators. The view model still
-owns app list/mock row state, product Real App Control, Two-App Readiness, lifecycle
-cleanup, cross-feature coordination, and status messages.
+Advanced Live orchestration, and Advanced Two-App Readiness have been extracted into
+coordinators. The view model still owns app list/mock row state, product Real App Control,
+lifecycle cleanup, cross-feature coordination, and status messages.
 
 **Files**: `MixerViewModel.swift` and likely new files such as:
-- `TwoAppReadinessCoordinator.swift`
-- possible Two-App Readiness state/model file
+- possible product Real Control or lifecycle/status coordinator files after read-only
+  planning
 
-**Approach**: Continue incrementally. Extract Two-App Readiness state/model first, then a
-Two-App Readiness coordinator if the shape stays clean. Keep product Real App Control in
-`MixerViewModel` until a separate read-only plan confirms safe boundaries for helper
-resolution, cache invalidation, live session state, and lifecycle cleanup.
+**Approach**: Continue incrementally. Keep product Real App Control in `MixerViewModel`
+until a separate read-only plan confirms safe boundaries for helper resolution, cache
+invalidation, live session state, and lifecycle cleanup.
 
 ---
 
@@ -115,32 +114,6 @@ device change cleanup, and menu bar/banner state.
 **Action**: Do a read-only boundary assessment before any extraction. Do not move product
 Real Control until the plan identifies stable APIs and the required characterization
 tests.
-
----
-
-### Two-App Readiness state/model extraction
-
-**Priority**: High | **Risk**: Low
-
-Two-App Readiness still lives in `MixerViewModel`, but it now has fake-backed
-characterization tests. A small preparatory extraction can move pure target option/state
-types before moving orchestration.
-
-**Files**: `MixerViewModel.swift`, `ProcessTapTwoAppReadinessTesting.swift`, likely new
-state/model file under `Features/Mixer`.
-
----
-
-### Two-App Readiness coordinator extraction
-
-**Priority**: Medium | **Risk**: Medium
-
-After the state/model extraction, move selection, target option construction, start/stop,
-snapshot/result state, and selection refresh into a coordinator while leaving
-cross-feature lifecycle orchestration in `MixerViewModel` until proven safe.
-
-**Files**: `MixerViewModel.swift`, `TwoAppReadinessTestView.swift`, new
-`TwoAppReadinessCoordinator.swift`.
 
 ---
 
@@ -183,8 +156,8 @@ code grows.
 **Priority**: Medium | **Risk**: Low
 
 The remaining `MixerViewModel` clusters are product Real App Control, app list/mock row
-state, Two-App Readiness, lifecycle cleanup, and status messages. Add narrow tests before
-moving any of these responsibilities.
+state, lifecycle cleanup, cross-feature busy gating, and status messages. Add narrow
+tests before moving any of these responsibilities.
 
 **Files**: `MixerViewModel.swift`, new test file using mock implementations.
 
@@ -371,6 +344,6 @@ extension, no persistent virtual device), uninstalling is as simple as deleting 
 | Priority | Items |
 |---|---|
 | Critical | — |
-| High | Writable-volume UX, helper PID change handling, helper resolver confidence, continue MixerViewModel split, Product Real Control read-only plan, Two-App Readiness state/model extraction |
-| Medium | Two-App Readiness coordinator extraction, OutputQueue evaluation, accessibility labels, helper resolution UX feedback, multi-session architecture evaluation, GitHub release packaging |
+| High | Writable-volume UX, helper PID change handling, helper resolver confidence, continue MixerViewModel split, Product Real Control read-only plan |
+| Medium | OutputQueue evaluation, accessibility labels, helper resolution UX feedback, multi-session architecture evaluation, GitHub release packaging |
 | Low | Unified stop-reason enum, configurable timeout, settings window, CHANGELOG, centralized renderer, HAL evaluation, installer |

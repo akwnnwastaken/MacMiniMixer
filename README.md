@@ -20,7 +20,7 @@ Advanced helper diagnostics can scan helper/content process candidates for visib
 
 A successful Advanced readiness test was observed with Spotify + a YouTube helper target at 50% gain: Spotify reported 928 callbacks, peak 0.202, RMS 0.060, 928 queued buffers, 0 drops, and 0 failures; the YouTube helper reported 932 callbacks, peak 0.590, RMS 0.174, 932 queued buffers, 0 drops, and 0 failures. Both sessions stopped cleanly by timeout. This is promising, but it does not mean the app is production-ready as a multi-app mixer or that browser/helper row control is stable production behavior.
 
-Recent maintenance work replaced brittle string-based result checks with typed outcomes, made Process Tap resource cleanup thread-safe, added lightweight `os.Logger` diagnostics, added macOS 14.2 Process Tap availability guards while keeping the deployment target at macOS 13.0, added an MIT License, added GitHub Actions build/test CI, added XCTest coverage, unified Process Tap diagnostics accumulation, and extracted shared Process Tap output buffer copying logic with unit tests. `MixerViewModel` has also started an incremental split into coordinators for Advanced helper discovery, system output, Advanced Process Tap diagnostics, and manual Advanced Live Control.
+Recent maintenance work replaced brittle string-based result checks with typed outcomes, made Process Tap resource cleanup thread-safe, added lightweight `os.Logger` diagnostics, added macOS 14.2 Process Tap availability guards while keeping the deployment target at macOS 13.0, added an MIT License, added GitHub Actions build/test CI, added XCTest coverage, unified Process Tap diagnostics accumulation, and extracted shared Process Tap output buffer copying logic with unit tests. `MixerViewModel` has also started an incremental split into coordinators for Advanced helper discovery, system output, Advanced Process Tap diagnostics, manual Advanced Live Control, and Advanced Two-App Readiness.
 
 It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by default, only one real-controlled row/session can be active, and production multi-app per-application control is not implemented.
 
@@ -160,7 +160,8 @@ The current live-control implementation is intentionally still limited to one ac
 - `SystemOutputCoordinator` owns system volume/device state and pure volume/device operations.
 - `AdvancedProcessTapDiagnosticsCoordinator` owns Process Tap Test, Mute Probe, and Replay Probe.
 - `AdvancedLiveControlCoordinator` owns manual Advanced Live start/stop orchestration.
-- `MixerViewModel` remains the central coordinator for product Real App Control, Two-App Readiness, app list/mock row state, lifecycle cleanup, cross-feature busy gating, and status messages.
+- `TwoAppReadinessCoordinator` owns Advanced Two-App Readiness selection, target options, start/stop orchestration, snapshot/result state, and selection repair.
+- `MixerViewModel` remains the central coordinator for product Real App Control, app list/mock row state, lifecycle cleanup, cross-feature busy gating, and status messages.
 - XCTest coverage currently focuses on pure logic and synthetic buffers, not real Process Tap or device integration.
 
 ## Requirements
@@ -227,7 +228,7 @@ Near-term:
 - More robust output device handling
 - Error/status UI for devices that cannot switch or expose writable volume
 - Continue simplifying the main UI while keeping diagnostics available in Advanced
-- Continue the careful `MixerViewModel` split with Two-App Readiness state/model extraction before any larger coordinator move
+- Continue the careful `MixerViewModel` split after read-only planning around product Real Control and lifecycle/status boundaries
 - Add more characterization tests around remaining product Real Control, lifecycle cleanup, app list/mock state, and status behavior
 - Refine live session reliability and latency
 - Refine global Experimental Real App Control behavior
