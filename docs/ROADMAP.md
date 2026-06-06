@@ -224,12 +224,14 @@ explanation of what is happening would help users understand the delay.
 
 ---
 
-### Configurable live control timeout
+### Configurable Advanced live control timeout
 
 **Priority**: Low | **Risk**: Low
 
-The 60-second timeout is hardcoded in `AppConstants.processTapLiveControlMaxDuration`.
-A settings preference for this value would help power users who want longer sessions.
+Manual Advanced Live Control still uses the limited live policy from
+`AppConstants.processTapLiveControlMaxDuration`; Product Real App Control uses an
+indefinite policy while healthy. A settings preference for the Advanced/manual value could
+help power users who want different diagnostic session lengths.
 
 **Files**: `AppConstants.swift`, `MixerPanelView.swift` or a new Settings window.
 

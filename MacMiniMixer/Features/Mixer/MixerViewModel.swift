@@ -918,7 +918,8 @@ final class MixerViewModel: ObservableObject {
         Task {
             let result = await processTapLiveController.startLiveControl(
                 for: target,
-                gain: gain
+                gain: gain,
+                timeoutPolicy: .indefinite
             ) { diagnostics in
                 Task { @MainActor in
                     self.processTapLiveDiagnostics = diagnostics

@@ -10,6 +10,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
     func startLiveControl(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
@@ -17,6 +18,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             self.startLiveControlSynchronously(
                 for: target,
                 gain: gain,
+                timeoutPolicy: timeoutPolicy,
                 onDiagnostics: onDiagnostics,
                 onStopped: onStopped
             )
@@ -58,6 +60,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
     private func startLiveControlSynchronously(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) -> ProcessTapTestResult {
@@ -97,6 +100,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             return attemptStart(
                 target: target,
                 gain: gain,
+                timeoutPolicy: timeoutPolicy,
                 processIdentifier: processIdentifier,
                 onDiagnostics: onDiagnostics,
                 onStopped: onStopped
@@ -116,6 +120,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
     private func attemptStart(
         target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         processIdentifier: Int32,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
@@ -302,19 +307,19 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         sessionLock.unlock()
         didActivateSession = true
 
-        startTimers(for: session)
+        startTimers(for: session, timeoutPolicy: timeoutPolicy)
         onDiagnostics(session.diagnostics())
         AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public)")
 
         return ProcessTapTestResult(
             outcome: .liveControlStarted,
             message: "Live control started",
-            detail: "Gain \(gain.percentLabel). Auto-stops after \(Int(AppConstants.processTapLiveControlMaxDuration))s.",
+            detail: startDetail(gain: gain, timeoutPolicy: timeoutPolicy),
             severity: .info
         )
     }
 
-    private func startTimers(for session: ProcessTapLiveSession) {
+    private func startTimers(for session: ProcessTapLiveSession, timeoutPolicy: ProcessTapLiveTimeoutPolicy) {
         let diagnosticsTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         diagnosticsTimer.schedule(deadline: .now(), repeating: AppConstants.processTapLevelMeterUpdateInterval)
         diagnosticsTimer.setEventHandler { [weak self, weak session] in
@@ -335,19 +340,35 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             session.onDiagnostics(session.diagnostics())
         }
 
-        let timeoutTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timeoutTimer.schedule(deadline: .now() + AppConstants.processTapLiveControlMaxDuration)
-        timeoutTimer.setEventHandler { [weak self, weak session] in
-            guard let self, let session else {
-                return
-            }
+        let timeoutTimer: DispatchSourceTimer?
+        switch timeoutPolicy {
+        case .limited(let duration):
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            timer.schedule(deadline: .now() + duration)
+            timer.setEventHandler { [weak self, weak session] in
+                guard let self, let session else {
+                    return
+                }
 
-            self.stop(session: session, reason: .timedOut)
+                self.stop(session: session, reason: .timedOut)
+            }
+            timeoutTimer = timer
+        case .indefinite:
+            timeoutTimer = nil
         }
 
         session.setTimers(diagnosticsTimer: diagnosticsTimer, timeoutTimer: timeoutTimer)
         diagnosticsTimer.resume()
-        timeoutTimer.resume()
+        timeoutTimer?.resume()
+    }
+
+    private func startDetail(gain: ProcessTapReplayGainOption, timeoutPolicy: ProcessTapLiveTimeoutPolicy) -> String {
+        switch timeoutPolicy {
+        case .limited(let duration):
+            return "Gain \(gain.percentLabel). Auto-stops after \(Int(duration))s."
+        case .indefinite:
+            return "Gain \(gain.percentLabel)."
+        }
     }
 
     @discardableResult
@@ -512,7 +533,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         return true
     }
 
-    func setTimers(diagnosticsTimer: DispatchSourceTimer, timeoutTimer: DispatchSourceTimer) {
+    func setTimers(diagnosticsTimer: DispatchSourceTimer, timeoutTimer: DispatchSourceTimer?) {
         cleanupLock.lock()
         self.diagnosticsTimer = diagnosticsTimer
         self.timeoutTimer = timeoutTimer

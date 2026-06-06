@@ -36,6 +36,10 @@ final class AdvancedLiveControlCoordinatorTests: XCTestCase {
         XCTAssertEqual(liveController.startedTargets.map(\.appID), ["music"])
         XCTAssertEqual(liveController.startedTargets.map(\.processIdentifier), [102])
         XCTAssertEqual(liveController.startedGains, [selectedGain])
+        XCTAssertEqual(
+            liveController.startTimeoutPolicies,
+            [.limited(AppConstants.processTapLiveControlMaxDuration)]
+        )
         XCTAssertEqual(startedAppName, "Music")
         XCTAssertEqual(liveDiagnostics?.selectedGain, selectedGain)
         XCTAssertEqual(diagnostics.result?.outcome, .liveControlStarted)
@@ -172,16 +176,19 @@ private func makeAdvancedLiveApp(id: String, name: String, pid: Int32) -> MixerA
 private final class FakeAdvancedLiveController: ProcessTapLiveControlling, @unchecked Sendable {
     private(set) var startedTargets: [ProcessTapTarget] = []
     private(set) var startedGains: [ProcessTapReplayGainOption] = []
+    private(set) var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] = []
     private(set) var stopReasons: [ProcessTapLiveStopReason] = []
 
     func startLiveControl(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
         startedTargets.append(target)
         startedGains.append(gain)
+        startTimeoutPolicies.append(timeoutPolicy)
         onDiagnostics(
             ProcessTapLiveDiagnostics(
                 selectedGain: gain,

@@ -409,6 +409,7 @@ private final class FakeTwoAppLiveController: ProcessTapLiveControlling, @unchec
     func startLiveControl(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {

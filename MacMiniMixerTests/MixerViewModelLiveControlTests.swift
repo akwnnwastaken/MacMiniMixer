@@ -13,6 +13,10 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.liveController.startedTargets.map(\.appID), ["music"])
         XCTAssertEqual(harness.liveController.startedTargets.map(\.processIdentifier), [102])
         XCTAssertEqual(harness.liveController.startedTargets.map(\.appName), ["Music"])
+        XCTAssertEqual(
+            harness.liveController.startTimeoutPolicies,
+            [.limited(AppConstants.processTapLiveControlMaxDuration)]
+        )
     }
 
     func testManualAdvancedLiveIgnoresAdvancedHelperTarget() async {
@@ -46,6 +50,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.liveController.startedTargets.first?.appID, "music")
         XCTAssertEqual(harness.liveController.startedTargets.first?.appName, "Music")
         XCTAssertEqual(harness.liveController.startedTargets.first?.processIdentifier, 102)
+        XCTAssertEqual(harness.liveController.startTimeoutPolicies, [.indefinite])
         XCTAssertEqual(harness.viewModel.activeExperimentalAppID, "music")
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "Music")
     }
@@ -77,6 +82,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(resolver.resolveRequests.map(\.appID), ["youtube"])
         XCTAssertEqual(harness.liveController.startedTargets.first?.processIdentifier, 201)
         XCTAssertEqual(harness.liveController.startedTargets.first?.appName, "YouTube")
+        XCTAssertEqual(harness.liveController.startTimeoutPolicies, [.indefinite])
         XCTAssertEqual(harness.viewModel.activeExperimentalAppID, "youtube")
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "YouTube")
     }
@@ -444,6 +450,7 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
     private var startResults: [ProcessTapTestResult]
     private(set) var startedTargets: [ProcessTapTarget] = []
     private(set) var startGains: [ProcessTapReplayGainOption] = []
+    private(set) var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] = []
     private(set) var gainUpdates: [ProcessTapReplayGainOption] = []
     private(set) var stopReasons: [ProcessTapLiveStopReason] = []
     private var onStopped: (@Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
@@ -457,11 +464,13 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
     func startLiveControl(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
         startedTargets.append(target)
         startGains.append(gain)
+        startTimeoutPolicies.append(timeoutPolicy)
         self.onStopped = onStopped
         onDiagnostics(makeLiveDiagnostics(gain: gain))
         guard !startResults.isEmpty else {

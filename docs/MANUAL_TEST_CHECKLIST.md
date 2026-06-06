@@ -135,9 +135,9 @@ Setup: Global "Real app control" ON. Spotify playing audio.
 - **Expected**: Status warning "Stop active live control first". Music live control does
   not start.
 
-### 4.6 Timeout auto-stops at 60 seconds
-- Start live control. Wait 60 seconds.
-- **Expected**: Live control stops automatically. Status "Live control stopped: timeout".
+### 4.6 Product live control persists past 60 seconds
+- Start product live control. Wait longer than 60 seconds.
+- **Expected**: Live control remains active while the app and output device remain valid.
 
 ### 4.7 App quit stops live control
 - Start live control for an app, then quit the app.

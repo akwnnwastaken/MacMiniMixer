@@ -456,10 +456,12 @@ sessions.
     `outputQueue.enqueue(inputData, gain: gainState.scalar)`.
 12. `resources.startIO()`.
 13. `ProcessTapLiveSession` created and stored as `activeSession`.
-14. Two `DispatchSourceTimer` instances started:
+14. Timers are started:
     - Diagnostics timer: fires every 100ms, checks process liveness, checks output device
       change, calls `onDiagnostics`.
-    - Timeout timer: fires after 60s, calls `stop(session:, reason: .timedOut)`.
+    - Timeout timer: limited live sessions only; fires after 60s and calls
+      `stop(session:, reason: .timedOut)`. Product Real App Control requests an
+      indefinite policy and keeps only the diagnostics/liveness timer.
 
 ### Gain
 

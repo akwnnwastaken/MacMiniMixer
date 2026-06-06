@@ -58,6 +58,22 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapLiveSessionStartResult {
+        await startSession(
+            for: target,
+            gain: gain,
+            timeoutPolicy: .standard,
+            onDiagnostics: onDiagnostics,
+            onStopped: onStopped
+        )
+    }
+
+    private func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult {
         let sessionID = ProcessTapLiveSessionID()
         let sessionState = ProcessTapLiveSessionState(id: sessionID, target: target, gain: gain)
         let controller = controllerFactory()
@@ -77,7 +93,8 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         AppLogger.processTap.info("Live session start reserved sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
         let result = await controller.startLiveControl(
             for: target,
-            gain: gain
+            gain: gain,
+            timeoutPolicy: timeoutPolicy
         ) { [weak self] diagnostics in
             self?.recordDiagnostics(diagnostics, for: sessionID)
             onDiagnostics(sessionID, diagnostics)
@@ -153,12 +170,14 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     func startLiveControl(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
         let startResult = await startSession(
             for: target,
             gain: gain,
+            timeoutPolicy: timeoutPolicy,
             onDiagnostics: { _, diagnostics in
                 onDiagnostics(diagnostics)
             },

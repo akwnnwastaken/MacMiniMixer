@@ -18,6 +18,7 @@ final class ProcessTapLiveSessionManagerTests: XCTestCase {
         XCTAssertEqual(manager.activeSessions.count, 1)
         XCTAssertEqual(manager.activeSession?.processIdentifier, 101)
         XCTAssertEqual(controller.startCallCount, 1)
+        XCTAssertEqual(controller.startTimeoutPolicies, [.limited(AppConstants.processTapLiveControlMaxDuration)])
     }
 
     func testStartSessionRejectsSecondSessionWhenMaxSessionsIsOne() async {
@@ -274,6 +275,7 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
     private var _startCallCount = 0
     private var _stopReasons: [ProcessTapLiveStopReason] = []
     private var _gainUpdates: [ProcessTapReplayGainOption] = []
+    private var _startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] = []
 
     init(
         startResult: ProcessTapTestResult = .started,
@@ -303,13 +305,20 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
         return _gainUpdates
     }
 
+    var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _startTimeoutPolicies
+    }
+
     func startLiveControl(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
-        recordStart(onStopped: onStopped)
+        recordStart(timeoutPolicy: timeoutPolicy, onStopped: onStopped)
 
         return startResult
     }
@@ -340,9 +349,13 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
         return stopResult
     }
 
-    private func recordStart(onStopped: @escaping (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void) {
+    private func recordStart(
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onStopped: @escaping (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) {
         lock.lock()
         _startCallCount += 1
+        _startTimeoutPolicies.append(timeoutPolicy)
         self.onStopped = onStopped
         lock.unlock()
     }
