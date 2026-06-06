@@ -197,6 +197,49 @@ explanation of what is happening would help users understand the delay.
 
 ---
 
+### Experimental per-app volume boost
+
+**Priority**: Low | **Risk**: High | **Status**: Later research / experimental
+
+Product Real App Control may eventually allow an eligible selected app to be amplified
+above its original audio level, with an initial research target of 100-200%.
+
+**User value**: Mute, reduce, or experimentally boost applications that provide no
+built-in volume controls.
+
+This is not part of the current implementation phase. It must be off by default and
+require a separate explicit opt-in from normal 0-100% per-app volume control. The first
+implementation should begin later with characterization tests and a narrowly scoped
+experimental mode.
+
+Required constraints:
+- Continue using only public Process Tap/Core Audio APIs.
+- No HAL driver, persistent virtual audio device, private APIs, third-party dependencies,
+  or disk audio saving.
+- Preserve the current one-active-real-session limitation initially.
+- Affect only the selected application.
+- Do not boost system output volume.
+- Do not affect unrelated applications.
+- Test direct visible-PID and browser/helper-PID paths separately.
+- Avoid sudden gain jumps, especially with headphones.
+- Show a clear warning before enabling gain above 100%.
+
+Before implementation, require a separate read-only assessment of current gain mapping,
+available audio headroom, clipping risk, distortion risk, hard clipping versus limiter or
+soft-clipping options, CPU usage, latency, long-running Process Tap resource behavior,
+repeated gain updates, sleep/wake behavior, output-device changes, controlled app exit
+cleanup, browser/helper PID exit or replacement, and recovery after Core Audio failure.
+
+Do not begin implementation until current Product Real App Control lifecycle and
+coordinator cleanup work are stable. Do not treat 200% as guaranteed clean output; the
+actual safe maximum may depend on clipping, limiter behavior, source material, and output
+hardware.
+
+**Files**: likely `MixerAppRowView.swift`, `MixerViewModel.swift`,
+`CoreAudioProcessTapLiveController.swift`, and focused tests after a read-only assessment.
+
+---
+
 ### Configurable Advanced live control timeout
 
 **Priority**: Low | **Risk**: Low
@@ -346,4 +389,4 @@ extension, no persistent virtual device), uninstalling is as simple as deleting 
 | Critical | — |
 | High | Writable-volume UX, helper PID change handling, helper resolver confidence, continue MixerViewModel split, Product Real Control read-only plan |
 | Medium | OutputQueue evaluation, accessibility labels, helper resolution UX feedback, multi-session architecture evaluation, GitHub release packaging |
-| Low | Unified stop-reason enum, configurable timeout, settings window, CHANGELOG, centralized renderer, HAL evaluation, installer |
+| Low | Experimental per-app volume boost, unified stop-reason enum, configurable timeout, settings window, CHANGELOG, centralized renderer, HAL evaluation, installer |
