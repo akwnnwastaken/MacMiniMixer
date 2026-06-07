@@ -25,8 +25,23 @@ struct ProductRealControlActiveSession: Equatable, Sendable {
 }
 
 struct ProductRealControlState: Equatable, Sendable {
-    private(set) var activeSession: ProductRealControlActiveSession?
+    private(set) var activeSessionsByAppID: [MixerAppItem.ID: ProductRealControlActiveSession] = [:]
     private(set) var resolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] = [:]
+
+    var activeSessions: [ProductRealControlActiveSession] {
+        Array(activeSessionsByAppID.values)
+    }
+
+    var activeVisibleAppIDs: [MixerAppItem.ID] {
+        Array(activeSessionsByAppID.keys)
+    }
+
+    /// Transitional single-session convenience: while orchestration still enforces one
+    /// active product session at a time, this returns that session. Phase 3 lifts the
+    /// single-session limit; new code should prefer `activeSessions` / `activeVisibleAppIDs`.
+    var activeSession: ProductRealControlActiveSession? {
+        activeSessionsByAppID.values.first
+    }
 
     var activeVisibleAppID: MixerAppItem.ID? {
         activeSession?.visibleAppID
@@ -50,7 +65,7 @@ struct ProductRealControlState: Equatable, Sendable {
         controlledProcessIdentifier: Int32?,
         source: ProductRealControlStartSource
     ) {
-        activeSession = ProductRealControlActiveSession(
+        activeSessionsByAppID[visibleAppID] = ProductRealControlActiveSession(
             visibleAppID: visibleAppID,
             displayName: displayName,
             controlledProcessIdentifier: controlledProcessIdentifier ?? -1,
@@ -59,7 +74,11 @@ struct ProductRealControlState: Equatable, Sendable {
     }
 
     mutating func clearActiveSession() {
-        activeSession = nil
+        activeSessionsByAppID = [:]
+    }
+
+    mutating func clearSession(for appID: MixerAppItem.ID) {
+        activeSessionsByAppID.removeValue(forKey: appID)
     }
 
     mutating func beginResolution(for appID: MixerAppItem.ID) {
@@ -75,7 +94,7 @@ struct ProductRealControlState: Equatable, Sendable {
     }
 
     func isActive(appID: MixerAppItem.ID, isLiveControlActive: Bool) -> Bool {
-        activeVisibleAppID == appID && isLiveControlActive
+        activeSessionsByAppID[appID] != nil && isLiveControlActive
     }
 
     func isResolving(appID: MixerAppItem.ID) -> Bool {

@@ -64,6 +64,94 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertNil(state.activeDisplayName)
     }
 
+    func testActiveSessionsAreTrackedByVisibleAppIDCollection() {
+        var state = ProductRealControlState()
+
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+
+        XCTAssertEqual(Set(state.activeVisibleAppIDs), ["spotify", "youtube"])
+        XCTAssertEqual(state.activeSessions.count, 2)
+        XCTAssertTrue(state.isActive(appID: "spotify", isLiveControlActive: true))
+        XCTAssertTrue(state.isActive(appID: "youtube", isLiveControlActive: true))
+        XCTAssertEqual(state.activeSessionsByAppID["youtube"]?.controlledProcessIdentifier, 201)
+    }
+
+    func testBeginningSessionForSameAppReplacesThatAppsSession() {
+        var state = ProductRealControlState()
+
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 202,
+            source: .cachedHelper
+        )
+
+        XCTAssertEqual(state.activeSessions.count, 1)
+        XCTAssertEqual(state.activeSessionsByAppID["youtube"]?.controlledProcessIdentifier, 202)
+        XCTAssertEqual(state.activeSessionsByAppID["youtube"]?.source, .cachedHelper)
+    }
+
+    func testClearSessionForAppRemovesOnlyThatAppSession() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+
+        state.clearSession(for: "spotify")
+
+        XCTAssertEqual(state.activeVisibleAppIDs, ["youtube"])
+        XCTAssertFalse(state.isActive(appID: "spotify", isLiveControlActive: true))
+        XCTAssertTrue(state.isActive(appID: "youtube", isLiveControlActive: true))
+    }
+
+    func testClearActiveSessionRemovesAllSessions() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+
+        state.clearActiveSession()
+
+        XCTAssertTrue(state.activeSessions.isEmpty)
+        XCTAssertTrue(state.activeVisibleAppIDs.isEmpty)
+        XCTAssertNil(state.activeSession)
+    }
+
     func testResolutionStateIsTrackedByVisibleRowID() {
         var state = ProductRealControlState()
 
