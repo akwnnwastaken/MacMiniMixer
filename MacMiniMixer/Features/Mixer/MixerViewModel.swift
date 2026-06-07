@@ -286,7 +286,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func isActiveLiveControlTarget(_ appID: MixerAppItem.ID) -> Bool {
-        appID == productRealControlState.activeVisibleAppID ||
+        productRealControlState.activeVisibleAppIDs.contains(appID) ||
             (isProcessTapLiveControlActive && appID == selectedProcessTapAppID)
     }
 
@@ -613,8 +613,11 @@ final class MixerViewModel: ObservableObject {
     /// no longer running: a live-controlled app that exited stops its session, and a pending
     /// helper resolution for a vanished app is cancelled.
     private func stopRealControlForExitedTargetApps() {
-        if let activeExperimentalAppID = productRealControlState.activeVisibleAppID,
-           !apps.contains(where: { $0.id == activeExperimentalAppID }) {
+        let exitedActiveAppIDs = productRealControlState.activeVisibleAppIDs.filter { activeAppID in
+            !apps.contains(where: { $0.id == activeAppID })
+        }
+        if !exitedActiveAppIDs.isEmpty {
+            // One active session today; Phase 4 will stop each exited session individually.
             stopProcessTapLiveControl(reason: .targetAppExited)
         }
 
