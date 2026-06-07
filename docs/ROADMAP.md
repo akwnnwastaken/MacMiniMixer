@@ -41,6 +41,12 @@ not yet a finished Windows Volume Mixer replacement.
   - `AdvancedProcessTapDiagnosticsCoordinator`
   - `AdvancedLiveControlCoordinator`
   - `TwoAppReadinessCoordinator`
+- `CHANGELOG.md` with milestone history.
+- Persistent read-only output-volume indicator for devices without a writable volume API.
+- Accessibility labels/values/hints for app rows, system output controls, and output-device
+  selection.
+- Consolidated output-device-change teardown in `MixerViewModel`
+  (`stopActiveAudioWorkForOutputDeviceChange`).
 
 ---
 
@@ -73,68 +79,121 @@ not yet a finished Windows Volume Mixer replacement.
 
 ## Next Recommended Low-Risk Work
 
-### Reassess Product Real Control after state/model extraction
+### Reassess Product Real Control after state/model extraction — done
 
-**Priority**: High | **Risk**: Low
+**Priority**: High | **Risk**: Low | **Status**: Reassessed; coordinator deferred
 
-Do a read-only reassessment of the Product Real Control cluster now that pure state/model
-helpers have been extracted.
-
-**Decision point**: Decide whether a narrow `ProductRealControlCoordinator` is justified.
-Do not assume the extraction must happen. If the benefit does not justify the risk, leave
-working Product orchestration in `MixerViewModel`.
-
-**Likely files**: `MixerViewModel.swift`, `ProductRealControlState.swift`,
-`MixerViewModelLiveControlTests.swift`.
+Read-only reassessment complete. **Decision: do not extract a `ProductRealControlCoordinator`
+yet** — the cluster is the central arbiter (~142 references), mutates four `@Published`
+properties the panel and other VM logic share, and drives the Advanced diagnostics display.
+Extraction would likely increase coupling/complexity. Full rationale and the conditions that
+would change the decision are recorded in `docs/DECISIONS.md`. Low-risk simplifications that
+fell out of the review were applied (pure `liveControlWarningMessage`, named app-refresh
+teardown helpers, documented intentional double `beginSession`).
 
 ---
 
-### Non-writable output-volume UX
+### Non-writable output-volume UX — done (follow-up optional)
 
-**Priority**: High | **Risk**: Low
+**Priority**: High | **Risk**: Low | **Status**: Implemented
 
-Some output devices do not expose a writable volume API. The app already surfaces short
-warnings; improve discoverability with a compact persistent indicator, tooltip, or clearer
-status affordance.
+`SystemOutputCoordinator` now tracks per-device writability
+(`isSystemOutputVolumeWritable`) and `MixerPanelView` shows a compact persistent
+"Read-only" badge plus tooltip when the selected device rejects volume writes. Writability
+resets when the selected device changes.
 
-**Likely files**: `SystemOutputCoordinator.swift`, `MixerPanelView.swift`,
-`OutputDeviceSelectorView.swift`.
+**Optional follow-up**: probe writability proactively on device refresh (instead of only
+after a rejected write) so the badge appears before the user first drags the slider.
 
 ---
 
-### Accessibility labels
+### Accessibility labels — done
+
+**Priority**: Medium | **Risk**: Low | **Status**: Implemented
+
+Explicit labels/values/hints added for app rows (volume slider, mute, Real/Resolving
+state), the system output slider and mute button, and output-device selection rows.
+
+**Optional follow-up**: SwiftUI accessibility/snapshot tests once a view-test harness
+exists (see "UI-layer test coverage" below).
+
+---
+
+### System Settings permission affordance — done (follow-up optional)
+
+**Priority**: Medium | **Risk**: Low | **Status**: Implemented
+
+A compact "Open System Settings" button now appears in the Advanced Process Tap result line
+when the outcome is `.permissionDenied`, opening the Privacy & Security pane via
+`NSWorkspace`. It is deliberately not shown for `.missingUsageDescription` (a build-config
+problem, not a user-fixable setting). The settings URL targets the Privacy & Security root
+rather than a version-specific anchor for robustness across macOS versions.
+
+**Optional follow-up**: surface the same affordance on the main transient status banner (not
+just the collapsed Advanced section) for users who hit a permission denial while toggling
+Real App Control. This needs `MixerStatusMessage` to carry an optional action.
+
+---
+
+### CHANGELOG and release-readiness cleanup — partially done
+
+**Priority**: Low | **Risk**: Low | **Status**: `CHANGELOG.md` added
+
+`CHANGELOG.md` now exists with milestone history and an `[Unreleased]` section. Remaining
+work: keep it synchronized with each change and prepare conservative release notes without
+implying production-grade multi-app mixer support.
+
+**Likely files**: `CHANGELOG.md`, `README.md`, `docs/*`.
+
+---
+
+### Continue `MixerViewModel` cleanup
 
 **Priority**: Medium | **Risk**: Low
 
-Add explicit labels/hints for app rows, sliders, mute buttons, Real/Resolving state, and
-output-device controls.
+`MixerViewModel` is still the largest file (~1.1k lines). The output-device-change teardown
+was consolidated into `stopActiveAudioWorkForOutputDeviceChange`; continue collapsing other
+repeated cross-feature cleanup patterns (app-refresh handling, termination teardown) into
+named helpers before deciding on any further coordinator extraction. This is distinct from
+the Product Real Control coordinator decision above — it is pure local simplification with
+no behavior change, verified by the existing characterization tests.
 
-**Likely files**: `MixerAppRowView.swift`, `MixerPanelView.swift`,
-`OutputDeviceSelectorView.swift`.
+**Likely files**: `MixerViewModel.swift`.
 
----
-
-### System Settings permission affordance
-
-**Priority**: Medium | **Risk**: Low
-
-Permission-denied messages are clearer now. Add a safe, compact affordance or link to
-System Settings for System Audio Recording if a public and non-surprising path is
-available.
-
-**Likely files**: `ProcessTapPermissionMessage.swift`, Advanced views,
-`MixerPanelView.swift`.
+**Note**: The duplicated `beginSession` call in `startExperimentalControl` is intentional
+(early optimistic set + post-`await` re-assertion) and is now documented inline. Do not
+"simplify" it away without re-checking the suspension-point behavior.
 
 ---
 
-### CHANGELOG and release-readiness cleanup
+### Diagnostic tooling inventory and sunset decision
+
+**Priority**: Medium | **Risk**: Low (decision) / Medium (if removing code)
+
+The Advanced section now carries a large surface: Process Tap Test, Mute Probe, Replay
+Probe, Two-App Readiness, Helper Discovery, manual Probe, and auto-detect. Several of these
+exist to gather feasibility evidence rather than as permanent product features, and they
+account for a large share of the codebase and maintenance cost.
+
+**Decision point**: For each Advanced tool, decide whether it is (a) a permanent product
+feature, (b) evidence-gathering that can be removed once its question is answered, or (c)
+developer-only and movable behind a debug flag. Record outcomes in `docs/DECISIONS.md`.
+Do not remove anything until its purpose is explicitly reclassified.
+
+**Likely files**: `docs/DECISIONS.md`, Advanced views/services.
+
+---
+
+### UI-layer test coverage
 
 **Priority**: Low | **Risk**: Low
 
-Add `CHANGELOG.md`, keep docs synchronized with code, and prepare conservative release
-notes without implying production-grade multi-app mixer support.
+All 164 tests target view models, coordinators, and services. SwiftUI views
+(`MixerPanelView`, `ProcessTapTestView`, etc.) have no automated coverage. Investigate a
+lightweight accessibility/snapshot harness so view regressions (including the new
+accessibility labels) are caught.
 
-**Likely files**: `CHANGELOG.md`, `README.md`, `docs/*`.
+**Likely files**: new test target/helpers, `MacMiniMixerTests/*`.
 
 ---
 

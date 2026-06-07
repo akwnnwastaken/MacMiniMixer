@@ -179,3 +179,50 @@ self-contained subsystems are being extracted one coordinator at a time.
 **Would revisit**: Continue the split in small steps. Product Real App Control should only
 move after a read-only boundary plan and more characterization tests confirm the safest
 interface.
+
+---
+
+## Why a `ProductRealControlCoordinator` is deferred (post-extraction reassessment)
+
+**Decision**: After extracting the pure `ProductRealControlState` state/model helpers, a
+read-only reassessment was done to decide whether the remaining Product Real Control
+orchestration should move into its own coordinator (mirroring the other five). The decision
+is **not yet** — keep the orchestration in `MixerViewModel` for now.
+
+**What was measured**: ~142 references in `MixerViewModel` touch the Product Real Control
+cluster (`productRealControlState`, `isProcessTapLiveControlActive`,
+`activeLiveControlAppName`, `processTapLiveDiagnostics`, the `advancedProcessTapDiagnostics`
+coordinator, `appAudioTargetResolver`, and `showStatus`).
+
+**Reasoning (why it is different from the coordinators already extracted)**:
+- The five extracted coordinators each own a *self-contained* slice of state and report back
+  through a single `onWillChange` callback. Product Real Control is the opposite: it is the
+  central arbiter that mutates four `@Published` properties the SwiftUI panel binds to
+  (`isProcessTapLiveControlActive`, `activeLiveControlAppName`, `processTapLiveDiagnostics`,
+  and the active session in `productRealControlState`).
+- Those same `@Published` properties are read by *other* `MixerViewModel` logic
+  (output-device-change teardown, app-refresh teardown). Moving them into a coordinator would
+  force either duplication or extra callback threading — likely a net increase in complexity.
+- Product Real Control drives the **Advanced diagnostics display** (`setResult`,
+  `setProgress`, `setRunning` on `AdvancedProcessTapDiagnosticsCoordinator`). A new
+  coordinator would need a hard dependency on another coordinator, a coupling the codebase
+  has deliberately minimized.
+- Start/guard logic reads the running state of five other subsystems (Two-App Readiness,
+  Process Tap testing, helper probe, auto-detect, app-audio resolution) for mutual
+  exclusion. A coordinator would need all of them injected or passed per call.
+
+**What was done instead (low-risk simplifications that fell out of the review)**:
+- The live-control warning mapping moved to a pure, tested
+  `ProcessTapTestResult.liveControlWarningMessage` computed property.
+- The app-refresh teardown was split into named helpers
+  (`stopRealControlForExitedTargetApps`, `refreshProcessTapSelectionAfterAppRefresh`).
+- The output-device-change teardown was consolidated into
+  `stopActiveAudioWorkForOutputDeviceChange`.
+- The duplicated `beginSession` call (early optimistic set + post-`await` re-assertion) is
+  intentional and is now documented inline rather than removed.
+
+**Would revisit if**: the four shared `@Published` properties can be reduced to a single
+observable session value, AND the dependency on `AdvancedProcessTapDiagnosticsCoordinator`
+for display is broken (e.g. Product control gets its own result/progress surface). At that
+point a narrow coordinator owning only the resolution + session lifecycle would be a clean,
+low-risk extraction.
