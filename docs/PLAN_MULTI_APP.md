@@ -156,4 +156,88 @@ enforces one active session.
   only the new collection shape.
 - The shared-flag hazard above is the one place a naive change would regress Advanced manual
   control — call it out in review.
+
+---
+
+## Phase 3 detail plan (read-only analysis)
+
+Goal: allow **two** product real-control sessions at once — lift `maxSessions` to 2, relax
+the one-session guard, and route per-app start/stop/gain by session id. This is the first
+**behavior-changing** phase and the first point a real two-app manual test is possible.
+
+### The core shift: from the compat shim to the per-session API
+
+Today `MixerViewModel` holds `processTapLiveController: ProcessTapLiveControlling` and uses
+the **single-session compat API** (`startLiveControl` / `stopLiveControl` /
+`updateLiveControlGain`), which internally tracks one `compatibilityActiveSessionID`. To
+control two apps independently the product path must use
+`ProcessTapLiveSessionManaging` instead: `startSession(...)` returns a
+`ProcessTapLiveSessionID`, and `stopSession(id:)` / `updateGain(sessionID:)` act per session.
+`ProcessTapLiveSessionManager` already conforms to both protocols, so this is a consumer-side
+change, not an engine rewrite.
+
+### Concrete changes
+
+- **A. Wiring (`MacMiniMixerApp`).** `ProcessTapLiveSessionManager(controller:)` →
+  `ProcessTapLiveSessionManager(maxSessions: 2, controllerFactory: { CoreAudioProcessTapLiveController() })`.
+  The factory init is mandatory: the single-`controller` init shares one controller instance,
+  which cannot run two independent taps. Each session needs its own controller.
+- **B. VM uses the session-managing API for the product path.** Hold
+  `ProcessTapLiveSessionManaging` for product start/stop/gain. The Advanced manual path keeps
+  the `ProcessTapLiveControlling` compat API (one session) — but both share the same manager
+  instance and its two slots (see hazards).
+- **C. `ProductRealControlActiveSession` gains `liveSessionID`.** Store the id returned by
+  `startSession` so the VM can stop/update the correct app's session.
+- **D. Start path (`startExperimentalControl`).** Replace the compat `startLiveControl` with
+  `startSession`, capture the `sessionID`, store it in the per-app session. The
+  `onDiagnostics` / `onStopped` callbacks now carry the `sessionID` → map back to the app id.
+- **E. Stop / gain per session.** Add `stopExperimentalControl(for appID:)` →
+  `stopSession(id: session.liveSessionID)`. `updateExperimentalGainIfActive` →
+  `updateGain(sessionID:gain:)` for that app, not the single compat gain.
+- **F. `handleLiveControlStopped` keyed by session.** Identify which app's session stopped
+  via the sessionID→appID map; clear only that app's session and invalidate only its cache.
+- **G. Guard relaxation.** Allow starting a second product session while one is active;
+  keep blocking when Advanced manual / Two-App Readiness / Process Tap testing / resolution
+  is busy. Cap product sessions at 2 for now ("Two apps max for now" on a third attempt).
+- **H. `@Published` mirrors.** `isProcessTapLiveControlActive` becomes derived
+  (`productSessionsActive || advancedManualActive`) — mind the shared-flag hazard;
+  `activeLiveControlAppName` becomes a summary when count > 1; the banner lists/counts active
+  apps.
+- **I. Per-app diagnostics (folded sub-step 3, gap D).** Product sessions stop driving the
+  single `advancedProcessTapDiagnostics` surface; introduce `processTapLiveDiagnosticsByAppID`
+  for per-row state. Minimal first cut: product rows show only the existing "Real" badge and
+  do not write the Advanced surface; per-row meters can come later.
+- **J. Resolution serialization (folded Phase 2).** Starting app B's helper resolution while
+  app A resolves is rejected by the single-lane resolver. First cut: surface B as "queued" /
+  retry; the clean version is a real queue.
+
+### Hazards / decisions
+
+1. **Shared slots between product and Advanced manual.** Both draw on the same
+   `maxSessions = 2` manager. Simplest rule: product cap = 2, and Advanced manual stays
+   mutually exclusive with product (keep that guard). Alternative: separate managers.
+2. **Factory vs shared controller** — must use the factory init (per-session controller).
+3. **Shared-flag hazard (gap D)** — derive `isProcessTapLiveControlActive` from both sources.
+4. **Resolution single-lane** — queue or sequential UX.
+5. **Resource reality** — two independent taps + private aggregate devices; already shown
+   stable for 5 minutes by Phase 0, so this is the green light to proceed.
+
+### Suggested sub-order (each builds; behavior-neutral until 3d)
+
+- **3a.** Wiring: `maxSessions = 2` + factory. No behavior change yet (guard still blocks a
+  second). Build green.
+- **3b.** `ActiveSession` gains `liveSessionID`; product start path switches to
+  `startSession`, still one at a time (guard intact). Behavior-neutral. Tests. *(Biggest
+  plumbing step.)*
+- **3c.** Per-app stop & gain by session id. Behavior-neutral (one session). Tests.
+- **3d.** Relax the product↔product guard to allow a second session (cap 2). Derive the
+  shared flag; banner summary. **← FIRST TWO-APP MANUAL TEST HERE.**
+- **3e.** Resolution serialization / queue UX.
+- **3f.** Per-row diagnostics (sub-step 3).
+
+### Risk
+
+High — touches the arbiter's start/stop/gain/lifecycle. Mitigation: 3a–3c are
+behavior-neutral (guard still enforces ≤1); only 3d flips behavior and is gated by the manual
+two-app test; the existing suite plus new per-session tests guard each sub-step.
 </content>
