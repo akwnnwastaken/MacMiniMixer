@@ -67,7 +67,9 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         )
     }
 
-    private func startSession(
+    // Non-private so multi-session callers (e.g. Two-App Readiness) can choose a timeout
+    // policy other than `.standard`; the protocol method keeps the `.standard` default.
+    func startSession(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
         timeoutPolicy: ProcessTapLiveTimeoutPolicy,

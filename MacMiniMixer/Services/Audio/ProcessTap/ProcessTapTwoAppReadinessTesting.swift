@@ -216,6 +216,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
         let appAStart = await run.manager.startSession(
             for: appA,
             gain: gain,
+            timeoutPolicy: .indefinite,
             onDiagnostics: { [weak self] sessionID, diagnostics in
                 self?.recordDiagnostics(diagnostics, sessionID: sessionID, runID: run.id)
             },
@@ -242,6 +243,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
         let appBStart = await run.manager.startSession(
             for: appB,
             gain: gain,
+            timeoutPolicy: .indefinite,
             onDiagnostics: { [weak self] sessionID, diagnostics in
                 self?.recordDiagnostics(diagnostics, sessionID: sessionID, runID: run.id)
             },
