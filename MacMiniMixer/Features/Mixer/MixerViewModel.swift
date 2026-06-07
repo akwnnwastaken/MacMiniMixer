@@ -7,9 +7,8 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var statusMessage: MixerStatusMessage?
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
     @Published private(set) var isProcessTapLiveControlActive = false
-    @Published private(set) var appAudioResolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] = [:]
-    @Published private(set) var activeExperimentalAppID: MixerAppItem.ID?
     @Published private(set) var activeLiveControlAppName: String?
+    @Published private var productRealControlState = ProductRealControlState()
     @Published private(set) var showAllApps = false
     @Published private(set) var isExperimentalRealAppControlEnabled = false
 
@@ -146,6 +145,14 @@ final class MixerViewModel: ObservableObject {
         systemOutput.selectedOutputDeviceName
     }
 
+    var appAudioResolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] {
+        productRealControlState.resolutionStateByAppID
+    }
+
+    var activeExperimentalAppID: MixerAppItem.ID? {
+        productRealControlState.activeVisibleAppID
+    }
+
     var selectedProcessTapAppID: MixerAppItem.ID? {
         advancedProcessTapDiagnostics.selectedAppID
     }
@@ -271,7 +278,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func isActiveLiveControlTarget(_ appID: MixerAppItem.ID) -> Bool {
-        appID == activeExperimentalAppID ||
+        appID == productRealControlState.activeVisibleAppID ||
             (isProcessTapLiveControlActive && appID == selectedProcessTapAppID)
     }
 
@@ -506,8 +513,8 @@ final class MixerViewModel: ObservableObject {
         advancedHelperDiscovery.stopProbe(reason: .userStopped)
         advancedProcessTapDiagnostics.stopReplayProbeForTermination()
         isProcessTapLiveControlActive = false
-        appAudioResolutionStateByAppID = [:]
-        activeExperimentalAppID = nil
+        productRealControlState.clearAllResolutions()
+        productRealControlState.clearActiveSession()
         activeLiveControlAppName = nil
     }
 
@@ -540,11 +547,11 @@ final class MixerViewModel: ObservableObject {
     }
 
     func isExperimentalControlActive(for appID: MixerAppItem.ID) -> Bool {
-        activeExperimentalAppID == appID && isProcessTapLiveControlActive
+        productRealControlState.isActive(appID: appID, isLiveControlActive: isProcessTapLiveControlActive)
     }
 
     func isResolvingExperimentalControl(for appID: MixerAppItem.ID) -> Bool {
-        appAudioResolutionStateByAppID[appID] != nil
+        productRealControlState.isResolving(appID: appID)
     }
 
     func toggleExperimentalControl(for appID: MixerAppItem.ID) {
@@ -578,12 +585,12 @@ final class MixerViewModel: ObservableObject {
         refreshTwoAppReadinessEligibility()
         invalidateCachedAudioTargetsForRemovedOrChangedApps(previousApps: previousApps, refreshedApps: apps)
 
-        if let activeExperimentalAppID,
+        if let activeExperimentalAppID = productRealControlState.activeVisibleAppID,
            !apps.contains(where: { $0.id == activeExperimentalAppID }) {
             stopProcessTapLiveControl(reason: .targetAppExited)
         }
 
-        if let resolvingAppID = appAudioResolutionStateByAppID.keys.first,
+        if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
            !apps.contains(where: { $0.id == resolvingAppID }) {
             cancelAppAudioTargetResolution(reason: .targetExited)
         }
@@ -754,7 +761,7 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        appAudioResolutionStateByAppID = [app.id: .resolving]
+        productRealControlState.beginResolution(for: app.id)
         appAudioResolutionTask?.cancel()
         appAudioResolutionTask = Task { [weak self] in
             let result = await self?.appAudioTargetResolver.resolveTarget(
@@ -778,9 +785,14 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        let gain = experimentalGainOption(for: app)
+        let gain = ProductRealControlState.gainOption(for: app)
 
-        activeExperimentalAppID = app.id
+        productRealControlState.beginSession(
+            visibleAppID: app.id,
+            displayName: app.name,
+            controlledProcessIdentifier: target.processIdentifier,
+            source: ProductRealControlStartSource(resolutionSource: resolutionSource)
+        )
         activeLiveControlAppName = app.name
         advancedProcessTapDiagnostics.setResult(
             ProcessTapTestResult(
@@ -823,14 +835,19 @@ final class MixerViewModel: ObservableObject {
 
                 if result.outcome == .liveControlStarted {
                     isProcessTapLiveControlActive = true
-                    activeExperimentalAppID = app.id
+                    productRealControlState.beginSession(
+                        visibleAppID: app.id,
+                        displayName: app.name,
+                        controlledProcessIdentifier: target.processIdentifier,
+                        source: ProductRealControlStartSource(resolutionSource: resolutionSource)
+                    )
                     activeLiveControlAppName = app.name
                 } else {
                     if resolutionSource == .cachedHelper {
                         appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
                     }
 
-                    activeExperimentalAppID = nil
+                    productRealControlState.clearActiveSession()
                     activeLiveControlAppName = nil
                     processTapLiveDiagnostics = nil
                     advancedProcessTapDiagnostics.setProgress(nil)
@@ -856,13 +873,13 @@ final class MixerViewModel: ObservableObject {
         _ result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
     ) {
-        let stoppedAppID = activeExperimentalAppID
+        let stoppedAppID = productRealControlState.activeVisibleAppID
         advancedProcessTapDiagnostics.setResult(result)
         processTapLiveDiagnostics = diagnostics
         advancedProcessTapDiagnostics.setProgress(diagnostics?.progress)
         isProcessTapLiveControlActive = false
         advancedProcessTapDiagnostics.setRunning(false)
-        activeExperimentalAppID = nil
+        productRealControlState.clearActiveSession()
         activeLiveControlAppName = nil
         if result.outcome == .liveControlAppExited,
            let stoppedAppID,
@@ -879,11 +896,11 @@ final class MixerViewModel: ObservableObject {
         _ result: AppAudioTargetResolutionResult?,
         for appID: MixerAppItem.ID
     ) {
-        guard appAudioResolutionStateByAppID[appID] != nil else {
+        guard productRealControlState.shouldAcceptResolutionResult(for: appID) else {
             return
         }
 
-        appAudioResolutionStateByAppID[appID] = nil
+        productRealControlState.clearResolution(for: appID)
         appAudioResolutionTask = nil
 
         guard let result else {
@@ -971,7 +988,7 @@ final class MixerViewModel: ObservableObject {
 
         appAudioResolutionTask?.cancel()
         appAudioResolutionTask = nil
-        appAudioResolutionStateByAppID = [:]
+        productRealControlState.clearAllResolutions()
         appAudioTargetResolver.cancelCurrentResolution(reason: reason)
     }
 
@@ -1018,23 +1035,11 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        processTapLiveController.updateLiveControlGain(experimentalGainOption(for: app))
-    }
-
-    private func experimentalGainOption(for app: MixerAppItem) -> ProcessTapReplayGainOption {
-        let scalar: Float = app.isMuted
-            ? 0
-            : Float(app.volume.clamped(to: AppConstants.volumeRange) / AppConstants.volumeRange.upperBound)
-        let percent = Int((Double(scalar) * 100).rounded())
-
-        return ProcessTapReplayGainOption(
-            scalar: scalar,
-            label: "\(percent)%"
-        )
+        processTapLiveController.updateLiveControlGain(ProductRealControlState.gainOption(for: app))
     }
 
     private var isAppAudioTargetResolving: Bool {
-        !appAudioResolutionStateByAppID.isEmpty
+        productRealControlState.isResolving
     }
 
     private func showStatus(_ text: String, style: MixerStatusMessage.Style) {
