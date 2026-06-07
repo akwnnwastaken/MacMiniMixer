@@ -222,6 +222,22 @@ change, not an engine rewrite.
 5. **Resource reality** — two independent taps + private aggregate devices; already shown
    stable for 5 minutes by Phase 0, so this is the green light to proceed.
 
+### Entanglement found while starting 3a (refines the above)
+
+The product **stop** path is more shared than first assumed. Product start calls
+`processTapLiveController.startLiveControl` directly, but product **stop**
+(`MixerViewModel.stopProcessTapLiveControl`) routes through
+`AdvancedLiveControlCoordinator.stopLiveControl` → `liveController.stopLiveControl(reason:)`
+— the **compat single-session** stop, which is also the Advanced manual stop. So per-app
+stop must give the product its own stop that calls `stopSession(id:)` directly, decoupling it
+from the shared compat stop. The protocol also needs a timeout-aware `startSession` (the
+manager has a non-private `startSession(...timeoutPolicy:)` but it is not on
+`ProcessTapLiveSessionManaging`), because the product requires `.indefinite`, not `.standard`.
+
+3b therefore changes start, stop, and gain together (they share the session id) and touches
+two test fakes (`FakeLiveControlController`, `FakeTwoAppLiveController`) plus the product
+tests. It cannot be meaningfully split smaller while staying behavior-correct.
+
 ### Suggested sub-order (each builds; behavior-neutral until 3d)
 
 - **3a.** Wiring: `maxSessions = 2` + factory. No behavior change yet (guard still blocks a
