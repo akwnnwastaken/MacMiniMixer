@@ -117,6 +117,11 @@ owns it. This is gap D from the table and the main subtlety of the refactor.
 
 ### Concrete, behavior-neutral sub-steps (each independently test-green)
 
+**Status: Phase 1 complete.** Sub-steps 1 and 2 are implemented and behavior-neutral
+(`ProductRealControlState` collection + `MixerViewModel` iteration); sub-step 3 is folded
+into Phase 3 (see below); sub-step 4 is documentation only (no code). The product path still
+enforces one active session.
+
 1. **State model collection (do first, lowest risk).** Add `activeSessionsByAppID`; make
    `activeSession`/`activeVisibleAppID` computed from it; `beginSession` inserts,
    `clearActiveSession` clears all, add `clearSession(for:)`. Extend
@@ -124,9 +129,13 @@ owns it. This is gap D from the table and the main subtlety of the refactor.
 2. **VM consumers loop over all active app ids.** `stopRealControlForExitedTargetApps` and
    the exit/teardown checks iterate `activeVisibleAppIDs` instead of the single
    `activeVisibleAppID`. Still ≤1, so identical behavior; positions the code for N.
-3. **Per-app diagnostics scaffolding.** Introduce `processTapLiveDiagnosticsByAppID` backed
-   by ≤1 entry; keep the existing single `@Published processTapLiveDiagnostics` as a derived
-   "first" so the Advanced display is untouched until Phase 3.
+3. **Per-app diagnostics scaffolding — folded into Phase 3 (not done in Phase 1).** On
+   inspection, the single `processTapLiveDiagnostics` is written by *both* the product path
+   and the Advanced manual path (which has no product app id). Introducing a per-app keyed
+   store now would either be dead code (nothing renders per-app meters yet) or break the
+   Advanced manual display (no app-id key). This is gap D — it only pays off when per-row
+   live meters consume it, so it moves to Phase 3 alongside the display decoupling. Avoid
+   adding state nothing reads.
 4. **Leave the shared flag intact.** Keep `isProcessTapLiveControlActive` and
    `activeLiveControlAppName` as-is (single). Document that in Phase 3 the flag becomes
    `productSessionsActive || advancedManualActive`, and the name becomes a summary when
