@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ProcessTapTestView: View {
@@ -544,6 +545,12 @@ struct ProcessTapTestView: View {
                     .lineLimit(2)
                     .padding(.leading, 20)
             }
+
+            if result.suggestsSystemAudioRecordingSettings {
+                openSystemSettingsButton
+                    .padding(.leading, 20)
+                    .padding(.top, 1)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -551,6 +558,21 @@ struct ProcessTapTestView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(result.severity.tint.opacity(0.08))
         )
+    }
+
+    private var openSystemSettingsButton: some View {
+        Button {
+            if let url = ProcessTapPermissionMessage.systemAudioRecordingSettingsURL {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            Label("Open System Settings", systemImage: "gearshape")
+                .font(.caption2.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.blue)
+        .help("Open Privacy & Security so you can enable System Audio Recording")
+        .accessibilityHint(Text("Opens Privacy and Security settings to grant System Audio Recording"))
     }
 
     private func liveDiagnosticsLine(_ diagnostics: ProcessTapLiveDiagnostics) -> some View {

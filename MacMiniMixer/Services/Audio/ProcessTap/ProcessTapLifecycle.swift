@@ -38,6 +38,14 @@ enum ProcessTapPermissionMessage {
     static func detail(forEligibilityReason reason: String?) -> String? {
         reason == missingUsageDescriptionReason ? missingUsageDescriptionDetail : reason
     }
+
+    /// Opens the Privacy & Security pane where the user can grant System Audio Recording.
+    /// We intentionally target the Privacy & Security root rather than a version-specific
+    /// anchor: the "System Audio Recording" anchor is not reliably documented across macOS
+    /// versions, and landing on the correct pane is the safe, non-surprising behavior.
+    static let systemAudioRecordingSettingsURL = URL(
+        string: "x-apple.systempreferences:com.apple.preference.security?Privacy"
+    )
 }
 
 enum ProcessTapCoreAudio {
