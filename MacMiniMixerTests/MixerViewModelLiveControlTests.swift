@@ -377,6 +377,35 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "Spotify")
     }
 
+    func testPermissionDeniedStartFailureOffersSystemSettingsAction() async {
+        let liveController = FakeLiveControlController(startResults: [
+            ProcessTapTestResult(outcome: .permissionDenied, message: "Permission denied", severity: .warning)
+        ])
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+        await waitFor { harness.viewModel.activeExperimentalAppID == nil }
+
+        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Could not start live control for this app")
+        XCTAssertEqual(harness.viewModel.statusMessage?.action, .openSystemAudioRecordingSettings)
+    }
+
+    func testNonPermissionStartFailureHasNoSystemSettingsAction() async {
+        let liveController = FakeLiveControlController(startResults: [
+            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning)
+        ])
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+        await waitFor { harness.viewModel.activeExperimentalAppID == nil }
+
+        XCTAssertNil(harness.viewModel.statusMessage?.action)
+    }
+
     func testHelperResolvedSetupFailureInvalidatesMappingClearsStateAndAllowsLaterResolve() async {
         let resolver = FakeAppAudioTargetResolver(results: [
             .resolved(

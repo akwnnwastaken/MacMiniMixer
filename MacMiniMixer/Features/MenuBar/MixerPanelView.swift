@@ -521,6 +521,10 @@ struct MixerPanelView: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            if let action = message.action {
+                statusActionButton(action)
+            }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
@@ -532,6 +536,33 @@ struct MixerPanelView: View {
                         .stroke(message.style.tint.opacity(0.22), lineWidth: 1)
                 )
         )
+    }
+
+    private func statusActionButton(_ action: MixerStatusMessage.Action) -> some View {
+        Button {
+            perform(action)
+        } label: {
+            Text(action.label)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.blue.opacity(0.14))
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.blue)
+        .accessibilityHint(Text("Opens Privacy and Security settings to grant System Audio Recording"))
+    }
+
+    private func perform(_ action: MixerStatusMessage.Action) {
+        switch action {
+        case .openSystemAudioRecordingSettings:
+            if let url = ProcessTapPermissionMessage.systemAudioRecordingSettingsURL {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     private var panelBackground: some View {

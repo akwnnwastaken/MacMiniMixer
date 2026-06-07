@@ -893,7 +893,11 @@ final class MixerViewModel: ObservableObject {
                         if resolutionSource == .discoveredHelper {
                             appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
                         }
-                        showStatus("Could not start live control for this app", style: .warning)
+                        showStatus(
+                            "Could not start live control for this app",
+                            style: .warning,
+                            action: result.suggestsSystemAudioRecordingSettings ? .openSystemAudioRecordingSettings : nil
+                        )
                     }
                 }
             }
@@ -971,7 +975,11 @@ final class MixerViewModel: ObservableObject {
 
     private func showLiveControlWarningIfNeeded(for result: ProcessTapTestResult) {
         if let message = result.liveControlWarningMessage {
-            showStatus(message, style: .warning)
+            showStatus(
+                message,
+                style: .warning,
+                action: result.suggestsSystemAudioRecordingSettings ? .openSystemAudioRecordingSettings : nil
+            )
         }
     }
 
@@ -1056,8 +1064,12 @@ final class MixerViewModel: ObservableObject {
         productRealControlState.isResolving
     }
 
-    private func showStatus(_ text: String, style: MixerStatusMessage.Style) {
-        let message = MixerStatusMessage(text: text, style: style)
+    private func showStatus(
+        _ text: String,
+        style: MixerStatusMessage.Style,
+        action: MixerStatusMessage.Action? = nil
+    ) {
+        let message = MixerStatusMessage(text: text, style: style, action: action)
         statusMessage = message
         clearStatusAfterDelay(message.id)
     }

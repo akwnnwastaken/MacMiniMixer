@@ -129,9 +129,10 @@ when the outcome is `.permissionDenied`, opening the Privacy & Security pane via
 problem, not a user-fixable setting). The settings URL targets the Privacy & Security root
 rather than a version-specific anchor for robustness across macOS versions.
 
-**Optional follow-up**: surface the same affordance on the main transient status banner (not
-just the collapsed Advanced section) for users who hit a permission denial while toggling
-Real App Control. This needs `MixerStatusMessage` to carry an optional action.
+**Done**: the affordance is also surfaced on the main transient status banner.
+`MixerStatusMessage` now carries an optional `Action`; permission-denied start failures
+(both the Advanced manual path and the Real App Control toggle path) attach an
+`openSystemAudioRecordingSettings` action rendered as an inline "Open Settings" button.
 
 ---
 
