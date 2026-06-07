@@ -292,6 +292,10 @@ is the evidence base and the development instrument for this goal.
 3. Per-row real control state in the main UI (remove the one-active-session limit).
 4. Resource/latency characterization under many simultaneous sessions.
 
+The detailed, phased implementation plan lives in [`PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md).
+The first concrete step is **Phase 0: sustained characterization** of two simultaneous
+sessions.
+
 ---
 
 ## Explicitly Deferred Large-Scope Work
