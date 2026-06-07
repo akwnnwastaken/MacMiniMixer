@@ -167,21 +167,17 @@ no behavior change, verified by the existing characterization tests.
 
 ---
 
-### Diagnostic tooling inventory and sunset decision
+### Diagnostic tooling inventory and sunset decision — done
 
-**Priority**: Medium | **Risk**: Low (decision) / Medium (if removing code)
+**Priority**: Medium | **Risk**: Low | **Status**: Classified; retain all
 
-The Advanced section now carries a large surface: Process Tap Test, Mute Probe, Replay
-Probe, Two-App Readiness, Helper Discovery, manual Probe, and auto-detect. Several of these
-exist to gather feasibility evidence rather than as permanent product features, and they
-account for a large share of the codebase and maintenance cost.
-
-**Decision point**: For each Advanced tool, decide whether it is (a) a permanent product
-feature, (b) evidence-gathering that can be removed once its question is answered, or (c)
-developer-only and movable behind a debug flag. Record outcomes in `docs/DECISIONS.md`.
-Do not remove anything until its purpose is explicitly reclassified.
-
-**Likely files**: `docs/DECISIONS.md`, Advanced views/services.
+Each Advanced tool has been classified in `docs/DECISIONS.md`. **Outcome: retain everything
+for now** — the maintainer's goal is a full Windows-style mixer (simultaneous per-app
+control for every listed app), so every diagnostic is on the critical path to that goal,
+either as evidence (Two-App Readiness) or as a building-block diagnostic. Sunset triggers
+are recorded: after multi-app ships and is validated, Replay Probe and Mute Probe are the
+first removal candidates, and the manual Helper Discovery UI can be debug-gated (its engine
+stays, since the product depends on it).
 
 ---
 
@@ -278,17 +274,39 @@ separate from runtime audio behavior.
 
 ---
 
+## North-Star Goal: Full Windows-style Multi-App Mixer
+
+The maintainer's end goal is a true Windows Volume Mixer experience: **simultaneous,
+independent per-app volume control for every app shown in the audio list**, changed live and
+at the same time. This is the product's north star, not a deferred curiosity.
+
+The work is still approached **incrementally** for sound engineering reasons (see
+`docs/DECISIONS.md`): one validated active session today, two short-lived sessions measured
+via Two-App Readiness, then more — only as evidence shows simultaneous sessions stay stable
+on CPU, latency, and buffer timing. The diagnostic tooling is retained precisely because it
+is the evidence base and the development instrument for this goal.
+
+**Likely milestones toward it** (each gated by characterization evidence):
+1. Sustained two-app live control (promote Two-App Readiness from diagnostic to product).
+2. N-app session management in `ProcessTapLiveSessionManager` (raise `maxSessions`).
+3. Per-row real control state in the main UI (remove the one-active-session limit).
+4. Resource/latency characterization under many simultaneous sessions.
+
+---
+
 ## Explicitly Deferred Large-Scope Work
 
-These are not immediate tasks.
+These are not immediate tasks, and remain deferred even though the multi-app goal above is
+active — they are heavier architectural bets to reach for only if the incremental
+public-API path proves insufficient.
 
-- Full simultaneous multi-app Product Real Control.
 - Centralized mixer/renderer architecture.
 - HAL driver, plug-in, or system extension.
 - Persistent virtual audio device.
 - Large Core Audio redesign.
 - Installer/uninstaller work required by any future persistent system component.
 
-The current direction remains: preserve the public-API Process Tap approach, keep Product
-control one-active-session-at-a-time, validate behavior with tests/manual diagnostics, and
-avoid broad audio-path rewrites unless evidence shows they are necessary.
+The current direction remains: preserve the public-API Process Tap approach, grow Product
+control from one-active-session toward multi-app **incrementally as evidence allows**,
+validate behavior with tests/manual diagnostics, and avoid broad audio-path rewrites unless
+evidence shows they are necessary.

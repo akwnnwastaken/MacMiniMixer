@@ -226,3 +226,46 @@ observable session value, AND the dependency on `AdvancedProcessTapDiagnosticsCo
 for display is broken (e.g. Product control gets its own result/progress surface). At that
 point a narrow coordinator owning only the resolution + session lifecycle would be a clean,
 low-risk extraction.
+
+---
+
+## Diagnostic tooling classification (sunset decision)
+
+**Context**: The Advanced section carries a large diagnostic surface (Process Tap Test,
+Mute Probe, Replay Probe, Two-App Readiness, Helper Discovery + Candidate Probe +
+auto-detect). This decision classifies each so future cleanup is principled rather than
+ad hoc.
+
+**Stated product goal (from the maintainer)**: a true Windows-Volume-Mixer experience —
+*simultaneous, independent per-app volume control for every app shown in the audio list*,
+not just one or two at a time. This makes full multi-app Product Real Control the
+north-star goal, not a deferred curiosity. The current one-active-session limit remains the
+*incremental* path toward it (see "Why main product remains one active session").
+
+**Decision**: **Retain all diagnostic tooling for now.** Nothing is removed or debug-gated,
+because every tool is on the critical path to the multi-app goal — either as evidence or as
+a building-block diagnostic used while developing it. The value of this entry is the
+classification and the sunset *triggers*, not removal.
+
+**Classification**:
+- **Permanent product engine (never sunset)** — the product depends on these directly:
+  `ProcessTapLiveController` (live control), `AppAudioTargetResolver` (browser/helper
+  resolution), and the probing it reuses internally (`ProcessTapCandidateAudioProbing`,
+  `HelperProcessCandidateDiscovery`, see `AppAudioTargetResolving.swift`).
+- **Evidence on the critical path (retain through multi-app development)** —
+  **Two-App Readiness** (~1670 LOC across tester/view/coordinator) is the multi-session
+  prototype that measures whether simultaneous sessions stay stable. It is the evidence base
+  for the headline feature and must not be removed before multi-app ships.
+- **Building-block diagnostics (retain; first sunset candidates after multi-app ships)** —
+  Process Tap Test, Mute Probe, Replay Probe, and the manual Helper Discovery UI. These are
+  the tools used to validate per-app tap-ability, muting, playback gain, and helper
+  resolution during development.
+
+**Sunset trigger**: once production multi-app control exists *and* is validated, re-evaluate
+this list. Replay Probe and Mute Probe are the most likely to become redundant first (their
+questions — "can captured audio be replayed at a gain?" / "does tap-muting work?" — are
+answered once full multi live-control is proven). The manual Helper Discovery *UI* can then
+be debug-gated while its *engine* stays (the product still needs it).
+
+**Would revisit if**: the multi-app goal is ever abandoned — in that case Two-App Readiness
+(~1670 LOC) becomes the single largest removal candidate.
