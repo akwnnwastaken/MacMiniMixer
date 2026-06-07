@@ -145,6 +145,10 @@ final class MixerViewModel: ObservableObject {
         systemOutput.selectedOutputDeviceName
     }
 
+    var isSystemOutputVolumeWritable: Bool {
+        systemOutput.isSystemOutputVolumeWritable
+    }
+
     var appAudioResolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] {
         productRealControlState.resolutionStateByAppID
     }
@@ -313,39 +317,46 @@ final class MixerViewModel: ObservableObject {
     func refreshOutputDevices() {
         let refreshResult = systemOutput.refreshOutputDevices()
 
-        if isProcessTapLiveControlActive,
-           refreshResult.didOutputDeviceChange {
-            AppLogger.audio.warning("Output device change stopping live control previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
+        guard refreshResult.didOutputDeviceChange else {
+            return
+        }
+
+        stopActiveAudioWorkForOutputDeviceChange(refreshResult)
+        appAudioTargetResolver.invalidateAllCachedTargets()
+        refreshSystemOutputVolume()
+    }
+
+    /// Stops every in-flight Process Tap activity when the system output device changes,
+    /// since tapped audio is tied to the previous device. Each subsystem is only asked to
+    /// stop when it is actually running, preserving the previous per-feature guards.
+    private func stopActiveAudioWorkForOutputDeviceChange(_ refreshResult: SystemOutputRefreshResult) {
+        let logChange: (String) -> Void = { subsystem in
+            AppLogger.audio.warning("Output device change \(subsystem, privacy: .public) previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
+        }
+
+        if isProcessTapLiveControlActive {
+            logChange("stopping live control")
             stopProcessTapLiveControl(reason: .outputDeviceChanged)
         }
 
-        if isTwoAppReadinessRunning,
-           refreshResult.didOutputDeviceChange {
-            AppLogger.audio.warning("Output device change stopping two-app readiness previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
+        if isTwoAppReadinessRunning {
+            logChange("stopping two-app readiness")
             stopTwoAppReadiness(reason: .outputDeviceChanged)
         }
 
-        if (helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning),
-           refreshResult.didOutputDeviceChange {
-            AppLogger.audio.warning("Output device change stopping helper probe previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
+        if helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning {
+            logChange("stopping helper probe")
             stopHelperProcessProbe(reason: .outputDeviceChanged)
         }
 
-        if isAppAudioTargetResolving,
-           refreshResult.didOutputDeviceChange {
-            AppLogger.audio.warning("Output device change cancelling app audio resolution previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
+        if isAppAudioTargetResolving {
+            logChange("cancelling app audio resolution")
             cancelAppAudioTargetResolution(reason: .outputDeviceChanged)
         }
 
-        if advancedProcessTapDiagnostics.isReplayProbeRunning,
-           refreshResult.didOutputDeviceChange {
-            AppLogger.audio.warning("Output device change stopping replay probe previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
+        if advancedProcessTapDiagnostics.isReplayProbeRunning {
+            logChange("stopping replay probe")
             advancedProcessTapDiagnostics.stopReplayProbe(reason: .outputDeviceChanged)
-        }
-
-        if refreshResult.didOutputDeviceChange {
-            appAudioTargetResolver.invalidateAllCachedTargets()
-            refreshSystemOutputVolume()
         }
     }
 
@@ -584,7 +595,16 @@ final class MixerViewModel: ObservableObject {
         }
         refreshTwoAppReadinessEligibility()
         invalidateCachedAudioTargetsForRemovedOrChangedApps(previousApps: previousApps, refreshedApps: apps)
+        stopRealControlForExitedTargetApps()
+        refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: previousProcessTapAppID)
+        refreshTwoAppReadinessSelectionsAfterAppRefresh()
+        refreshHelperDiscoverySelectionAfterAppRefresh()
+    }
 
+    /// After an app-list refresh, tears down Product Real Control work whose target app is
+    /// no longer running: a live-controlled app that exited stops its session, and a pending
+    /// helper resolution for a vanished app is cancelled.
+    private func stopRealControlForExitedTargetApps() {
         if let activeExperimentalAppID = productRealControlState.activeVisibleAppID,
            !apps.contains(where: { $0.id == activeExperimentalAppID }) {
             stopProcessTapLiveControl(reason: .targetAppExited)
@@ -594,21 +614,24 @@ final class MixerViewModel: ObservableObject {
            !apps.contains(where: { $0.id == resolvingAppID }) {
             cancelAppAudioTargetResolution(reason: .targetExited)
         }
+    }
 
+    /// Preserves the Advanced diagnostic selection when the previously selected app survived
+    /// the refresh; otherwise stops any active live control for the vanished app and falls
+    /// back to a preferred selection.
+    private func refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: MixerAppItem.ID?) {
         if let previousProcessTapAppID,
            apps.contains(where: { $0.id == previousProcessTapAppID }) {
             // Keep the existing diagnostic selection and result state when the selected app survived refresh.
-        } else {
-            if isProcessTapLiveControlActive {
-                stopProcessTapLiveControl(reason: .targetAppExited)
-            }
-
-            advancedProcessTapDiagnostics.selectPreferredAppAfterAppRefresh(apps: apps)
-            processTapLiveDiagnostics = nil
+            return
         }
 
-        refreshTwoAppReadinessSelectionsAfterAppRefresh()
-        refreshHelperDiscoverySelectionAfterAppRefresh()
+        if isProcessTapLiveControlActive {
+            stopProcessTapLiveControl(reason: .targetAppExited)
+        }
+
+        advancedProcessTapDiagnostics.selectPreferredAppAfterAppRefresh(apps: apps)
+        processTapLiveDiagnostics = nil
     }
 
     func volume(for appID: MixerAppItem.ID) -> Double {
@@ -787,6 +810,11 @@ final class MixerViewModel: ObservableObject {
 
         let gain = ProductRealControlState.gainOption(for: app)
 
+        // Optimistic/early session set: `activeVisibleAppID` is read by `visibleMixerApps`
+        // independently of `isProcessTapLiveControlActive`, so setting it now keeps the row
+        // visible during startup and lets `refreshApplications` detect a target-app exit
+        // while the async `startLiveControl` below is still in flight. The success branch
+        // re-asserts this after the await (see below).
         productRealControlState.beginSession(
             visibleAppID: app.id,
             displayName: app.name,
@@ -835,6 +863,9 @@ final class MixerViewModel: ObservableObject {
 
                 if result.outcome == .liveControlStarted {
                     isProcessTapLiveControlActive = true
+                    // Re-assert the session after the await: the early set above may have
+                    // been cleared by other MainActor work (e.g. app refresh) during the
+                    // suspension. Same arguments, so this is a no-op on the happy path.
                     productRealControlState.beginSession(
                         visibleAppID: app.id,
                         displayName: app.name,
@@ -939,25 +970,8 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func showLiveControlWarningIfNeeded(for result: ProcessTapTestResult) {
-        switch result.outcome {
-        case .tapCleanupFailed:
-            showStatus("Live control cleanup warning", style: .warning)
-        case .liveControlTimedOut:
-            showStatus("Live control stopped: timeout", style: .warning)
-        case .liveControlOutputChanged:
-            showStatus("Live control stopped: output device changed", style: .warning)
-        case .liveControlAppExited:
-            showStatus("Live control stopped: app exited", style: .warning)
-        case .liveControlSetupFailed:
-            showStatus("Could not start live control", style: .warning)
-        case .missingUsageDescription:
-            showStatus(ProcessTapPermissionMessage.missingUsageDescription, style: .warning)
-        case .permissionDenied:
-            showStatus(ProcessTapPermissionMessage.permissionRequired, style: .warning)
-        case .unsupportedOS:
-            showStatus(ProcessTapCoreAudio.unsupportedOSMessage, style: .warning)
-        default:
-            break
+        if let message = result.liveControlWarningMessage {
+            showStatus(message, style: .warning)
         }
     }
 
