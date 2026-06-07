@@ -238,6 +238,37 @@ manager has a non-private `startSession(...timeoutPolicy:)` but it is not on
 two test fakes (`FakeLiveControlController`, `FakeTwoAppLiveController`) plus the product
 tests. It cannot be meaningfully split smaller while staying behavior-correct.
 
+### 3b-main detail: routing the shared stop (plan)
+
+`stopProcessTapLiveControl` is shared by the product banner, the Advanced manual UI, and the
+global stops (output-device change, termination, disabling real control). Today product and
+Advanced manual are **mutually exclusive** (≤1 total active), so "stop the one active" works.
+
+3b-main switches the **product** path to the per-session API while leaving Advanced manual
+on the compat path, by routing inside the existing stop based on which kind is active:
+
+- **`ProductRealControlActiveSession` gains `liveSessionID: ProcessTapLiveSessionID?`** —
+  nil during the brief optimistic window, set to the real id on success.
+- **`startExperimentalControl`** uses `startSession(timeoutPolicy: .indefinite, ...)`, wires
+  the per-session `onDiagnostics`/`onStopped` (by session id) to the existing handlers, and
+  stores the returned id via `beginSession(..., liveSessionID:)`.
+- **New `stopProductLiveSessions(reason:)`** iterates `productRealControlState.activeSessions`
+  and calls `stopSession(id:)`; each session's wired `onStopped` drives
+  `handleLiveControlStopped`.
+- **`stopProcessTapLiveControl(reason:)` routes:** if a product session is active →
+  `stopProductLiveSessions`; else (Advanced manual) → the existing
+  `advancedLiveControl.stopLiveControl` compat path. Behavior-neutral with ≤1.
+- **`updateExperimentalGainIfActive`** uses `updateGain(sessionID: session.liveSessionID, …)`.
+
+Why behavior-neutral with ≤1: the route stops whichever single control is active, exactly as
+before; start/gain hit the same engine via a different method. The test fakes already record
+`startSession`/`stopSession`/`updateGain` into the same arrays, and `emitStopped` fires the
+per-session handler, so product-path assertions hold.
+
+Deferred to 3d (when two product sessions exist): a per-row
+`stopExperimentalControl(for appID:)`, keying `handleLiveControlStopped` by session id, and a
+`stopAllLiveControl` for the global stops.
+
 ### Suggested sub-order (each builds; behavior-neutral until 3d)
 
 - **3a.** Wiring: `maxSessions = 2` + factory. No behavior change yet (guard still blocks a
