@@ -71,4 +71,80 @@ since it is the highest-risk refactor.
 
 Phase 1's singular→collection conversion touches the central arbiter (wide blast radius).
 Mitigation: the existing characterization tests, plus incremental behavior-neutral steps.
+
+---
+
+## Phase 1 boundary plan (read-only analysis)
+
+Goal: convert the single-active-session model to a per-app collection **without enabling
+multi yet** — keep `maxSessions = 1` and all mutual-exclusion guards, so behavior is
+identical and all existing tests stay green. This de-risks the largest refactor so Phase 3
+only has to flip the cap and relax guards, not re-plumb state.
+
+### Where "single session" lives today (three layers)
+
+1. **State model — `ProductRealControlState`**
+   - `activeSession: ProcessTapRealControlActiveSession?` — the singular piece.
+   - `resolutionStateByAppID: [appID: AppAudioResolutionState]` — *already* a dict, but
+     `beginResolution` does `resolutionStateByAppID = [appID: .resolving]` (replaces the
+     whole dict), so resolution is dict-shaped yet single-enforced.
+2. **View-model `@Published` mirrors (in `MixerViewModel`)**
+   - `isProcessTapLiveControlActive: Bool`
+   - `activeLiveControlAppName: String?`
+   - `processTapLiveDiagnostics: ProcessTapLiveDiagnostics?`
+3. **Engine** — `processTapLiveController` is `ProcessTapLiveSessionManager(controller:)`
+   (`maxSessions = 1`) used through the single-session `ProcessTapLiveControlling` shim.
+   Already N-capable underneath; not the bottleneck.
+
+### Critical hazard: `isProcessTapLiveControlActive` is shared by two features
+
+It is set both by **Product Real Control** (per-app rows) *and* by **Advanced manual live
+control** (`startProcessTapLiveControl` via `AdvancedLiveControlCoordinator`). So it does NOT
+mean "product sessions are active" — it means "the single shared live engine is busy (by
+either feature)." Today the two are mutually exclusive by guard. **Phase 1 must not naively
+derive this flag from the product session collection alone** — Advanced manual control also
+owns it. This is gap D from the table and the main subtlety of the refactor.
+
+### Target shape after Phase 1 (still ≤1 enforced)
+
+- `ProductRealControlState.activeSessionsByAppID: [MixerAppItem.ID: ActiveSession]` replaces
+  `activeSession`. Keep `activeSession` / `activeVisibleAppID` as computed "first entry"
+  conveniences during the transition.
+- New/changed queries: `activeVisibleAppIDs: [ID]`, `isActive(appID:)`,
+  `clearSession(for: appID)` (alongside `clearActiveSession` = clear all).
+- `beginResolution` stops replacing the dict and instead inserts the one app (still ≤1 by
+  orchestration), so Phase 2 can allow a queue without a model change.
+
+### Concrete, behavior-neutral sub-steps (each independently test-green)
+
+1. **State model collection (do first, lowest risk).** Add `activeSessionsByAppID`; make
+   `activeSession`/`activeVisibleAppID` computed from it; `beginSession` inserts,
+   `clearActiveSession` clears all, add `clearSession(for:)`. Extend
+   `ProductRealControlStateTests`.
+2. **VM consumers loop over all active app ids.** `stopRealControlForExitedTargetApps` and
+   the exit/teardown checks iterate `activeVisibleAppIDs` instead of the single
+   `activeVisibleAppID`. Still ≤1, so identical behavior; positions the code for N.
+3. **Per-app diagnostics scaffolding.** Introduce `processTapLiveDiagnosticsByAppID` backed
+   by ≤1 entry; keep the existing single `@Published processTapLiveDiagnostics` as a derived
+   "first" so the Advanced display is untouched until Phase 3.
+4. **Leave the shared flag intact.** Keep `isProcessTapLiveControlActive` and
+   `activeLiveControlAppName` as-is (single). Document that in Phase 3 the flag becomes
+   `productSessionsActive || advancedManualActive`, and the name becomes a summary when
+   count > 1. Do not change their semantics in Phase 1.
+
+### Explicitly out of scope for Phase 1
+
+- Resolution serialization / queue (Phase 2).
+- `maxSessions` flip and guard relaxation (Phase 3).
+- Decoupling product control from the shared `AdvancedProcessTapDiagnosticsCoordinator`
+  display surface (Phase 3, gap D).
+- Banner / menu-bar icon reflecting N active apps (Phase 3).
+
+### Risk and mitigation
+
+- Blast radius is the ~142-reference arbiter, but every sub-step is behavior-neutral with
+  `maxSessions = 1`, so the full existing suite must stay green unchanged; new tests cover
+  only the new collection shape.
+- The shared-flag hazard above is the one place a naive change would regress Advanced manual
+  control — call it out in review.
 </content>
