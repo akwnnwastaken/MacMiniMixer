@@ -261,6 +261,339 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
     }
 
+    func testGlobalRealControlOffStopsActiveProductSessionAndInvalidatesCache() async {
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeHarness(appAudioTargetResolver: resolver)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        await waitFor { !harness.viewModel.isProcessTapLiveControlActive }
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.userStopped])
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertEqual(resolver.invalidateAllCount, 1)
+    }
+
+    func testGlobalRealControlOffCancelsInFlightHelperResolutionAndIgnoresLateCompletion() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible
+            ]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(45, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+        XCTAssertTrue(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        XCTAssertEqual(resolver.cancelledReasons, [.userStopped])
+        XCTAssertEqual(resolver.invalidateAllCount, 1)
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        resolver.completeNext(
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        )
+        await drainMainActor()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+    }
+
+    func testProductControlDoesNotStartWhenGlobalRealControlIsOff() async {
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible
+            ]
+        )
+
+        harness.viewModel.setAppVolume(33, for: "spotify")
+        harness.viewModel.setMuted(true, for: "youtube")
+        await drainMainActor()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertTrue(resolver.resolveRequests.isEmpty)
+        XCTAssertEqual(harness.audioController.appVolumeRequests.map(\.appID), ["spotify"])
+        XCTAssertEqual(harness.audioController.appVolumeRequests.map(\.volume), [33])
+        XCTAssertEqual(harness.audioController.appMutedRequests.map(\.appID), ["youtube"])
+        XCTAssertEqual(harness.audioController.appMutedRequests.map(\.isMuted), [true])
+    }
+
+    func testProductRealControlSurvivesPanelCloseCleanup() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        harness.viewModel.stopTwoAppReadinessForPanelClose()
+        await drainMainActor()
+
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertEqual(harness.viewModel.activeExperimentalAppID, "spotify")
+        XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "Spotify")
+        XCTAssertEqual(harness.liveController.stopReasons, [])
+        XCTAssertEqual(harness.liveController.startTimeoutPolicies, [.indefinite])
+    }
+
+    func testDirectVisiblePIDSetupFailureClearsProductStateAndAllowsRetry() async {
+        let liveController = FakeLiveControlController(startResults: [
+            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning),
+            ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+        ])
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+        await waitFor { harness.viewModel.activeExperimentalAppID == nil }
+
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Could not start live control for this app")
+
+        harness.viewModel.setAppVolume(55, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 2 }
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertEqual(liveController.startedTargets.map(\.appID), ["spotify", "spotify"])
+        XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "Spotify")
+    }
+
+    func testHelperResolvedSetupFailureInvalidatesMappingClearsStateAndAllowsLaterResolve() async {
+        let resolver = FakeAppAudioTargetResolver(results: [
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            ),
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:202", appName: "YouTube", processIdentifier: 202),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        ])
+        let liveController = FakeLiveControlController(startResults: [
+            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning),
+            ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+        ])
+        let harness = makeHarness(
+            liveController: liveController,
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible,
+                202: .eligible
+            ]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { liveController.startedTargets.count == 1 }
+        await waitFor { harness.viewModel.activeExperimentalAppID == nil }
+
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["youtube"])
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+
+        harness.viewModel.setAppVolume(60, for: "youtube")
+        await waitFor { liveController.startedTargets.count == 2 }
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "youtube") }
+
+        XCTAssertEqual(resolver.resolveRequests.map(\.appID), ["youtube", "youtube"])
+        XCTAssertEqual(liveController.startedTargets.map(\.processIdentifier), [201, 202])
+        XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "YouTube")
+    }
+
+    func testSetMutedStartsDirectProductControlWithZeroGainAndUnmuteUpdatesGain() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setMuted(true, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertEqual(harness.liveController.startedTargets.first?.appID, "spotify")
+        XCTAssertEqual(harness.liveController.startGains.first?.scalar, 0)
+        XCTAssertEqual(harness.liveController.startGains.first?.percentLabel, "0%")
+        XCTAssertEqual(harness.audioController.appMutedRequests.map(\.appID), ["spotify"])
+        XCTAssertEqual(harness.audioController.appMutedRequests.map(\.isMuted), [true])
+
+        harness.viewModel.setMuted(false, for: "spotify")
+
+        XCTAssertEqual(harness.liveController.gainUpdates.map(\.scalar), [0.5])
+        XCTAssertEqual(harness.liveController.gainUpdates.map(\.percentLabel), ["50%"])
+    }
+
+    func testDirectActiveAppDisappearanceStopsProductControlAndInvalidatesCache() async {
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeHarness(appAudioTargetResolver: resolver)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "spotify" }
+        harness.viewModel.refreshApplications()
+        await waitFor { !harness.viewModel.isProcessTapLiveControlActive }
+
+        XCTAssertFalse(harness.liveController.stopReasons.isEmpty)
+        XCTAssertTrue(harness.liveController.stopReasons.allSatisfy { $0 == .targetAppExited })
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["spotify"])
+    }
+
+    func testHelperExitCallbackClearsProductStateAndInvalidatesHelperCache() async {
+        let resolver = FakeAppAudioTargetResolver(results: [
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        ])
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible
+            ]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "youtube") }
+
+        harness.liveController.emitStopped(
+            ProcessTapTestResult(outcome: .liveControlAppExited, message: "Live control stopped: process exited", severity: .warning)
+        )
+        await waitFor { !harness.viewModel.isProcessTapLiveControlActive }
+
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["youtube"])
+    }
+
+    func testAppDisappearsDuringHelperResolutionCancelsResolutionAndIgnoresLateCompletion() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible
+            ]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+        XCTAssertTrue(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "youtube" }
+        harness.viewModel.refreshApplications()
+
+        XCTAssertEqual(resolver.cancelledReasons, [.targetExited])
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["youtube"])
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        resolver.completeNext(
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        )
+        await drainMainActor()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+    }
+
+    func testTerminationCleanupStopsActiveProductControlAndIsSafeWhenRepeated() async {
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeHarness(appAudioTargetResolver: resolver)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        harness.viewModel.stopProcessTapLiveControlForTermination()
+        harness.viewModel.stopProcessTapLiveControlForTermination()
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.appTerminating, .appTerminating])
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertEqual(resolver.invalidateAllCount, 2)
+    }
+
+    func testTerminationCleanupCancelsInFlightHelperResolutionAndIgnoresLateCompletion() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible
+            ]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+
+        harness.viewModel.stopProcessTapLiveControlForTermination()
+
+        XCTAssertEqual(resolver.cancelledReasons, [.userStopped])
+        XCTAssertEqual(resolver.invalidateAllCount, 1)
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+
+        resolver.completeNext(
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        )
+        await drainMainActor()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+    }
+
     private func makeHarness(
         apps: [MixerAppItem] = makeLiveControlApps(),
         outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
@@ -517,14 +850,20 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
 
 private final class FakeAppAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
     private var results: [AppAudioTargetResolutionResult]
+    private let suspendsWhenNoResultIsAvailable: Bool
+    private var pendingContinuations: [CheckedContinuation<AppAudioTargetResolutionResult, Never>] = []
     private(set) var resolveRequests: [AppAudioTargetRequest] = []
     private(set) var allowsCachedLookupRequests: [Bool] = []
     private(set) var cancelledReasons: [ProcessTapCandidateProbeStopReason] = []
     private(set) var invalidatedRequests: [AppAudioTargetRequest] = []
     private(set) var invalidateAllCount = 0
 
-    init(results: [AppAudioTargetResolutionResult] = []) {
+    init(
+        results: [AppAudioTargetResolutionResult] = [],
+        suspendsWhenNoResultIsAvailable: Bool = false
+    ) {
         self.results = results
+        self.suspendsWhenNoResultIsAvailable = suspendsWhenNoResultIsAvailable
     }
 
     func resolveTarget(
@@ -535,10 +874,25 @@ private final class FakeAppAudioTargetResolver: AppAudioTargetResolving, @unchec
         resolveRequests.append(request)
         allowsCachedLookupRequests.append(allowsCachedLookup)
         guard !results.isEmpty else {
+            if suspendsWhenNoResultIsAvailable {
+                return await withCheckedContinuation { continuation in
+                    pendingContinuations.append(continuation)
+                }
+            }
+
             return .unavailable("No active audio helper found")
         }
 
         return results.removeFirst()
+    }
+
+    func completeNext(_ result: AppAudioTargetResolutionResult) {
+        guard !pendingContinuations.isEmpty else {
+            results.append(result)
+            return
+        }
+
+        pendingContinuations.removeFirst().resume(returning: result)
     }
 
     func cancelCurrentResolution(reason: ProcessTapCandidateProbeStopReason) {
