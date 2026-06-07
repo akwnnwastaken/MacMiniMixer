@@ -961,6 +961,7 @@ private final class FakeLiveControlTwoAppReadinessTester: ProcessTapTwoAppReadin
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        duration: TimeInterval,
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) async -> ProcessTapTwoAppReadinessResult {

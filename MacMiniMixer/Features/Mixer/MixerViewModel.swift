@@ -189,6 +189,10 @@ final class MixerViewModel: ObservableObject {
         twoAppReadiness.selectedGain
     }
 
+    var selectedTwoAppReadinessDuration: ProcessTapTwoAppReadinessDurationOption {
+        twoAppReadiness.selectedDuration
+    }
+
     var twoAppReadinessEligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility] {
         twoAppReadiness.eligibilityByAppID
     }
@@ -387,6 +391,10 @@ final class MixerViewModel: ObservableObject {
 
     func selectTwoAppReadinessGain(_ gain: ProcessTapReplayGainOption) {
         twoAppReadiness.selectGain(gain)
+    }
+
+    func selectTwoAppReadinessDuration(_ duration: ProcessTapTwoAppReadinessDurationOption) {
+        twoAppReadiness.selectDuration(duration)
     }
 
     func selectHelperDiscoveryApp(_ appID: MixerAppItem.ID) {

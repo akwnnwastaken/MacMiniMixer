@@ -5,12 +5,14 @@ struct TwoAppReadinessTestView: View {
     let selectedAppAID: MixerAppItem.ID?
     let selectedAppBID: MixerAppItem.ID?
     let selectedGain: ProcessTapReplayGainOption
+    let selectedDuration: ProcessTapTwoAppReadinessDurationOption
     let snapshot: ProcessTapTwoAppReadinessSnapshot
     let result: ProcessTapTwoAppReadinessResult?
     let isRunning: Bool
     let selectAppA: (MixerAppItem.ID) -> Void
     let selectAppB: (MixerAppItem.ID) -> Void
     let selectGain: (ProcessTapReplayGainOption) -> Void
+    let selectDuration: (ProcessTapTwoAppReadinessDurationOption) -> Void
     let startTest: () -> Void
     let stopAll: () -> Void
 
@@ -109,6 +111,12 @@ struct TwoAppReadinessTestView: View {
                     .foregroundStyle(.secondary)
 
                 gainPicker
+
+                Text("Dur")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                durationPicker
 
                 Spacer(minLength: 0)
 
@@ -260,6 +268,45 @@ struct TwoAppReadinessTestView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(isRunning)
+    }
+
+    private var durationPicker: some View {
+        Menu {
+            ForEach(ProcessTapTwoAppReadinessDurationOption.allCases) { duration in
+                Button {
+                    selectDuration(duration)
+                } label: {
+                    if duration == selectedDuration {
+                        Label(duration.label, systemImage: "checkmark")
+                    } else {
+                        Text(duration.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(selectedDuration.label)
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.045))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(isRunning)
+        .help("How long the two-app test runs before auto-stopping. Longer runs gather sustained-stability evidence.")
     }
 
     private func diagnosticRow(_ session: ProcessTapTwoAppReadinessSessionSnapshot) -> some View {

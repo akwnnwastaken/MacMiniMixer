@@ -435,7 +435,7 @@ private final class FakeTwoAppLiveController: ProcessTapLiveControlling, @unchec
 }
 
 private final class FakeTwoAppReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
-    private(set) var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption)] = []
+    private(set) var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption, duration: TimeInterval)] = []
     private(set) var stopReasons: [ProcessTapLiveStopReason] = []
     private var lastSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
     private var onFinished: (@Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void)?
@@ -444,10 +444,11 @@ private final class FakeTwoAppReadinessTester: ProcessTapTwoAppReadinessTesting,
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        duration: TimeInterval,
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) async -> ProcessTapTwoAppReadinessResult {
-        startRequests.append((appA, appB, gain))
+        startRequests.append((appA, appB, gain, duration))
         self.onFinished = onFinished
         lastSnapshot = ProcessTapTwoAppReadinessSnapshot(
             sessions: [

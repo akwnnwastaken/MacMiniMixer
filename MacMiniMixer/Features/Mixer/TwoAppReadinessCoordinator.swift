@@ -5,6 +5,7 @@ final class TwoAppReadinessCoordinator {
     private(set) var selectedAppAID: MixerAppItem.ID?
     private(set) var selectedAppBID: MixerAppItem.ID?
     private(set) var selectedGain: ProcessTapReplayGainOption
+    private(set) var selectedDuration: ProcessTapTwoAppReadinessDurationOption
     private(set) var eligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility]
     private(set) var snapshot: ProcessTapTwoAppReadinessSnapshot
     private(set) var result: ProcessTapTwoAppReadinessResult?
@@ -40,6 +41,7 @@ final class TwoAppReadinessCoordinator {
             eligibilityByAppID: initialEligibility
         ).appBID
         self.selectedGain = .defaultOption
+        self.selectedDuration = .defaultOption
         self.snapshot = .empty
         self.result = nil
         self.isRunning = false
@@ -90,6 +92,16 @@ final class TwoAppReadinessCoordinator {
 
         sendWillChange()
         selectedGain = gain
+        result = nil
+    }
+
+    func selectDuration(_ duration: ProcessTapTwoAppReadinessDurationOption) {
+        guard !isRunning else {
+            return
+        }
+
+        sendWillChange()
+        selectedDuration = duration
         result = nil
     }
 
@@ -244,13 +256,14 @@ final class TwoAppReadinessCoordinator {
         let targetA = appA.target
         let targetB = appB.target
         let gain = selectedGain
+        let duration = selectedDuration
 
         sendWillChange()
         isRunning = true
         result = ProcessTapTwoAppReadinessResult(
             outcome: .starting,
             message: "Starting two-app test...",
-            detail: "Gain \(gain.percentLabel).",
+            detail: "Gain \(gain.percentLabel), duration \(duration.label).",
             severity: .info
         )
         snapshot = TwoAppReadinessState.startingSnapshot(
@@ -263,7 +276,8 @@ final class TwoAppReadinessCoordinator {
             let result = await tester.startTest(
                 appA: targetA,
                 appB: targetB,
-                gain: gain
+                gain: gain,
+                duration: duration.duration
             ) { [weak self] snapshot in
                 Task { @MainActor in
                     self?.setSnapshot(snapshot)

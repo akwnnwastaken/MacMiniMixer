@@ -104,11 +104,48 @@ struct ProcessTapTwoAppReadinessResult: Equatable, Sendable {
     )
 }
 
+/// How long a Two-App Readiness run lasts before it auto-stops. The short option preserves
+/// the original 10s diagnostic; the longer options exist for Phase 0 sustained
+/// characterization (CPU, latency drift, drops, sleep/wake) of two simultaneous sessions —
+/// the gating evidence for promoting multi-app control to the product (see PLAN_MULTI_APP.md).
+enum ProcessTapTwoAppReadinessDurationOption: String, CaseIterable, Identifiable, Sendable {
+    case short
+    case oneMinute
+    case fiveMinutes
+
+    var id: String { rawValue }
+
+    var duration: TimeInterval {
+        switch self {
+        case .short:
+            return AppConstants.processTapTwoAppReadinessDuration
+        case .oneMinute:
+            return 60
+        case .fiveMinutes:
+            return 300
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .short:
+            return "10s"
+        case .oneMinute:
+            return "1 min"
+        case .fiveMinutes:
+            return "5 min"
+        }
+    }
+
+    static let defaultOption: ProcessTapTwoAppReadinessDurationOption = .short
+}
+
 protocol ProcessTapTwoAppReadinessTesting: Sendable {
     func startTest(
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        duration: TimeInterval,
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) async -> ProcessTapTwoAppReadinessResult
@@ -127,6 +164,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        duration: TimeInterval,
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) async -> ProcessTapTwoAppReadinessResult {
@@ -160,6 +198,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
             appA: appA,
             appB: appB,
             gain: gain,
+            duration: duration,
             onUpdate: onUpdate,
             onFinished: onFinished
         )
@@ -236,7 +275,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
         return ProcessTapTwoAppReadinessResult(
             outcome: .running,
             message: "Two-app test running",
-            detail: "Auto-stops after \(Int(AppConstants.processTapTwoAppReadinessDuration))s.",
+            detail: "Auto-stops after \(Int(duration))s.",
             severity: .info
         )
     }
@@ -565,6 +604,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
 private final class TwoAppReadinessRun: @unchecked Sendable {
     let id = UUID()
     let manager: ProcessTapLiveSessionManager
+    let duration: TimeInterval
     let onUpdate: @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void
     let onFinished: @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
 
@@ -579,10 +619,12 @@ private final class TwoAppReadinessRun: @unchecked Sendable {
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        duration: TimeInterval,
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) {
         self.manager = manager
+        self.duration = duration
         self.onUpdate = onUpdate
         self.onFinished = onFinished
         self.sessions = [
@@ -742,8 +784,8 @@ private final class TwoAppReadinessRun: @unchecked Sendable {
 
     func startTimeout(_ action: @escaping @Sendable (UUID) -> Void) {
         timeoutTask?.cancel()
-        timeoutTask = Task { [id] in
-            let delay = UInt64(AppConstants.processTapTwoAppReadinessDuration * 1_000_000_000)
+        timeoutTask = Task { [id, duration] in
+            let delay = UInt64(duration * 1_000_000_000)
             try? await Task.sleep(nanoseconds: delay)
 
             guard !Task.isCancelled else {
