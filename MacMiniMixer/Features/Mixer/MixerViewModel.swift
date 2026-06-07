@@ -17,7 +17,7 @@ final class MixerViewModel: ObservableObject {
     private let systemOutput: SystemOutputCoordinator
     private let advancedProcessTapDiagnostics: AdvancedProcessTapDiagnosticsCoordinator
     private let advancedLiveControl: AdvancedLiveControlCoordinator
-    private let processTapLiveController: ProcessTapLiveControlling
+    private let processTapLiveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging
     private let twoAppReadiness: TwoAppReadinessCoordinator
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
     private let advancedHelperDiscovery: AdvancedHelperDiscoveryCoordinator
@@ -36,7 +36,7 @@ final class MixerViewModel: ObservableObject {
         systemVolumeController: SystemVolumeControlling,
         processTapTester: ProcessTapTesting,
         processTapReplayProbe: ProcessTapReplayProbing,
-        processTapLiveController: ProcessTapLiveControlling,
+        processTapLiveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging,
         twoAppReadinessTester: ProcessTapTwoAppReadinessTesting,
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
         appAudioTargetResolver: AppAudioTargetResolving,

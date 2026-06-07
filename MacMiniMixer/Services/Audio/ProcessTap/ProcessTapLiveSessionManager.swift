@@ -11,6 +11,14 @@ protocol ProcessTapLiveSessionManaging: Sendable {
         onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapLiveSessionStartResult
 
+    func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult
+
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult
     func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult]
     func updateGain(sessionID: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption)

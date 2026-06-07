@@ -808,14 +808,17 @@ private final class FakeLiveControlReplayProbe: ProcessTapReplayProbing, @unchec
     func stopCurrentReplayProbe(reason: ProcessTapReplayProbeStopReason) {}
 }
 
-private final class FakeLiveControlController: ProcessTapLiveControlling, @unchecked Sendable {
+private final class FakeLiveControlController: ProcessTapLiveControlling, ProcessTapLiveSessionManaging, @unchecked Sendable {
     private var startResults: [ProcessTapTestResult]
     private(set) var startedTargets: [ProcessTapTarget] = []
     private(set) var startGains: [ProcessTapReplayGainOption] = []
     private(set) var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] = []
     private(set) var gainUpdates: [ProcessTapReplayGainOption] = []
     private(set) var stopReasons: [ProcessTapLiveStopReason] = []
+    private(set) var startedSessionIDs: [ProcessTapLiveSessionID] = []
+    private(set) var sessionGainUpdates: [(id: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption)] = []
     private var onStopped: (@Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
+    private var sessionOnStopped: [ProcessTapLiveSessionID: @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void] = [:]
 
     init(startResults: [ProcessTapTestResult] = [
         ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
@@ -859,8 +862,70 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
         return ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info)
     }
 
+    // MARK: ProcessTapLiveSessionManaging
+
+    var activeSession: ProcessTapLiveSessionState? { nil }
+    var activeSessions: [ProcessTapLiveSessionState] { [] }
+
+    func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult {
+        await startSession(for: target, gain: gain, timeoutPolicy: .standard, onDiagnostics: onDiagnostics, onStopped: onStopped)
+    }
+
+    func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult {
+        startedTargets.append(target)
+        startGains.append(gain)
+        startTimeoutPolicies.append(timeoutPolicy)
+        let result = startResults.isEmpty
+            ? ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+            : startResults.removeFirst()
+        guard result.outcome == .liveControlStarted else {
+            return ProcessTapLiveSessionStartResult(sessionID: nil, result: result)
+        }
+        let sessionID = ProcessTapLiveSessionID()
+        startedSessionIDs.append(sessionID)
+        sessionOnStopped[sessionID] = onStopped
+        onDiagnostics(sessionID, makeLiveDiagnostics(gain: gain))
+        return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
+    }
+
+    func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        stopReasons.append(reason)
+        let result = ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info)
+        sessionOnStopped.removeValue(forKey: id)?(id, result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
+        return ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
+    }
+
+    func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult] {
+        let ids = Array(sessionOnStopped.keys)
+        var results: [ProcessTapTestResult] = []
+        for id in ids {
+            results.append(await stopSession(id: id, reason: reason))
+        }
+        return results
+    }
+
+    func updateGain(sessionID: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption) {
+        gainUpdates.append(gain)
+        sessionGainUpdates.append((sessionID, gain))
+    }
+
     func emitStopped(_ result: ProcessTapTestResult) {
         onStopped?(result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
+        for (id, handler) in sessionOnStopped {
+            handler(id, result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
+        }
+        sessionOnStopped.removeAll()
     }
 
     private func makeLiveDiagnostics(gain: ProcessTapReplayGainOption) -> ProcessTapLiveDiagnostics {
