@@ -46,6 +46,35 @@ final class SystemOutputCoordinatorTests: XCTestCase {
         XCTAssertTrue(audioController.setSystemVolumeRequests.isEmpty)
     }
 
+    func testFailedVolumeWriteMarksOutputVolumeNonWritable() {
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+
+        coordinator.setSystemVolume(80)
+
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+    }
+
+    func testSwitchingOutputDeviceResetsVolumeWritability() {
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(
+            outputDeviceLister: FakeOutputDeviceLister(devices: [
+                makeSystemOutputDevice(id: "built-in", isDefault: true),
+                makeSystemOutputDevice(id: "airpods")
+            ]),
+            systemVolumeController: volumeController
+        )
+
+        coordinator.setSystemVolume(80)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+
+        _ = coordinator.selectOutputDevice("airpods")
+
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+    }
+
     func testMuteSetsVolumeToZeroAndRemembersLastNonZeroVolume() {
         let audioController = FakeSystemOutputAudioController(systemVolume: 70)
         let volumeController = FakeSystemVolumeController()

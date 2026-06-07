@@ -155,6 +155,10 @@ struct MixerPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
+                if !viewModel.isSystemOutputVolumeWritable {
+                    nonWritableVolumeBadge
+                }
+
                 Spacer()
 
                 Text(viewModel.selectedOutputDeviceName)
@@ -174,6 +178,7 @@ struct MixerPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .help(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output")
+                .accessibilityLabel(Text(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output"))
 
                 Text("Output")
                     .font(.callout.weight(.medium))
@@ -195,11 +200,35 @@ struct MixerPanelView: View {
                         }
                     }
                 )
+                .accessibilityLabel(Text("System output volume"))
+                .accessibilityValue(Text("\(Int(viewModel.systemVolume.rounded())) percent"))
+                .accessibilityHint(Text(viewModel.isSystemOutputVolumeWritable
+                    ? "Adjusts the system output volume"
+                    : "This output device does not expose writable volume"))
 
                 volumeText(viewModel.systemVolume)
             }
         }
         .sectionStyle(tintOpacity: 0.32)
+    }
+
+    private var nonWritableVolumeBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 8, weight: .bold))
+
+            Text("Read-only")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+        )
+        .help("This output device does not expose a writable volume API. Use the device's own controls to change volume.")
+        .accessibilityLabel(Text("Volume is read-only on this output device"))
     }
 
     private var appMixerSection: some View {

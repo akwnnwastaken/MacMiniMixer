@@ -22,6 +22,10 @@ final class SystemOutputCoordinator {
     private(set) var outputDevices: [OutputDeviceItem]
     private(set) var selectedOutputDeviceID: OutputDeviceItem.ID
     private(set) var isSystemOutputMuted: Bool
+    /// Whether the currently selected output device accepted the most recent volume
+    /// write. Assumed writable until a write attempt is rejected, and reset to writable
+    /// whenever the selected device changes.
+    private(set) var isSystemOutputVolumeWritable = true
 
     private let audioController: AudioControlling
     private let outputDeviceLister: OutputDeviceListing
@@ -175,6 +179,7 @@ final class SystemOutputCoordinator {
             audioController.setSystemVolume(clampedVolume)
         }
 
+        setSystemOutputVolumeWritable(didSetVolume)
         return didSetVolume
     }
 
@@ -211,8 +216,23 @@ final class SystemOutputCoordinator {
     }
 
     private func setSelectedOutputDeviceID(_ selectedOutputDeviceID: OutputDeviceItem.ID) {
+        let didChangeDevice = selectedOutputDeviceID != self.selectedOutputDeviceID
         notifyWillChange()
         self.selectedOutputDeviceID = selectedOutputDeviceID
+
+        if didChangeDevice {
+            // Writability is per-device; a new device is assumed writable until proven otherwise.
+            setSystemOutputVolumeWritable(true)
+        }
+    }
+
+    private func setSystemOutputVolumeWritable(_ isWritable: Bool) {
+        guard isWritable != isSystemOutputVolumeWritable else {
+            return
+        }
+
+        notifyWillChange()
+        isSystemOutputVolumeWritable = isWritable
     }
 
     private func notifyWillChange() {
