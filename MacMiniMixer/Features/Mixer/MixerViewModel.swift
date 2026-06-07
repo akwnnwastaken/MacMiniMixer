@@ -513,12 +513,43 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func stopProcessTapLiveControl(reason: ProcessTapLiveStopReason) {
+        // Product and Advanced manual control are mutually exclusive today. Route product
+        // sessions to the per-session API; otherwise fall back to the Advanced manual compat
+        // stop. Per-row stop arrives in Phase 3d when two product sessions can coexist.
+        if !productRealControlState.activeSessions.isEmpty {
+            stopProductLiveSessions(reason: reason)
+            return
+        }
+
         advancedLiveControl.stopLiveControl(
             reason: reason,
             isLiveControlActive: isProcessTapLiveControlActive,
             currentDiagnostics: processTapLiveDiagnostics
         ) { [weak self] result, diagnostics in
             self?.handleLiveControlStopped(result, diagnostics: diagnostics)
+        }
+    }
+
+    private func stopProductLiveSessions(reason: ProcessTapLiveStopReason) {
+        let sessionIDs = productRealControlState.activeSessions.compactMap(\.liveSessionID)
+        guard !sessionIDs.isEmpty else {
+            // Optimistic window before the engine returned a session id: clean up locally,
+            // matching the compat path's not-active handling.
+            handleLiveControlStopped(
+                ProcessTapTestResult(
+                    outcome: .liveControlNotActive,
+                    message: "Live control is not active",
+                    severity: .info
+                ),
+                diagnostics: processTapLiveDiagnostics
+            )
+            return
+        }
+
+        Task {
+            for sessionID in sessionIDs {
+                _ = await processTapLiveController.stopSession(id: sessionID, reason: reason)
+            }
         }
     }
 
@@ -853,20 +884,21 @@ final class MixerViewModel: ObservableObject {
         advancedProcessTapDiagnostics.setRunning(true)
 
         Task {
-            let result = await processTapLiveController.startLiveControl(
+            let startResult = await processTapLiveController.startSession(
                 for: target,
                 gain: gain,
                 timeoutPolicy: .indefinite
-            ) { diagnostics in
+            ) { _, diagnostics in
                 Task { @MainActor in
                     self.processTapLiveDiagnostics = diagnostics
                     self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
                 }
-            } onStopped: { result, diagnostics in
+            } onStopped: { _, result, diagnostics in
                 Task { @MainActor in
                     self.handleLiveControlStopped(result, diagnostics: diagnostics)
                 }
             }
+            let result = startResult.result
 
             await MainActor.run {
                 advancedProcessTapDiagnostics.setResult(result)
@@ -876,12 +908,13 @@ final class MixerViewModel: ObservableObject {
                     isProcessTapLiveControlActive = true
                     // Re-assert the session after the await: the early set above may have
                     // been cleared by other MainActor work (e.g. app refresh) during the
-                    // suspension. Same arguments, so this is a no-op on the happy path.
+                    // suspension. Now carries the real engine session id for per-app stop/gain.
                     productRealControlState.beginSession(
                         visibleAppID: app.id,
                         displayName: app.name,
                         controlledProcessIdentifier: target.processIdentifier,
-                        source: ProductRealControlStartSource(resolutionSource: resolutionSource)
+                        source: ProductRealControlStartSource(resolutionSource: resolutionSource),
+                        liveSessionID: startResult.sessionID
                     )
                     activeLiveControlAppName = app.name
                 } else {
@@ -1064,11 +1097,12 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func updateExperimentalGainIfActive(for app: MixerAppItem) {
-        guard isExperimentalControlActive(for: app.id) else {
+        guard isExperimentalControlActive(for: app.id),
+              let sessionID = productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID else {
             return
         }
 
-        processTapLiveController.updateLiveControlGain(ProductRealControlState.gainOption(for: app))
+        processTapLiveController.updateGain(sessionID: sessionID, gain: ProductRealControlState.gainOption(for: app))
     }
 
     private var isAppAudioTargetResolving: Bool {

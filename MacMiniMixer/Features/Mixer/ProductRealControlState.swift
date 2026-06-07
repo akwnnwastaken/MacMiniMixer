@@ -22,6 +22,9 @@ struct ProductRealControlActiveSession: Equatable, Sendable {
     let displayName: String
     let controlledProcessIdentifier: Int32
     let source: ProductRealControlStartSource
+    /// The live engine session id for this app, once `startSession` has returned it. Nil
+    /// during the brief optimistic window before the async start completes.
+    var liveSessionID: ProcessTapLiveSessionID?
 }
 
 struct ProductRealControlState: Equatable, Sendable {
@@ -63,13 +66,15 @@ struct ProductRealControlState: Equatable, Sendable {
         visibleAppID: MixerAppItem.ID,
         displayName: String,
         controlledProcessIdentifier: Int32?,
-        source: ProductRealControlStartSource
+        source: ProductRealControlStartSource,
+        liveSessionID: ProcessTapLiveSessionID? = nil
     ) {
         activeSessionsByAppID[visibleAppID] = ProductRealControlActiveSession(
             visibleAppID: visibleAppID,
             displayName: displayName,
             controlledProcessIdentifier: controlledProcessIdentifier ?? -1,
-            source: source
+            source: source,
+            liveSessionID: liveSessionID
         )
     }
 
