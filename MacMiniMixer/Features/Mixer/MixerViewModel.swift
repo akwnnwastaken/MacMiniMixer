@@ -6,9 +6,16 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
     @Published private(set) var statusMessage: MixerStatusMessage?
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
-    @Published private(set) var isProcessTapLiveControlActive = false
+    @Published private var advancedManualLiveControlActive = false
     @Published private(set) var activeLiveControlAppName: String?
     @Published private var productRealControlState = ProductRealControlState()
+
+    /// Live control is active when the Advanced manual session is running or at least one
+    /// product session has confirmed-started. Derived so product and Advanced manual no
+    /// longer share a single stored flag (Phase 3d).
+    var isProcessTapLiveControlActive: Bool {
+        advancedManualLiveControlActive || productRealControlState.hasConfirmedLiveSession
+    }
     @Published private(set) var showAllApps = false
     @Published private(set) var isExperimentalRealAppControlEnabled = false
 
@@ -497,14 +504,14 @@ final class MixerViewModel: ObservableObject {
         ) { [weak self] diagnostics in
             self?.processTapLiveDiagnostics = diagnostics
         } onStarted: { [weak self] appName in
-            self?.isProcessTapLiveControlActive = true
+            self?.advancedManualLiveControlActive = true
             self?.activeLiveControlAppName = appName
         } onFailed: { [weak self] result in
             self?.processTapLiveDiagnostics = nil
             self?.activeLiveControlAppName = nil
             self?.showLiveControlWarningIfNeeded(for: result)
         } onStopped: { [weak self] result, diagnostics in
-            self?.handleLiveControlStopped(result, diagnostics: diagnostics)
+            self?.handleAdvancedManualLiveControlStopped(result, diagnostics: diagnostics)
         }
     }
 
@@ -526,7 +533,7 @@ final class MixerViewModel: ObservableObject {
             isLiveControlActive: isProcessTapLiveControlActive,
             currentDiagnostics: processTapLiveDiagnostics
         ) { [weak self] result, diagnostics in
-            self?.handleLiveControlStopped(result, diagnostics: diagnostics)
+            self?.handleAdvancedManualLiveControlStopped(result, diagnostics: diagnostics)
         }
     }
 
@@ -535,8 +542,9 @@ final class MixerViewModel: ObservableObject {
         guard !sessionIDs.isEmpty else {
             // Optimistic window before the engine returned a session id: clean up locally,
             // matching the compat path's not-active handling.
-            handleLiveControlStopped(
-                ProcessTapTestResult(
+            handleProductLiveControlStopped(
+                sessionID: nil,
+                result: ProcessTapTestResult(
                     outcome: .liveControlNotActive,
                     message: "Live control is not active",
                     severity: .info
@@ -562,7 +570,7 @@ final class MixerViewModel: ObservableObject {
         appAudioTargetResolver.invalidateAllCachedTargets()
         advancedHelperDiscovery.stopProbe(reason: .userStopped)
         advancedProcessTapDiagnostics.stopReplayProbeForTermination()
-        isProcessTapLiveControlActive = false
+        advancedManualLiveControlActive = false
         productRealControlState.clearAllResolutions()
         productRealControlState.clearActiveSession()
         activeLiveControlAppName = nil
@@ -893,9 +901,9 @@ final class MixerViewModel: ObservableObject {
                     self.processTapLiveDiagnostics = diagnostics
                     self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
                 }
-            } onStopped: { _, result, diagnostics in
+            } onStopped: { sessionID, result, diagnostics in
                 Task { @MainActor in
-                    self.handleLiveControlStopped(result, diagnostics: diagnostics)
+                    self.handleProductLiveControlStopped(sessionID: sessionID, result: result, diagnostics: diagnostics)
                 }
             }
             let result = startResult.result
@@ -905,7 +913,6 @@ final class MixerViewModel: ObservableObject {
                 advancedProcessTapDiagnostics.setRunning(false)
 
                 if result.outcome == .liveControlStarted {
-                    isProcessTapLiveControlActive = true
                     // Re-assert the session after the await: the early set above may have
                     // been cleared by other MainActor work (e.g. app refresh) during the
                     // suspension. Now carries the real engine session id for per-app stop/gain.
@@ -948,23 +955,53 @@ final class MixerViewModel: ObservableObject {
         }
     }
 
-    private func handleLiveControlStopped(
-        _ result: ProcessTapTestResult,
+    private func handleProductLiveControlStopped(
+        sessionID: ProcessTapLiveSessionID?,
+        result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
     ) {
-        let stoppedAppID = productRealControlState.activeVisibleAppID
-        advancedProcessTapDiagnostics.setResult(result)
-        processTapLiveDiagnostics = diagnostics
-        advancedProcessTapDiagnostics.setProgress(diagnostics?.progress)
-        isProcessTapLiveControlActive = false
-        advancedProcessTapDiagnostics.setRunning(false)
-        productRealControlState.clearActiveSession()
-        activeLiveControlAppName = nil
+        let stoppedSession = productRealControlState.activeSessions.first { session in
+            sessionID != nil && session.liveSessionID == sessionID
+        }
+        let stoppedAppID = stoppedSession?.visibleAppID
+
+        if let stoppedAppID {
+            productRealControlState.clearSession(for: stoppedAppID)
+        } else {
+            // No matching session id (optimistic window or already cleared): clear all.
+            productRealControlState.clearActiveSession()
+        }
+
+        if productRealControlState.activeSessions.isEmpty {
+            activeLiveControlAppName = nil
+        }
+
         if result.outcome == .liveControlAppExited,
            let stoppedAppID,
            let stoppedApp = apps.first(where: { $0.id == stoppedAppID }) {
             appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
         }
+
+        applyLiveControlStoppedDisplay(result, diagnostics: diagnostics)
+    }
+
+    private func handleAdvancedManualLiveControlStopped(
+        _ result: ProcessTapTestResult,
+        diagnostics: ProcessTapLiveDiagnostics?
+    ) {
+        advancedManualLiveControlActive = false
+        activeLiveControlAppName = nil
+        applyLiveControlStoppedDisplay(result, diagnostics: diagnostics)
+    }
+
+    private func applyLiveControlStoppedDisplay(
+        _ result: ProcessTapTestResult,
+        diagnostics: ProcessTapLiveDiagnostics?
+    ) {
+        advancedProcessTapDiagnostics.setResult(result)
+        processTapLiveDiagnostics = diagnostics
+        advancedProcessTapDiagnostics.setProgress(diagnostics?.progress)
+        advancedProcessTapDiagnostics.setRunning(false)
         if result.outcome == .liveControlOutputChanged {
             appAudioTargetResolver.invalidateAllCachedTargets()
         }

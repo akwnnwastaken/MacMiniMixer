@@ -39,6 +39,14 @@ struct ProductRealControlState: Equatable, Sendable {
         Array(activeSessionsByAppID.keys)
     }
 
+    /// True once at least one session has a confirmed engine session id (i.e. live control
+    /// actually started), as opposed to the brief optimistic window before `startSession`
+    /// returns. Used to derive the "live control active" flag without counting the optimistic
+    /// pre-start window.
+    var hasConfirmedLiveSession: Bool {
+        activeSessionsByAppID.values.contains { $0.liveSessionID != nil }
+    }
+
     /// Transitional single-session convenience: while orchestration still enforces one
     /// active product session at a time, this returns that session. Phase 3 lifts the
     /// single-session limit; new code should prefer `activeSessions` / `activeVisibleAppIDs`.
