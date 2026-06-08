@@ -17,6 +17,14 @@ enum ProductRealControlStartSource: Equatable, Sendable {
     }
 }
 
+/// Monotonic identifier for one Product live-start attempt. Used to reject stale async
+/// start completions/callbacks per app, so a late result from a superseded or cancelled
+/// start cannot reactivate or disturb current state. Uniqueness is global (monotonic raw
+/// value); validity is tracked per visible app id (see `pendingStartRequestByAppID`).
+struct ProductRealControlStartRequestID: Equatable, Sendable {
+    let rawValue: UInt64
+}
+
 struct ProductRealControlActiveSession: Equatable, Sendable {
     let visibleAppID: MixerAppItem.ID
     let displayName: String
@@ -25,11 +33,19 @@ struct ProductRealControlActiveSession: Equatable, Sendable {
     /// The live engine session id for this app, once `startSession` has returned it. Nil
     /// during the brief optimistic window before the async start completes.
     var liveSessionID: ProcessTapLiveSessionID?
+    /// The start request that produced this session, so a later callback can confirm it is
+    /// still the one that owns this app's session.
+    var startRequestID: ProductRealControlStartRequestID?
 }
 
 struct ProductRealControlState: Equatable, Sendable {
     private(set) var activeSessionsByAppID: [MixerAppItem.ID: ProductRealControlActiveSession] = [:]
     private(set) var resolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] = [:]
+    /// The currently pending start request for each visible app. A new start for an app
+    /// supersedes any earlier pending request for that same app, while leaving other apps'
+    /// requests untouched.
+    private(set) var pendingStartRequestByAppID: [MixerAppItem.ID: ProductRealControlStartRequestID] = [:]
+    private var nextStartRequestRawValue: UInt64 = 0
 
     var activeSessions: [ProductRealControlActiveSession] {
         Array(activeSessionsByAppID.values)
@@ -75,14 +91,16 @@ struct ProductRealControlState: Equatable, Sendable {
         displayName: String,
         controlledProcessIdentifier: Int32?,
         source: ProductRealControlStartSource,
-        liveSessionID: ProcessTapLiveSessionID? = nil
+        liveSessionID: ProcessTapLiveSessionID? = nil,
+        startRequestID: ProductRealControlStartRequestID? = nil
     ) {
         activeSessionsByAppID[visibleAppID] = ProductRealControlActiveSession(
             visibleAppID: visibleAppID,
             displayName: displayName,
             controlledProcessIdentifier: controlledProcessIdentifier ?? -1,
             source: source,
-            liveSessionID: liveSessionID
+            liveSessionID: liveSessionID,
+            startRequestID: startRequestID
         )
     }
 
@@ -92,6 +110,31 @@ struct ProductRealControlState: Equatable, Sendable {
 
     mutating func clearSession(for appID: MixerAppItem.ID) {
         activeSessionsByAppID.removeValue(forKey: appID)
+    }
+
+    /// Begins (and supersedes) the pending start request for `appID`, returning a fresh
+    /// per-app token. A later start for the same app invalidates this one; other apps are
+    /// unaffected.
+    mutating func beginStartRequest(for appID: MixerAppItem.ID) -> ProductRealControlStartRequestID {
+        nextStartRequestRawValue += 1
+        let requestID = ProductRealControlStartRequestID(rawValue: nextStartRequestRawValue)
+        pendingStartRequestByAppID[appID] = requestID
+        return requestID
+    }
+
+    /// Whether `requestID` is still the current pending start request for `appID`.
+    func isCurrentStartRequest(_ requestID: ProductRealControlStartRequestID, for appID: MixerAppItem.ID) -> Bool {
+        pendingStartRequestByAppID[appID] == requestID
+    }
+
+    /// Clears the pending start request for a single app only.
+    mutating func clearStartRequest(for appID: MixerAppItem.ID) {
+        pendingStartRequestByAppID.removeValue(forKey: appID)
+    }
+
+    /// Clears every pending start request (e.g. global toggle off, output change, termination).
+    mutating func clearAllStartRequests() {
+        pendingStartRequestByAppID = [:]
     }
 
     mutating func beginResolution(for appID: MixerAppItem.ID) {
