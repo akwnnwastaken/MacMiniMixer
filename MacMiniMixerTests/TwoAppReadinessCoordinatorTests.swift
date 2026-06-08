@@ -336,14 +336,14 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         )
     }
 
-    private func waitFor(
-        timeoutInYields: Int = 50,
-        _ predicate: @MainActor () -> Bool,
+    private nonisolated func waitFor(
+        timeoutInYields: Int = 10_000,
+        _ predicate: @escaping @MainActor @Sendable () -> Bool,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         for _ in 0..<timeoutInYields {
-            if predicate() {
+            if await MainActor.run(body: predicate) {
                 return
             }
 

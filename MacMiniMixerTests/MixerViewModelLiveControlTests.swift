@@ -1266,14 +1266,14 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         )
     }
 
-    private func waitFor(
+    private nonisolated func waitFor(
         timeoutInYields: Int = 10_000,
-        _ predicate: @MainActor () -> Bool,
+        _ predicate: @escaping @MainActor @Sendable () -> Bool,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         for _ in 0..<timeoutInYields {
-            if predicate() {
+            if await MainActor.run(body: predicate) {
                 return
             }
 
@@ -1447,8 +1447,10 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
     private(set) var gainUpdates: [ProcessTapReplayGainOption] = []
     private(set) var stopReasons: [ProcessTapLiveStopReason] = []
     private(set) var sessionStopRequests: [(sessionID: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason)] = []
+    private let pendingStartLock = NSLock()
     private var pendingStartContinuations: [PendingStart] = []
-    private var queuedPendingStartResults: [ProcessTapTestResult] = []
+    private var queuedNextPendingStartResults: [ProcessTapTestResult] = []
+    private var queuedPendingStartResultsBySessionID: [ProcessTapLiveSessionID: ProcessTapTestResult] = [:]
     private var onDiagnosticsBySessionID: [ProcessTapLiveSessionID: @Sendable (ProcessTapLiveDiagnostics) -> Void] = [:]
     private var onStoppedBySessionID: [ProcessTapLiveSessionID: @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void] = [:]
     private var compatibilitySessionID: ProcessTapLiveSessionID?
@@ -1467,12 +1469,15 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
             severity: .info
         )
     ) {
+        pendingStartLock.lock()
         guard !pendingStartContinuations.isEmpty else {
-            queuedPendingStartResults.append(result)
+            queuedNextPendingStartResults.append(result)
+            pendingStartLock.unlock()
             return
         }
 
         let pendingStart = pendingStartContinuations.removeFirst()
+        pendingStartLock.unlock()
         pendingStart.continuation.resume(
             returning: ProcessTapLiveSessionStartResult(
                 sessionID: result.outcome == .liveControlStarted ? pendingStart.sessionID : nil,
@@ -1489,12 +1494,15 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
             severity: .info
         )
     ) {
+        pendingStartLock.lock()
         guard let index = pendingStartContinuations.firstIndex(where: { $0.sessionID == sessionID }) else {
-            queuedPendingStartResults.append(result)
+            queuedPendingStartResultsBySessionID[sessionID] = result
+            pendingStartLock.unlock()
             return
         }
 
         let pendingStart = pendingStartContinuations.remove(at: index)
+        pendingStartLock.unlock()
         pendingStart.continuation.resume(
             returning: ProcessTapLiveSessionStartResult(
                 sessionID: result.outcome == .liveControlStarted ? pendingStart.sessionID : nil,
@@ -1520,8 +1528,7 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
         onStoppedBySessionID[sessionID] = onStopped
         onDiagnostics(makeLiveDiagnostics(gain: gain))
         if waitForStartCompletion {
-            if !queuedPendingStartResults.isEmpty {
-                let result = queuedPendingStartResults.removeFirst()
+            if let result = takeQueuedPendingStartResult(for: sessionID) {
                 return ProcessTapLiveSessionStartResult(
                     sessionID: result.outcome == .liveControlStarted ? sessionID : nil,
                     result: result
@@ -1529,7 +1536,25 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
             }
 
             return await withCheckedContinuation { continuation in
-                pendingStartContinuations.append(PendingStart(sessionID: sessionID, continuation: continuation))
+                let pendingStart = PendingStart(sessionID: sessionID, continuation: continuation)
+                var resultToResume: ProcessTapTestResult?
+
+                pendingStartLock.lock()
+                if let result = takeQueuedPendingStartResultLocked(for: sessionID) {
+                    resultToResume = result
+                } else {
+                    pendingStartContinuations.append(pendingStart)
+                }
+                pendingStartLock.unlock()
+
+                if let resultToResume {
+                    continuation.resume(
+                        returning: ProcessTapLiveSessionStartResult(
+                            sessionID: resultToResume.outcome == .liveControlStarted ? sessionID : nil,
+                            result: resultToResume
+                        )
+                    )
+                }
             }
         }
 
@@ -1623,6 +1648,25 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, @unche
     private struct PendingStart {
         let sessionID: ProcessTapLiveSessionID
         let continuation: CheckedContinuation<ProcessTapLiveSessionStartResult, Never>
+    }
+
+    private func takeQueuedPendingStartResult(for sessionID: ProcessTapLiveSessionID) -> ProcessTapTestResult? {
+        pendingStartLock.lock()
+        let result = takeQueuedPendingStartResultLocked(for: sessionID)
+        pendingStartLock.unlock()
+        return result
+    }
+
+    private func takeQueuedPendingStartResultLocked(for sessionID: ProcessTapLiveSessionID) -> ProcessTapTestResult? {
+        if let result = queuedPendingStartResultsBySessionID.removeValue(forKey: sessionID) {
+            return result
+        }
+
+        guard !queuedNextPendingStartResults.isEmpty else {
+            return nil
+        }
+
+        return queuedNextPendingStartResults.removeFirst()
     }
 }
 
