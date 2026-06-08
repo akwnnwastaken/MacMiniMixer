@@ -411,11 +411,13 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         harness.viewModel.setAppVolume(50, for: "spotify")
-        await waitFor { harness.liveController.startedSessionIDs.count == 1 }
-        await drainMainActor()
+        // Wait until the start has fully settled: the session id is recorded by startSession
+        // and the post-await has run (isProcessTapTesting back to false means setRunning(false)
+        // and the confirming beginSession in the same synchronous block have completed). This
+        // is deterministic, unlike a fixed drainMainActor yield count (which flakes on CI).
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
         harness.viewModel.setAppVolume(50, for: "music")
-        await waitFor { harness.liveController.startedSessionIDs.count == 2 }
-        await drainMainActor()
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
 
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
@@ -427,11 +429,13 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         harness.viewModel.setAppVolume(50, for: "spotify")
-        await waitFor { harness.liveController.startedSessionIDs.count == 1 }
-        await drainMainActor()
+        // Wait until the start has fully settled: the session id is recorded by startSession
+        // and the post-await has run (isProcessTapTesting back to false means setRunning(false)
+        // and the confirming beginSession in the same synchronous block have completed). This
+        // is deterministic, unlike a fixed drainMainActor yield count (which flakes on CI).
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
         harness.viewModel.setAppVolume(50, for: "music")
-        await waitFor { harness.liveController.startedSessionIDs.count == 2 }
-        await drainMainActor()
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
 
         harness.viewModel.toggleExperimentalControl(for: "spotify")
         await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
@@ -446,11 +450,13 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         harness.viewModel.setAppVolume(50, for: "spotify")
-        await waitFor { harness.liveController.startedSessionIDs.count == 1 }
-        await drainMainActor()
+        // Wait until the start has fully settled: the session id is recorded by startSession
+        // and the post-await has run (isProcessTapTesting back to false means setRunning(false)
+        // and the confirming beginSession in the same synchronous block have completed). This
+        // is deterministic, unlike a fixed drainMainActor yield count (which flakes on CI).
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
         harness.viewModel.setAppVolume(50, for: "music")
-        await waitFor { harness.liveController.startedSessionIDs.count == 2 }
-        await drainMainActor()
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
 
         harness.viewModel.setAppVolume(50, for: "youtube")
         await drainMainActor()
