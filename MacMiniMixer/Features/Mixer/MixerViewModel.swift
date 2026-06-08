@@ -614,11 +614,31 @@ final class MixerViewModel: ObservableObject {
 
     func toggleExperimentalControl(for appID: MixerAppItem.ID) {
         if isExperimentalControlActive(for: appID) {
-            stopProcessTapLiveControl()
+            stopExperimentalControl(for: appID)
             return
         }
 
         startExperimentalControl(for: appID)
+    }
+
+    private func stopExperimentalControl(for appID: MixerAppItem.ID) {
+        guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
+            // Optimistic window or not active: clear just this app locally.
+            productRealControlState.clearSession(for: appID)
+            updateActiveLiveControlAppNameAfterProductChange()
+            return
+        }
+
+        Task {
+            _ = await processTapLiveController.stopSession(id: sessionID, reason: .userStopped)
+        }
+    }
+
+    private func updateActiveLiveControlAppNameAfterProductChange() {
+        if advancedManualLiveControlActive {
+            return
+        }
+        activeLiveControlAppName = productRealControlState.activeSessions.first?.displayName
     }
 
     func refreshApplications() {
@@ -749,12 +769,34 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        if isProcessTapLiveControlActive || isProcessTapTesting {
-            showStatus("Stop active live control first", style: .warning)
+        if let blockReason = productSessionStartBlockReason(for: app.id) {
+            showStatus(blockReason, style: .warning)
             return
         }
 
         startResolvedExperimentalControl(for: app)
+    }
+
+    /// Whether a new product real-control session may start for `appID`. Returns a warning
+    /// message when blocked, or nil when allowed. Multiple product sessions are permitted up
+    /// to `maxConcurrentLiveSessions`; Advanced manual control and diagnostics remain mutually
+    /// exclusive with product control. Callers handle "already active for this app" separately.
+    private func productSessionStartBlockReason(for appID: MixerAppItem.ID) -> String? {
+        if isProcessTapTesting {
+            return "Stop active live control first"
+        }
+
+        if advancedManualLiveControlActive {
+            return "Stop the active live control first"
+        }
+
+        let alreadyCountsTowardLimit = productRealControlState.activeSessionsByAppID[appID] != nil
+        if !alreadyCountsTowardLimit,
+           productRealControlState.activeSessions.count >= AppConstants.maxConcurrentLiveSessions {
+            return "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
+        }
+
+        return nil
     }
 
     private func startExperimentalControl(for appID: MixerAppItem.ID) {
@@ -769,8 +811,8 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        guard !isProcessTapLiveControlActive else {
-            showStatus("Stop the active live control first", style: .warning)
+        if let blockReason = productSessionStartBlockReason(for: appID) {
+            showStatus(blockReason, style: .warning)
             return
         }
 
@@ -972,9 +1014,7 @@ final class MixerViewModel: ObservableObject {
             productRealControlState.clearActiveSession()
         }
 
-        if productRealControlState.activeSessions.isEmpty {
-            activeLiveControlAppName = nil
-        }
+        updateActiveLiveControlAppNameAfterProductChange()
 
         if result.outcome == .liveControlAppExited,
            let stoppedAppID,
@@ -1035,8 +1075,8 @@ final class MixerViewModel: ObservableObject {
                 return
             }
 
-            guard !isProcessTapLiveControlActive, !isProcessTapTesting else {
-                showStatus("Stop active live control first", style: .warning)
+            if let blockReason = productSessionStartBlockReason(for: app.id) {
+                showStatus(blockReason, style: .warning)
                 return
             }
 

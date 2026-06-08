@@ -406,6 +406,60 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertNil(harness.viewModel.statusMessage?.action)
     }
 
+    func testSecondAppStartsConcurrentProductSession() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 }
+        await drainMainActor()
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 }
+        await drainMainActor()
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertEqual(Set(harness.liveController.startedTargets.map(\.appID)), ["spotify", "music"])
+    }
+
+    func testStoppingOneProductSessionLeavesTheOtherActive() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 }
+        await drainMainActor()
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 }
+        await drainMainActor()
+
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+    }
+
+    func testThirdProductSessionBlockedByCap() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 }
+        await drainMainActor()
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 }
+        await drainMainActor()
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await drainMainActor()
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Real app control supports 2 apps at a time")
+        XCTAssertEqual(harness.liveController.startedSessionIDs.count, 2)
+    }
+
     func testHelperResolvedSetupFailureInvalidatesMappingClearsStateAndAllowsLaterResolve() async {
         let resolver = FakeAppAudioTargetResolver(results: [
             .resolved(
