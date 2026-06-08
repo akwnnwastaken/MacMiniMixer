@@ -282,6 +282,13 @@ final class MixerViewModel: ObservableObject {
     func setExperimentalRealAppControlEnabled(_ isEnabled: Bool) {
         isExperimentalRealAppControlEnabled = isEnabled
 
+        if !isEnabled {
+            // Invalidate every pending start so any in-flight start that completes after the
+            // toggle is rejected and its orphan session cleaned up (covers pending starts that
+            // have no confirmed session yet, which the active-only stop below would miss).
+            productRealControlState.clearAllStartRequests()
+        }
+
         if !isEnabled, isProcessTapLiveControlActive {
             stopProcessTapLiveControl()
         }
@@ -332,6 +339,9 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
+        // The output device changed under all taps: invalidate every pending Product start so
+        // late completions cannot reactivate state on the previous device.
+        productRealControlState.clearAllStartRequests()
         stopActiveAudioWorkForOutputDeviceChange(refreshResult)
         appAudioTargetResolver.invalidateAllCachedTargets()
         refreshSystemOutputVolume()
@@ -520,6 +530,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func stopProcessTapLiveControl(reason: ProcessTapLiveStopReason) {
+        // Global stop: cancel every pending Product start as well, so an in-flight start that
+        // completes after this stop is rejected (and its orphan session cleaned up).
+        productRealControlState.clearAllStartRequests()
+
         // Product and Advanced manual control are mutually exclusive today. Route product
         // sessions to the per-session API; otherwise fall back to the Advanced manual compat
         // stop. Per-row stop arrives in Phase 3d when two product sessions can coexist.
@@ -571,6 +585,7 @@ final class MixerViewModel: ObservableObject {
         advancedHelperDiscovery.stopProbe(reason: .userStopped)
         advancedProcessTapDiagnostics.stopReplayProbeForTermination()
         advancedManualLiveControlActive = false
+        productRealControlState.clearAllStartRequests()
         productRealControlState.clearAllResolutions()
         productRealControlState.clearActiveSession()
         activeLiveControlAppName = nil
@@ -621,7 +636,13 @@ final class MixerViewModel: ObservableObject {
         startExperimentalControl(for: appID)
     }
 
-    private func stopExperimentalControl(for appID: MixerAppItem.ID) {
+    private func stopExperimentalControl(
+        for appID: MixerAppItem.ID,
+        reason: ProcessTapLiveStopReason = .userStopped
+    ) {
+        // Per-app stop invalidates only this app's pending start, leaving other apps untouched.
+        productRealControlState.clearStartRequest(for: appID)
+
         guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
             // Optimistic window or not active: clear just this app locally.
             productRealControlState.clearSession(for: appID)
@@ -630,7 +651,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         Task {
-            _ = await processTapLiveController.stopSession(id: sessionID, reason: .userStopped)
+            _ = await processTapLiveController.stopSession(id: sessionID, reason: reason)
         }
     }
 
@@ -675,9 +696,9 @@ final class MixerViewModel: ObservableObject {
         let exitedActiveAppIDs = productRealControlState.activeVisibleAppIDs.filter { activeAppID in
             !apps.contains(where: { $0.id == activeAppID })
         }
-        if !exitedActiveAppIDs.isEmpty {
-            // One active session today; Phase 4 will stop each exited session individually.
-            stopProcessTapLiveControl(reason: .targetAppExited)
+        // Tear down only the exited apps' sessions/requests; surviving apps keep running.
+        for exitedAppID in exitedActiveAppIDs {
+            stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
         }
 
         if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
@@ -901,17 +922,22 @@ final class MixerViewModel: ObservableObject {
         }
 
         let gain = ProductRealControlState.gainOption(for: app)
+        // Per-app start-request token: a later start for this app, or any cancellation
+        // (stop / output change / toggle off / termination), supersedes this token so the
+        // async completion and callbacks below can be recognised as stale and rejected.
+        let startRequestID = productRealControlState.beginStartRequest(for: app.id)
 
         // Optimistic/early session set: `activeVisibleAppID` is read by `visibleMixerApps`
         // independently of `isProcessTapLiveControlActive`, so setting it now keeps the row
         // visible during startup and lets `refreshApplications` detect a target-app exit
-        // while the async `startLiveControl` below is still in flight. The success branch
+        // while the async `startSession` below is still in flight. The success branch
         // re-asserts this after the await (see below).
         productRealControlState.beginSession(
             visibleAppID: app.id,
             displayName: app.name,
             controlledProcessIdentifier: target.processIdentifier,
-            source: ProductRealControlStartSource(resolutionSource: resolutionSource)
+            source: ProductRealControlStartSource(resolutionSource: resolutionSource),
+            startRequestID: startRequestID
         )
         activeLiveControlAppName = app.name
         advancedProcessTapDiagnostics.setResult(
@@ -940,6 +966,9 @@ final class MixerViewModel: ObservableObject {
                 timeoutPolicy: .indefinite
             ) { _, diagnostics in
                 Task { @MainActor in
+                    guard self.shouldAcceptProductLiveCallback(appID: app.id, requestID: startRequestID) else {
+                        return
+                    }
                     self.processTapLiveDiagnostics = diagnostics
                     self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
                 }
@@ -950,20 +979,38 @@ final class MixerViewModel: ObservableObject {
             }
             let result = startResult.result
 
-            await MainActor.run {
+            let accepted = await MainActor.run { () -> Bool in
+                // Reject a stale completion: a newer start for this app, or any cancellation,
+                // has superseded this request. Leave current state untouched, but drop this
+                // request's own lingering optimistic entry if a newer request has not already
+                // replaced it (never touch a newer request's session).
+                guard productRealControlState.isCurrentStartRequest(startRequestID, for: app.id) else {
+                    if productRealControlState.activeSessionsByAppID[app.id]?.startRequestID == startRequestID,
+                       productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID == nil {
+                        productRealControlState.clearSession(for: app.id)
+                        updateActiveLiveControlAppNameAfterProductChange()
+                    }
+                    // This start owned the "running" diagnostics flag (starts are serialised by
+                    // the isProcessTapTesting guard), so clear it now that it is rejected.
+                    advancedProcessTapDiagnostics.setRunning(false)
+                    advancedProcessTapDiagnostics.setProgress(nil)
+                    return false
+                }
+
+                productRealControlState.clearStartRequest(for: app.id)
                 advancedProcessTapDiagnostics.setResult(result)
                 advancedProcessTapDiagnostics.setRunning(false)
 
                 if result.outcome == .liveControlStarted {
-                    // Re-assert the session after the await: the early set above may have
-                    // been cleared by other MainActor work (e.g. app refresh) during the
-                    // suspension. Now carries the real engine session id for per-app stop/gain.
+                    // Re-assert the session after the await with the real engine session id
+                    // and the owning request id, for per-app stop/gain and callback validation.
                     productRealControlState.beginSession(
                         visibleAppID: app.id,
                         displayName: app.name,
                         controlledProcessIdentifier: target.processIdentifier,
                         source: ProductRealControlStartSource(resolutionSource: resolutionSource),
-                        liveSessionID: startResult.sessionID
+                        liveSessionID: startResult.sessionID,
+                        startRequestID: startRequestID
                     )
                     activeLiveControlAppName = app.name
                 } else {
@@ -971,8 +1018,8 @@ final class MixerViewModel: ObservableObject {
                         appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
                     }
 
-                    productRealControlState.clearActiveSession()
-                    activeLiveControlAppName = nil
+                    productRealControlState.clearSession(for: app.id)
+                    updateActiveLiveControlAppNameAfterProductChange()
                     processTapLiveDiagnostics = nil
                     advancedProcessTapDiagnostics.setProgress(nil)
 
@@ -993,8 +1040,47 @@ final class MixerViewModel: ObservableObject {
                         )
                     }
                 }
+
+                return true
+            }
+
+            if !accepted {
+                // Stale start: only the just-started orphan session is torn down, by its own
+                // session id. Current state and other apps' sessions are left untouched.
+                await cleanupStaleProductLiveStart(startResult)
             }
         }
+    }
+
+    private func shouldAcceptProductLiveCallback(
+        appID: MixerAppItem.ID,
+        requestID: ProductRealControlStartRequestID
+    ) -> Bool {
+        if productRealControlState.isCurrentStartRequest(requestID, for: appID) {
+            return true
+        }
+
+        // Otherwise only accept callbacks for a confirmed (started) session that this request
+        // owns. A cancelled optimistic entry still carries the request id but has no live
+        // session, so its stale callbacks must be rejected.
+        guard let session = productRealControlState.activeSessionsByAppID[appID] else {
+            return false
+        }
+
+        return session.startRequestID == requestID && session.liveSessionID != nil
+    }
+
+    private func cleanupStaleProductLiveStart(_ startResult: ProcessTapLiveSessionStartResult) async {
+        guard startResult.result.outcome == .liveControlStarted else {
+            return
+        }
+
+        guard let sessionID = startResult.sessionID else {
+            AppLogger.processTap.warning("Stale Product Real Control start succeeded without a session-specific cleanup handle")
+            return
+        }
+
+        _ = await processTapLiveController.stopSession(id: sessionID, reason: .userStopped)
     }
 
     private func handleProductLiveControlStopped(
@@ -1002,26 +1088,34 @@ final class MixerViewModel: ObservableObject {
         result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
     ) {
-        let stoppedSession = productRealControlState.activeSessions.first { session in
-            sessionID != nil && session.liveSessionID == sessionID
-        }
-        let stoppedAppID = stoppedSession?.visibleAppID
+        if let sessionID {
+            guard let stoppedSession = productRealControlState.activeSessions.first(where: { $0.liveSessionID == sessionID }) else {
+                // A session id we no longer track: a stale orphan that was already rejected
+                // and is being torn down by its own id. Leave every other app's state and the
+                // shared display untouched.
+                return
+            }
 
-        if let stoppedAppID {
+            let stoppedAppID = stoppedSession.visibleAppID
+            // If this stop arrived while the same request was still pending (engine-side stop
+            // before the post-await ran), invalidate it so its late success is rejected. A
+            // newer request carries a different token and is left untouched.
+            if let stoppedRequestID = stoppedSession.startRequestID,
+               productRealControlState.isCurrentStartRequest(stoppedRequestID, for: stoppedAppID) {
+                productRealControlState.clearStartRequest(for: stoppedAppID)
+            }
             productRealControlState.clearSession(for: stoppedAppID)
+
+            if result.outcome == .liveControlAppExited,
+               let stoppedApp = apps.first(where: { $0.id == stoppedAppID }) {
+                appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
+            }
         } else {
-            // No matching session id (optimistic window or already cleared): clear all.
+            // No session id: an optimistic-window stop. Clear all product sessions.
             productRealControlState.clearActiveSession()
         }
 
         updateActiveLiveControlAppNameAfterProductChange()
-
-        if result.outcome == .liveControlAppExited,
-           let stoppedAppID,
-           let stoppedApp = apps.first(where: { $0.id == stoppedAppID }) {
-            appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
-        }
-
         applyLiveControlStoppedDisplay(result, diagnostics: diagnostics)
     }
 

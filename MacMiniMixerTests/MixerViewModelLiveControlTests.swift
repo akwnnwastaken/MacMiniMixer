@@ -746,6 +746,174 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             await Task.yield()
         }
     }
+
+    // MARK: - Stale-start safety (controlled completion)
+
+    func testStaleProductStartAfterGlobalToggleOffIsRejectedAndStopsOnlyStaleSession() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        await drainMainActor()
+
+        controller.completeNextStart(success: true)
+        await drainMainActor()
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertEqual(controller.stoppedSessionIDs.count, 1)
+    }
+
+    func testStaleProductStartAfterOutputDeviceChangeIsRejectedAndStopsStaleSession() async {
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller, outputDeviceLister: outputDeviceLister)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+
+        outputDeviceLister.devices = [makeLiveControlOutputDevice(id: "airpods", isDefault: true)]
+        harness.viewModel.refreshOutputDevices()
+        await drainMainActor()
+
+        controller.completeNextStart(success: true)
+        await drainMainActor()
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertEqual(controller.stoppedSessionIDs.count, 1)
+    }
+
+    func testStaleStartForOneAppDoesNotDisturbAnotherActiveApp() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // Music becomes a confirmed active session.
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "music") }
+
+        // Spotify starts, is cancelled per-app while pending, then completes late (stale).
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await drainMainActor()
+        controller.completeNextStart(success: true)
+        await drainMainActor()
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+    }
+
+    // Note: a same-app A1/A2 both-pending race is not reachable through the public API —
+    // the isProcessTapTesting guard serialises Product starts, so a second start cannot begin
+    // while the first is still in flight. The per-app token's same-app supersession is covered
+    // by ProductRealControlStateTests.testNewStartRequestForSameAppSupersedesPrevious.
+
+    func testStaleDiagnosticsAfterCancelledStartDoNotRepopulateState() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        await drainMainActor()
+
+        XCTAssertNil(harness.viewModel.processTapLiveDiagnostics)
+        controller.emitDiagnosticsForPendingStart(at: 0)
+        await drainMainActor()
+        XCTAssertNil(harness.viewModel.processTapLiveDiagnostics)
+    }
+
+    func testPerAppStopInvalidatesOnlyThatAppPendingStart() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "music") }
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await drainMainActor()
+        controller.completeNextStart(success: true)
+        await drainMainActor()
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+    }
+
+    func testConcurrentStartLimitOfTwoPreservedWithControlledCompletion() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+        controller.completeNextStart(success: true)
+        // Music is the second app, so the global "live control active" flag is already true;
+        // wait on the controlled completion draining instead of the (then-imprecise) per-app flag.
+        await waitFor { controller.pendingStartCount == 0 }
+        await drainMainActor()
+
+        // Both still active and indefinite; a third app is rejected by the cap.
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertEqual(controller.startTimeoutPolicies, [.indefinite, .indefinite])
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await drainMainActor()
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Real app control supports 2 apps at a time")
+    }
+
+    private func makeControlledHarness(
+        liveController: FakeControlledLiveController,
+        outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+    ) -> ControlledHarness {
+        let viewModel = MixerViewModel(
+            applicationLister: FakeLiveControlApplicationLister(apps: makeLiveControlApps()),
+            audioController: FakeLiveControlAudioController(),
+            outputDeviceLister: outputDeviceLister,
+            outputDeviceController: FakeLiveControlOutputDeviceController(),
+            systemVolumeReader: FakeLiveControlSystemVolumeReader(volumeScalar: 0.5),
+            systemVolumeController: FakeLiveControlSystemVolumeController(),
+            processTapTester: FakeLiveControlProcessTapTester(),
+            processTapReplayProbe: FakeLiveControlReplayProbe(),
+            processTapLiveController: liveController,
+            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
+            helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
+            appAudioTargetResolver: FakeAppAudioTargetResolver(),
+            processLister: FakeLiveControlProcessLister(),
+            processTapEligibility: { _ in .eligible }
+        )
+
+        return ControlledHarness(
+            viewModel: viewModel,
+            liveController: liveController,
+            outputDeviceLister: outputDeviceLister
+        )
+    }
 }
 
 private struct LiveControlHarness {
@@ -755,6 +923,170 @@ private struct LiveControlHarness {
     let outputDeviceLister: FakeLiveControlOutputDeviceLister
     let liveController: FakeLiveControlController
     let appAudioTargetResolver: FakeAppAudioTargetResolver
+}
+
+private struct ControlledHarness {
+    let viewModel: MixerViewModel
+    let liveController: FakeControlledLiveController
+    let outputDeviceLister: FakeLiveControlOutputDeviceLister
+}
+
+/// Live controller fake whose Product `startSession` suspends until the test explicitly
+/// completes it, so stale-start races can be exercised deterministically (no sleeps). Fully
+/// thread-safe: `startSession` runs on the view model's background task while the test drives
+/// completion from the main actor.
+private final class FakeControlledLiveController: ProcessTapLiveControlling, ProcessTapLiveSessionManaging, @unchecked Sendable {
+    private let lock = NSLock()
+
+    private struct PendingStart {
+        let sessionID: ProcessTapLiveSessionID
+        let onDiagnostics: @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void
+        let continuation: CheckedContinuation<ProcessTapTestResult, Never>
+    }
+
+    private var pendingStarts: [PendingStart] = []
+    private var sessionOnStopped: [ProcessTapLiveSessionID: @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void] = [:]
+    private var startedTargetsStorage: [ProcessTapTarget] = []
+    private var startTimeoutPoliciesStorage: [ProcessTapLiveTimeoutPolicy] = []
+    private var stoppedSessionIDsStorage: [ProcessTapLiveSessionID] = []
+
+    var pendingStartCount: Int { lock.lock(); defer { lock.unlock() }; return pendingStarts.count }
+    var startedTargets: [ProcessTapTarget] { lock.lock(); defer { lock.unlock() }; return startedTargetsStorage }
+    var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] { lock.lock(); defer { lock.unlock() }; return startTimeoutPoliciesStorage }
+    var stoppedSessionIDs: [ProcessTapLiveSessionID] { lock.lock(); defer { lock.unlock() }; return stoppedSessionIDsStorage }
+
+    /// Completes the oldest pending start with success or setup failure.
+    func completeNextStart(success: Bool = true) {
+        lock.lock()
+        guard !pendingStarts.isEmpty else {
+            lock.unlock()
+            return
+        }
+        let pending = pendingStarts.removeFirst()
+        lock.unlock()
+
+        let result = success
+            ? ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+            : ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning)
+        pending.continuation.resume(returning: result)
+    }
+
+    /// Fires the diagnostics callback for a still-pending start, to simulate a (possibly
+    /// stale) diagnostics update arriving while the start is in flight.
+    func emitDiagnosticsForPendingStart(at index: Int) {
+        lock.lock()
+        guard index < pendingStarts.count else {
+            lock.unlock()
+            return
+        }
+        let pending = pendingStarts[index]
+        lock.unlock()
+        pending.onDiagnostics(pending.sessionID, Self.makeDiagnostics())
+    }
+
+    // MARK: ProcessTapLiveSessionManaging
+
+    var activeSession: ProcessTapLiveSessionState? { nil }
+    var activeSessions: [ProcessTapLiveSessionState] { [] }
+
+    func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult {
+        await startSession(for: target, gain: gain, timeoutPolicy: .standard, onDiagnostics: onDiagnostics, onStopped: onStopped)
+    }
+
+    func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult {
+        let sessionID = ProcessTapLiveSessionID()
+        lock.lock()
+        startedTargetsStorage.append(target)
+        startTimeoutPoliciesStorage.append(timeoutPolicy)
+        sessionOnStopped[sessionID] = onStopped
+        lock.unlock()
+
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<ProcessTapTestResult, Never>) in
+            lock.lock()
+            pendingStarts.append(PendingStart(sessionID: sessionID, onDiagnostics: onDiagnostics, continuation: continuation))
+            lock.unlock()
+        }
+
+        if result.outcome == .liveControlStarted {
+            return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
+        }
+
+        lock.lock()
+        sessionOnStopped.removeValue(forKey: sessionID)
+        lock.unlock()
+        return ProcessTapLiveSessionStartResult(sessionID: nil, result: result)
+    }
+
+    func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        lock.lock()
+        stoppedSessionIDsStorage.append(id)
+        let handler = sessionOnStopped.removeValue(forKey: id)
+        lock.unlock()
+
+        handler?(id, ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info), nil)
+        return ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
+    }
+
+    func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult] {
+        lock.lock()
+        let ids = Array(sessionOnStopped.keys)
+        lock.unlock()
+
+        var results: [ProcessTapTestResult] = []
+        for id in ids {
+            results.append(await stopSession(id: id, reason: reason))
+        }
+        return results
+    }
+
+    func updateGain(sessionID: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption) {}
+
+    // MARK: ProcessTapLiveControlling (Advanced manual path — not exercised by these tests)
+
+    func startLiveControl(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapTestResult {
+        ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+    }
+
+    func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
+    }
+
+    func updateLiveControlGain(_ gain: ProcessTapReplayGainOption) {}
+
+    @discardableResult
+    func stopLiveControlNow(reason: ProcessTapLiveStopReason) -> ProcessTapTestResult? {
+        nil
+    }
+
+    private static func makeDiagnostics() -> ProcessTapLiveDiagnostics {
+        ProcessTapLiveDiagnostics(
+            selectedGain: .defaultOption,
+            callbackCount: 10,
+            peakLevel: 0.2,
+            rmsLevel: 0.05,
+            enqueuedBufferCount: 10,
+            droppedBufferCount: 0,
+            enqueueFailureCount: 0,
+            copyFailureCount: 0
+        )
+    }
 }
 
 private func makeLiveControlApps() -> [MixerAppItem] {
