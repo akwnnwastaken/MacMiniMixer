@@ -269,6 +269,50 @@ Deferred to 3d (when two product sessions exist): a per-row
 `stopExperimentalControl(for appID:)`, keying `handleLiveControlStopped` by session id, and a
 `stopAllLiveControl` for the global stops.
 
+### 3d detail: allowing a second product session (plan)
+
+3d is the behavior change. It is decomposed so the risky state/flag work is behavior-neutral
+prep, and only the guard relaxation flips behavior (the first two-app manual test).
+
+**Key state distinction.** `isProcessTapLiveControlActive` today is a shared stored flag set
+by both product and Advanced manual. For two product sessions it must become derived:
+- New stored `advancedManualLiveControlActive` — set only by the Advanced manual path
+  (`startProcessTapLiveControl` onStarted/onStopped).
+- `isProcessTapLiveControlActive` becomes computed:
+  `advancedManualLiveControlActive || !productRealControlState.activeSessions.isEmpty`.
+- "Advanced manual is the active one" = `advancedManualLiveControlActive` (product count 0).
+
+**3d-i (behavior-neutral prep).**
+- Split the flag as above; route the Advanced manual path to set
+  `advancedManualLiveControlActive`; everything reading `isProcessTapLiveControlActive` keeps
+  working via the computed value.
+- Key teardown by session: `handleLiveControlStopped` takes the stopped `sessionID`, finds
+  the app whose `liveSessionID` matches, and clears only that app (`clearSession(for:)`)
+  instead of `clearActiveSession()`. Wire the product `onStopped` callback to pass its
+  `sessionID`. With ≤1 enforced this is identical behavior. Tests.
+- `activeLiveControlAppName` becomes derived (single name when one product session; a count
+  summary when more) — still one today.
+
+**3d-ii (behavior flip — FIRST TWO-APP MANUAL TEST).**
+- Relax the start guard in `startAutomaticRealControlIfNeeded` / `startExperimentalControl`:
+  replace `if isProcessTapLiveControlActive || isProcessTapTesting { block }` with: block if
+  `isProcessTapTesting`, block if `advancedManualLiveControlActive`, block if
+  `productRealControlState.activeSessions.count >= AppConstants.maxConcurrentLiveSessions`
+  ("Two apps max for now"). Allow an additional product session otherwise.
+- Add `stopExperimentalControl(for appID:)` → `stopSession(id: that app's liveSessionID)`,
+  so the per-row "Real" toggle and per-row stop affect only that app. `toggleExperimentalControl`
+  stops just its row; the banner gets per-app or stop-all affordances.
+- The global stops (output change, termination, disable real control) keep stopping all via
+  `stopProductLiveSessions`.
+
+**3d-iii (UI).** Banner reflects N active apps (count or list); rows already show per-row
+"Real". Optional per-row live meters fold in here (the deferred sub-step 3).
+
+**Hazards.** The optimistic early `beginSession` now happens per app while another is active —
+ensure the collection keys by app id (it does). `handleLiveControlStopped` must not clear
+sibling sessions. Resolution is still single-lane (Phase 2 / 3e) — starting B's resolution
+while A resolves is rejected; surface "busy" for now.
+
 ### Suggested sub-order (each builds; behavior-neutral until 3d)
 
 - **3a.** Wiring: `maxSessions = 2` + factory. No behavior change yet (guard still blocks a
