@@ -22,11 +22,18 @@ struct ProductRealControlActiveSession: Equatable, Sendable {
     let displayName: String
     let controlledProcessIdentifier: Int32
     let source: ProductRealControlStartSource
+    let startRequestID: ProductRealControlStartRequestID?
+}
+
+struct ProductRealControlStartRequestID: Equatable, Sendable {
+    let rawValue: UInt64
 }
 
 struct ProductRealControlState: Equatable, Sendable {
     private(set) var activeSession: ProductRealControlActiveSession?
     private(set) var resolutionStateByAppID: [MixerAppItem.ID: AppAudioResolutionState] = [:]
+    private(set) var currentStartRequestID: ProductRealControlStartRequestID?
+    private var nextStartRequestRawValue: UInt64 = 0
 
     var activeVisibleAppID: MixerAppItem.ID? {
         activeSession?.visibleAppID
@@ -34,6 +41,10 @@ struct ProductRealControlState: Equatable, Sendable {
 
     var activeDisplayName: String? {
         activeSession?.displayName
+    }
+
+    var activeStartRequestID: ProductRealControlStartRequestID? {
+        activeSession?.startRequestID
     }
 
     var isResolving: Bool {
@@ -48,18 +59,41 @@ struct ProductRealControlState: Equatable, Sendable {
         visibleAppID: MixerAppItem.ID,
         displayName: String,
         controlledProcessIdentifier: Int32?,
-        source: ProductRealControlStartSource
+        source: ProductRealControlStartSource,
+        startRequestID: ProductRealControlStartRequestID? = nil
     ) {
         activeSession = ProductRealControlActiveSession(
             visibleAppID: visibleAppID,
             displayName: displayName,
             controlledProcessIdentifier: controlledProcessIdentifier ?? -1,
-            source: source
+            source: source,
+            startRequestID: startRequestID
         )
     }
 
     mutating func clearActiveSession() {
         activeSession = nil
+    }
+
+    mutating func beginStartRequest() -> ProductRealControlStartRequestID {
+        nextStartRequestRawValue += 1
+        let requestID = ProductRealControlStartRequestID(rawValue: nextStartRequestRawValue)
+        currentStartRequestID = requestID
+        return requestID
+    }
+
+    func isCurrentStartRequest(_ requestID: ProductRealControlStartRequestID) -> Bool {
+        currentStartRequestID == requestID
+    }
+
+    mutating func clearStartRequest(_ requestID: ProductRealControlStartRequestID) {
+        if currentStartRequestID == requestID {
+            currentStartRequestID = nil
+        }
+    }
+
+    mutating func invalidateCurrentStartRequest() {
+        currentStartRequestID = nil
     }
 
     mutating func beginResolution(for appID: MixerAppItem.ID) {

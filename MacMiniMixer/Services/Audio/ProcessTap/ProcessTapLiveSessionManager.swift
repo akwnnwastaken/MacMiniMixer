@@ -104,6 +104,20 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         if result.outcome == .liveControlStarted {
+            guard let currentSession = session(for: sessionID) else {
+                _ = await controller.stopLiveControl(reason: .userStopped)
+                AppLogger.processTap.warning("Live session started after removal; cleaned stale controller sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public)")
+                return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
+            }
+
+            if currentSession.phase == .stopping {
+                let reason = currentSession.stopReason ?? .userStopped
+                _ = await controller.stopLiveControl(reason: reason)
+                removeSession(sessionID)
+                AppLogger.processTap.info("Live session late start cleaned after prior stop sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public) reason=\(String(describing: reason), privacy: .public)")
+                return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
+            }
+
             markSession(sessionID, phase: .active, gain: gain)
             AppLogger.processTap.info("Live session active sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public)")
             return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
@@ -117,6 +131,8 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
 
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
         AppLogger.processTap.info("Live session stop requested sessionID=\(id.rawValue.uuidString, privacy: .public) reason=\(String(describing: reason), privacy: .public)")
+        let priorPhase = session(for: id)?.phase
+        let wasPendingStartOrStop = priorPhase == .starting || priorPhase == .stopping
         markSession(id, phase: .stopping, stopReason: reason)
 
         guard let controller = controller(for: id) else {
@@ -130,12 +146,32 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         let result = await controller.stopLiveControl(reason: reason)
-        if result.outcome == .liveControlNotActive {
+        if result.outcome == .liveControlNotActive, !wasPendingStartOrStop {
             removeSession(id)
         }
 
         AppLogger.processTap.info("Live session stop completed sessionID=\(id.rawValue.uuidString, privacy: .public) outcome=\(String(describing: result.outcome), privacy: .public)")
         return result
+    }
+
+    func startLiveControlSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult {
+        await startSession(
+            for: target,
+            gain: gain,
+            timeoutPolicy: timeoutPolicy,
+            onDiagnostics: { _, diagnostics in
+                onDiagnostics(diagnostics)
+            },
+            onStopped: { _, result, diagnostics in
+                onStopped(result, diagnostics)
+            }
+        )
     }
 
     func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult] {
@@ -174,16 +210,12 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
-        let startResult = await startSession(
+        let startResult = await startLiveControlSession(
             for: target,
             gain: gain,
             timeoutPolicy: timeoutPolicy,
-            onDiagnostics: { _, diagnostics in
-                onDiagnostics(diagnostics)
-            },
-            onStopped: { _, result, diagnostics in
-                onStopped(result, diagnostics)
-            }
+            onDiagnostics: onDiagnostics,
+            onStopped: onStopped
         )
 
         if let sessionID = startResult.sessionID {
@@ -203,6 +235,10 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         return await stopSession(id: sessionID, reason: reason)
+    }
+
+    func stopLiveControlSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        await stopSession(id: id, reason: reason)
     }
 
     func updateLiveControlGain(_ gain: ProcessTapReplayGainOption) {
@@ -279,6 +315,15 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         return controllers[sessionID]
+    }
+
+    private func session(for sessionID: ProcessTapLiveSessionID) -> ProcessTapLiveSessionState? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        return sessions[sessionID]
     }
 
     private func currentCompatibilitySessionID() -> ProcessTapLiveSessionID? {

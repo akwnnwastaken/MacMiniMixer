@@ -64,6 +64,43 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertNil(state.activeDisplayName)
     }
 
+    func testStartRequestsAreGeneratedAndValidatedExplicitly() {
+        var state = ProductRealControlState()
+
+        let first = state.beginStartRequest()
+        XCTAssertEqual(first.rawValue, 1)
+        XCTAssertTrue(state.isCurrentStartRequest(first))
+
+        let second = state.beginStartRequest()
+        XCTAssertEqual(second.rawValue, 2)
+        XCTAssertFalse(state.isCurrentStartRequest(first))
+        XCTAssertTrue(state.isCurrentStartRequest(second))
+
+        state.clearStartRequest(first)
+        XCTAssertTrue(state.isCurrentStartRequest(second))
+
+        state.clearStartRequest(second)
+        XCTAssertNil(state.currentStartRequestID)
+    }
+
+    func testInvalidatingCurrentStartRequestRejectsPendingCompletionWithoutClearingActiveMetadata() {
+        var state = ProductRealControlState()
+        let requestID = state.beginStartRequest()
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID,
+            startRequestID: requestID
+        )
+
+        state.invalidateCurrentStartRequest()
+
+        XCTAssertFalse(state.isCurrentStartRequest(requestID))
+        XCTAssertEqual(state.activeVisibleAppID, "spotify")
+        XCTAssertEqual(state.activeStartRequestID, requestID)
+    }
+
     func testResolutionStateIsTrackedByVisibleRowID() {
         var state = ProductRealControlState()
 

@@ -267,6 +267,10 @@ final class MixerViewModel: ObservableObject {
     func setExperimentalRealAppControlEnabled(_ isEnabled: Bool) {
         isExperimentalRealAppControlEnabled = isEnabled
 
+        if !isEnabled {
+            invalidateProductStartRequest(clearPendingState: true)
+        }
+
         if !isEnabled, isProcessTapLiveControlActive {
             stopProcessTapLiveControl()
         }
@@ -317,6 +321,10 @@ final class MixerViewModel: ObservableObject {
            refreshResult.didOutputDeviceChange {
             AppLogger.audio.warning("Output device change stopping live control previousDefault=\(refreshResult.previousDefaultDeviceID ?? "none", privacy: .public) currentDefault=\(refreshResult.currentDefaultDeviceID ?? "none", privacy: .public)")
             stopProcessTapLiveControl(reason: .outputDeviceChanged)
+        }
+
+        if refreshResult.didOutputDeviceChange {
+            invalidateProductStartRequest(clearPendingState: true)
         }
 
         if isTwoAppReadinessRunning,
@@ -494,6 +502,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func stopProcessTapLiveControl(reason: ProcessTapLiveStopReason) {
+        invalidateProductStartRequest(clearPendingState: !isProcessTapLiveControlActive)
         advancedLiveControl.stopLiveControl(
             reason: reason,
             isLiveControlActive: isProcessTapLiveControlActive,
@@ -504,6 +513,7 @@ final class MixerViewModel: ObservableObject {
     }
 
     func stopProcessTapLiveControlForTermination() {
+        invalidateProductStartRequest(clearPendingState: true)
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
         _ = twoAppReadiness.stopNow(reason: .appTerminating)
         advancedHelperDiscovery.stopAutoDetect(reason: .userStopped)
@@ -786,12 +796,14 @@ final class MixerViewModel: ObservableObject {
         }
 
         let gain = ProductRealControlState.gainOption(for: app)
+        let startRequestID = productRealControlState.beginStartRequest()
 
         productRealControlState.beginSession(
             visibleAppID: app.id,
             displayName: app.name,
             controlledProcessIdentifier: target.processIdentifier,
-            source: ProductRealControlStartSource(resolutionSource: resolutionSource)
+            source: ProductRealControlStartSource(resolutionSource: resolutionSource),
+            startRequestID: startRequestID
         )
         activeLiveControlAppName = app.name
         advancedProcessTapDiagnostics.setResult(
@@ -814,22 +826,35 @@ final class MixerViewModel: ObservableObject {
         advancedProcessTapDiagnostics.setRunning(true)
 
         Task {
-            let result = await processTapLiveController.startLiveControl(
+            let startResult = await processTapLiveController.startLiveControlSession(
                 for: target,
                 gain: gain,
                 timeoutPolicy: .indefinite
             ) { diagnostics in
                 Task { @MainActor in
+                    guard self.shouldAcceptProductLiveCallback(startRequestID) else {
+                        return
+                    }
                     self.processTapLiveDiagnostics = diagnostics
                     self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
                 }
             } onStopped: { result, diagnostics in
                 Task { @MainActor in
+                    guard self.shouldAcceptProductLiveCallback(startRequestID) else {
+                        return
+                    }
+                    self.invalidateProductStartRequestForAcceptedStopCallback(startRequestID)
                     self.handleLiveControlStopped(result, diagnostics: diagnostics)
                 }
             }
 
-            await MainActor.run {
+            let accepted = await MainActor.run {
+                guard productRealControlState.isCurrentStartRequest(startRequestID) else {
+                    return false
+                }
+
+                productRealControlState.clearStartRequest(startRequestID)
+                let result = startResult.result
                 advancedProcessTapDiagnostics.setResult(result)
                 advancedProcessTapDiagnostics.setRunning(false)
 
@@ -839,7 +864,8 @@ final class MixerViewModel: ObservableObject {
                         visibleAppID: app.id,
                         displayName: app.name,
                         controlledProcessIdentifier: target.processIdentifier,
-                        source: ProductRealControlStartSource(resolutionSource: resolutionSource)
+                        source: ProductRealControlStartSource(resolutionSource: resolutionSource),
+                        startRequestID: startRequestID
                     )
                     activeLiveControlAppName = app.name
                 } else {
@@ -865,6 +891,12 @@ final class MixerViewModel: ObservableObject {
                         showStatus("Could not start live control for this app", style: .warning)
                     }
                 }
+
+                return true
+            }
+
+            if !accepted {
+                await cleanupStaleProductLiveStart(startResult)
             }
         }
     }
@@ -890,6 +922,45 @@ final class MixerViewModel: ObservableObject {
             appAudioTargetResolver.invalidateAllCachedTargets()
         }
         showLiveControlWarningIfNeeded(for: result)
+    }
+
+    private func shouldAcceptProductLiveCallback(_ requestID: ProductRealControlStartRequestID) -> Bool {
+        productRealControlState.isCurrentStartRequest(requestID) ||
+            productRealControlState.activeStartRequestID == requestID
+    }
+
+    private func invalidateProductStartRequestForAcceptedStopCallback(_ requestID: ProductRealControlStartRequestID) {
+        if productRealControlState.isCurrentStartRequest(requestID) {
+            productRealControlState.invalidateCurrentStartRequest()
+        }
+    }
+
+    private func invalidateProductStartRequest(clearPendingState: Bool) {
+        productRealControlState.invalidateCurrentStartRequest()
+
+        guard clearPendingState,
+              !isProcessTapLiveControlActive else {
+            return
+        }
+
+        productRealControlState.clearActiveSession()
+        activeLiveControlAppName = nil
+        processTapLiveDiagnostics = nil
+        advancedProcessTapDiagnostics.setRunning(false)
+        advancedProcessTapDiagnostics.setProgress(nil)
+    }
+
+    private func cleanupStaleProductLiveStart(_ startResult: ProcessTapLiveSessionStartResult) async {
+        guard startResult.result.outcome == .liveControlStarted else {
+            return
+        }
+
+        guard let sessionID = startResult.sessionID else {
+            AppLogger.processTap.warning("Stale Product Real Control start succeeded without a session-specific cleanup handle")
+            return
+        }
+
+        _ = await processTapLiveController.stopLiveControlSession(id: sessionID, reason: .userStopped)
     }
 
     private func handleAppAudioTargetResolution(
