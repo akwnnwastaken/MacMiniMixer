@@ -80,6 +80,12 @@ mappings only when needed.
 
 ## Why main product remains one active session
 
+> **Update (Phase 3):** Superseded — the product cap was raised to two. After Phase 0
+> sustained characterization (two simultaneous sessions for 5 minutes at 0 drops, 0 failures,
+> stable CPU) and the incremental Phase 1–3 refactor, `maxConcurrentLiveSessions` is now 2 and
+> two-app control is manually validated on real hardware. The original single-session
+> reasoning below is kept for history. Growth beyond two (Phase 5) remains evidence-gated.
+
 **Decision**: `ProcessTapLiveSessionManager` for the main product path has `maxSessions = 1`.
 
 **Reasoning**:

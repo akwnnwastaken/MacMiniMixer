@@ -313,6 +313,12 @@ ensure the collection keys by app id (it does). `handleLiveControlStopped` must 
 sibling sessions. Resolution is still single-lane (Phase 2 / 3e) — starting B's resolution
 while A resolves is rejected; surface "busy" for now.
 
+**Status: Phase 3 two-app control implemented and manually validated.** 3a–3d-ii are done;
+two simultaneous product real-control sessions run with independent per-app volume, confirmed
+on real hardware (two apps showing "Real", independent control, per-app stop, and the
+2-session cap). Remaining: 3d-iii (banner/UI reflecting N apps, optional per-row meters),
+then Phase 4 (per-session lifecycle hardening) and Phase 5 (N > 2).
+
 ### Suggested sub-order (each builds; behavior-neutral until 3d)
 
 - **3a.** Wiring: `maxSessions = 2` + factory. No behavior change yet (guard still blocks a
