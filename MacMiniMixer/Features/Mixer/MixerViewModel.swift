@@ -51,6 +51,7 @@ final class MixerViewModel: ObservableObject {
     private var appAudioResolutionTask: Task<Void, Never>?
     private var statusClearTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
 
     init(
         applicationLister: ApplicationListing,
@@ -134,11 +135,42 @@ final class MixerViewModel: ObservableObject {
                 self?.stopProcessTapLiveControlForTermination()
             }
         }
+
+        // `willSleep` is posted by AppKit on the main thread, and `queue: .main` runs this block on
+        // the main thread too. Tear down synchronously (not a deferred `Task`) so the Core Audio
+        // tap/aggregate is gone before the system sleeps and cannot resume stale on wake. The
+        // observer lives for the view model's lifetime (an app-lifetime `@StateObject`), so it fires
+        // whether or not the menu-bar panel is open.
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else {
+                return
+            }
+
+            // `MainActor.assumeIsolated` is macOS 14.0+; Process Tap itself requires macOS 14.2+, so
+            // on older systems there is no live audio work to tear down and the deferred no-op is
+            // safe. On supported systems this runs the cleanup synchronously on the main thread.
+            if #available(macOS 14.0, *) {
+                MainActor.assumeIsolated {
+                    self.handleSystemWillSleep()
+                }
+            } else {
+                Task { @MainActor in
+                    self.handleSystemWillSleep()
+                }
+            }
+        }
     }
 
     deinit {
         if let terminationObserver {
             NotificationCenter.default.removeObserver(terminationObserver)
+        }
+        if let sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
         }
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
@@ -669,8 +701,27 @@ final class MixerViewModel: ObservableObject {
     }
 
     func stopProcessTapLiveControlForTermination() {
-        _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
-        _ = twoAppReadiness.stopNow(reason: .appTerminating)
+        tearDownAllProcessTapWork(liveStopReason: .appTerminating)
+    }
+
+    /// Synchronous, idempotent teardown of every active/pending Process Tap audio work item when
+    /// the system is about to sleep. Reuses the same path as termination so logs/diagnostics carry
+    /// the accurate `.systemSleep` reason while preserving the stale-start / session-ID guards: any
+    /// pending start that completes after this is rejected (cleared token) and its orphan engine
+    /// session torn down by its own id. No automatic restart — the user re-engages after wake; the
+    /// global Real App Control toggle preference is left untouched. Surfaces no status/warning.
+    func handleSystemWillSleep() {
+        tearDownAllProcessTapWork(liveStopReason: .systemSleep)
+    }
+
+    /// Shared teardown body for termination and system sleep. The two differ only in the live stop
+    /// reason forwarded to the engine (`.appTerminating` vs `.systemSleep`); the helper/probe and
+    /// resolver cancellations use their own `.userStopped` reason (a normal controlled stop, not a
+    /// failure), and the state clears are identical. Idempotent: every call clears already-clear
+    /// state and stops already-stopped engines safely.
+    private func tearDownAllProcessTapWork(liveStopReason: ProcessTapLiveStopReason) {
+        _ = processTapLiveController.stopLiveControlNow(reason: liveStopReason)
+        _ = twoAppReadiness.stopNow(reason: liveStopReason)
         advancedHelperDiscovery.stopAutoDetect(reason: .userStopped)
         appAudioResolutionTask?.cancel()
         appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)

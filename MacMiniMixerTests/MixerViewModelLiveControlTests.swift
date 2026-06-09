@@ -1012,6 +1012,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         processLister: FakeLiveControlProcessLister = FakeLiveControlProcessLister(),
         processTapReplayProbe: FakeLiveControlReplayProbe = FakeLiveControlReplayProbe(),
         helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe = FakeLiveControlCandidateAudioProbe(),
+        twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester = FakeLiveControlTwoAppReadinessTester(),
         eligibilityByPID: [Int32: ProcessTapProcessEligibility] = [:]
     ) -> LiveControlHarness {
         let appLister = FakeLiveControlApplicationLister(apps: apps)
@@ -1028,7 +1029,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             processTapTester: FakeLiveControlProcessTapTester(),
             processTapReplayProbe: processTapReplayProbe,
             processTapLiveController: liveController,
-            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
+            twoAppReadinessTester: twoAppReadinessTester,
             helperProcessAudioProbe: helperProcessAudioProbe,
             appAudioTargetResolver: appAudioTargetResolver,
             processLister: processLister,
@@ -1047,7 +1048,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             audioController: audioController,
             outputDeviceLister: outputDeviceLister,
             liveController: liveController,
-            appAudioTargetResolver: appAudioTargetResolver
+            appAudioTargetResolver: appAudioTargetResolver,
+            twoAppReadinessTester: twoAppReadinessTester
         )
     }
 
@@ -1816,6 +1818,177 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(banner.confirmedCount, 2)
     }
 
+    // MARK: - Phase 4c-2: system sleep teardown (handleSystemWillSleep)
+    //
+    // handleSystemWillSleep() is the directly-callable @MainActor cleanup the willSleep observer
+    // invokes synchronously on the main thread. These tests call it directly (no real system sleep,
+    // and no panel/onAppear — the observer is owned by the app-lifetime view model, so cleanup is
+    // independent of panel lifecycle). They lock in: confirmed Product teardown with .systemSleep,
+    // banner/state clearing, helper cache invalidation, pending/late-completion stale safety,
+    // Advanced Manual stop, Two-App Readiness reason forwarding, idempotency, and sleep-then-quit.
+
+    func testSystemSleepTearsDownConfirmedProductSessionsAndClearsBanner() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+
+        harness.viewModel.handleSystemWillSleep()
+
+        // Engine torn down with the system-sleep reason; all Product/banner state cleared; helper
+        // cache globally invalidated.
+        XCTAssertEqual(harness.liveController.stopReasons, [.systemSleep])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertGreaterThanOrEqual(harness.appAudioTargetResolver.invalidateAllCount, 1)
+    }
+
+    func testSystemSleepWithConfirmedAndPendingRejectsLateSuccessWithoutResurrection() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+        XCTAssertEqual(controller.startedSessionIDs.count, 2)
+        let musicID = controller.startedSessionIDs[1]
+
+        harness.viewModel.handleSystemWillSleep()
+
+        // Confirmed app's Product state is cleared immediately; banner gone.
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+
+        // The pending start's late success is stale (token invalidated); its orphan engine session
+        // is torn down by its own id, and nothing is reactivated.
+        controller.completeNextStart(success: true)
+        await waitFor { controller.stoppedSessionIDs.contains(musicID) }
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
+    func testSystemSleepDuringPendingDirectStartRejectsLateCompletion() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        let spotifyID = controller.startedSessionIDs[0]
+
+        harness.viewModel.handleSystemWillSleep()
+
+        controller.completeNextStart(success: true)
+        await waitFor { controller.stoppedSessionIDs.contains(spotifyID) }
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
+    func testSystemSleepCancelsInFlightHelperResolutionAndIgnoresLateResult() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+        XCTAssertTrue(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        harness.viewModel.handleSystemWillSleep()
+
+        XCTAssertEqual(resolver.cancelledReasons, [.userStopped])
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+        XCTAssertGreaterThanOrEqual(resolver.invalidateAllCount, 1)
+
+        resolver.completeNext(
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        )
+        await drainMainActor()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
+    func testSystemSleepStopsAdvancedManualLiveControl() async {
+        let harness = makeHarness()
+        harness.viewModel.selectProcessTapApp("music")
+        harness.viewModel.startProcessTapLiveControl()
+        await waitFor { harness.viewModel.isProcessTapLiveControlActive }
+
+        harness.viewModel.handleSystemWillSleep()
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.systemSleep])
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
+    func testSystemSleepForwardsSystemSleepReasonToTwoAppReadiness() async {
+        let tester = FakeLiveControlTwoAppReadinessTester()
+        let harness = makeHarness(twoAppReadinessTester: tester)
+
+        harness.viewModel.handleSystemWillSleep()
+
+        // The two-app readiness test is torn down through its synchronous stop path with the
+        // system-sleep reason (a normal controlled stop, not timeout/failure).
+        XCTAssertEqual(tester.stopAllNowReasons, [.systemSleep])
+    }
+
+    func testRepeatedSystemSleepIsIdempotent() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+
+        harness.viewModel.handleSystemWillSleep()
+        harness.viewModel.handleSystemWillSleep()
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.systemSleep, .systemSleep])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+    }
+
+    func testSystemSleepThenTerminationIsSafe() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+
+        harness.viewModel.handleSystemWillSleep()
+        harness.viewModel.stopProcessTapLiveControlForTermination()
+
+        // Each teardown carries its own reason; the second is a safe no-op over already-clear state.
+        XCTAssertEqual(harness.liveController.stopReasons, [.systemSleep, .appTerminating])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
     private func makeControlledHarness(
         liveController: FakeControlledLiveController,
         outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
@@ -1865,6 +2038,7 @@ private struct LiveControlHarness {
     let outputDeviceLister: FakeLiveControlOutputDeviceLister
     let liveController: FakeLiveControlController
     let appAudioTargetResolver: FakeAppAudioTargetResolver
+    let twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester
 }
 
 private struct ControlledHarness {
@@ -2499,6 +2673,12 @@ private final class FakeLiveControlCandidateAudioProbe: ProcessTapCandidateAudio
 }
 
 private final class FakeLiveControlTwoAppReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopAllNowReasonsStorage: [ProcessTapLiveStopReason] = []
+    /// Stop reasons forwarded to the synchronous `stopAllNow` path, so a test can assert system
+    /// sleep tears the two-app test down with `.systemSleep`.
+    var stopAllNowReasons: [ProcessTapLiveStopReason] { lock.lock(); defer { lock.unlock() }; return stopAllNowReasonsStorage }
+
     func startTest(
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
@@ -2516,7 +2696,10 @@ private final class FakeLiveControlTwoAppReadinessTester: ProcessTapTwoAppReadin
 
     @discardableResult
     func stopAllNow(reason: ProcessTapLiveStopReason) -> ProcessTapTwoAppReadinessResult? {
-        .idle
+        lock.lock()
+        stopAllNowReasonsStorage.append(reason)
+        lock.unlock()
+        return .idle
     }
 }
 
