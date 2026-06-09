@@ -1174,14 +1174,287 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.statusMessage?.text, "Real app control supports 2 apps at a time")
     }
 
+    // MARK: - Phase 4a: multi-app lifecycle isolation characterization
+    //
+    // These lock in the per-session lifecycle guarantees for two concurrent Product sessions:
+    // output-device change tears both down by their own ids, an app/helper exit clears only the
+    // exiting session, an unknown/stale callback clears nothing, and a global stop with a pending
+    // start rejects the late completion. They are behaviour-neutral (no production changes) and
+    // deterministic (controlled continuations + real state signals, no fixed sleeps/yields).
+
+    /// Starts and confirms a Product session for `appID` on a controlled harness, returning the
+    /// engine session id the view model now owns for it.
+    private func startConfirmedProductSession(
+        for appID: MixerAppItem.ID,
+        harness: ControlledHarness,
+        controller: FakeControlledLiveController
+    ) async -> ProcessTapLiveSessionID {
+        let alreadyStarted = controller.startedSessionIDs.count
+        harness.viewModel.setAppVolume(50, for: appID)
+        await waitFor { controller.pendingStartCount == 1 }
+        controller.completeNextStart(success: true)
+        await waitFor {
+            harness.viewModel.isExperimentalControlActive(for: appID)
+                && controller.startedSessionIDs.count == alreadyStarted + 1
+                && !harness.viewModel.isProcessTapTesting
+        }
+        return controller.startedSessionIDs[alreadyStarted]
+    }
+
+    func testTwoActiveSessionsOutputDeviceChangeStopsBothByOwnIDAndInvalidatesCacheGlobally() async {
+        let controller = FakeControlledLiveController()
+        let resolver = FakeAppAudioTargetResolver()
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let harness = makeControlledHarness(
+            liveController: controller,
+            outputDeviceLister: outputDeviceLister,
+            appAudioTargetResolver: resolver
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        let musicID = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+
+        // Two confirmed sessions with distinct, non-nil engine session ids.
+        XCTAssertEqual(controller.startedSessionIDs, [spotifyID, musicID])
+        XCTAssertEqual(Set([spotifyID, musicID]).count, 2)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+
+        // Trigger the output-device change through the real view model lifecycle path.
+        outputDeviceLister.devices = [makeLiveControlOutputDevice(id: "airpods", isDefault: true)]
+        harness.viewModel.refreshOutputDevices()
+        await waitFor { controller.stoppedSessionIDs.count == 2 }
+        await waitFor { !harness.viewModel.isProcessTapLiveControlActive }
+
+        // Both sessions stopped, each by its own id, for the output-device-changed reason.
+        XCTAssertEqual(Set(controller.stoppedSessionIDs), Set([spotifyID, musicID]))
+        XCTAssertEqual(controller.stoppedReasons, [.outputDeviceChanged, .outputDeviceChanged])
+
+        // Both apps cleared from Product active state.
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+
+        // Helper cache invalidated globally exactly once for the device change.
+        XCTAssertEqual(resolver.invalidateAllCount, 1)
+
+        // No pending completion can resurrect a session: both starts were already confirmed, so
+        // the pending-request invalidation + stale-late-completion sub-cases are covered by the
+        // global-stop test below and the existing stale-output test. A no-op completion here must
+        // not reactivate anything.
+        controller.completeNextStart(success: true)
+        await drainMainActor()
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+    }
+
+    func testActiveSessionAppExitCallbackClearsOnlyThatSessionAndLeavesOtherActive() async {
+        let controller = FakeControlledLiveController()
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeControlledHarness(liveController: controller, appAudioTargetResolver: resolver)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        let musicID = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+
+        // App A (spotify) exits via the engine's per-session stopped callback.
+        controller.emitSessionStopped(handlerForSessionID: spotifyID, outcome: .liveControlAppExited)
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        // Only A is cleared; B (music) keeps its session, identity and active state.
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertEqual(harness.viewModel.activeExperimentalAppID, "music")
+
+        // Only A's target cache is invalidated; no global stop (an exit arrives via onStopped,
+        // never through stopSession, so stoppedSessionIDs stays empty and B is never stopped).
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["spotify"])
+        XCTAssertTrue(controller.stoppedSessionIDs.isEmpty)
+
+        // B's slider still routes gain only to B's still-live session.
+        harness.viewModel.setAppVolume(25, for: "music")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+
+        // A redelivered exit for the already-cleared session is idempotent (routed via B's
+        // handler but reporting A's id): handleProductLiveControlStopped finds no such session
+        // and returns without touching B.
+        controller.emitSessionStopped(handlerForSessionID: musicID, reportedSessionID: spotifyID, outcome: .liveControlAppExited)
+        await drainMainActor()
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["spotify"])
+        XCTAssertTrue(controller.stoppedSessionIDs.isEmpty)
+    }
+
+    func testActiveSessionHelperExitCallbackClearsOnlyThatSessionAndInvalidatesItsHelperCache() async {
+        let resolver = FakeAppAudioTargetResolver(results: [
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        ])
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(
+            liveController: controller,
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // A = youtube via a resolved helper; B = spotify direct.
+        let youtubeID = await startConfirmedProductSession(for: "youtube", harness: harness, controller: controller)
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        XCTAssertEqual(resolver.resolveRequests.map(\.appID), ["youtube"])
+        XCTAssertNotEqual(youtubeID, spotifyID)
+
+        // A's helper PID exits.
+        controller.emitSessionStopped(handlerForSessionID: youtubeID, outcome: .liveControlAppExited)
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "youtube") }
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+        // Helper cache invalidated for the visible app only; B untouched; no global stop.
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["youtube"])
+        XCTAssertTrue(controller.stoppedSessionIDs.isEmpty)
+    }
+
+    func testUnknownSessionStoppedCallbackLeavesBothActiveSessionsUntouched() async {
+        let controller = FakeControlledLiveController()
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeControlledHarness(liveController: controller, appAudioTargetResolver: resolver)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+        XCTAssertNil(harness.viewModel.statusMessage)
+
+        // A stopped/exit callback whose reported id belongs to no tracked session (routed via
+        // spotify's still-registered handler so the production onStopped path runs, but reporting
+        // an unknown id). Neither session must be cleared.
+        let unknownID = ProcessTapLiveSessionID()
+        controller.emitSessionStopped(handlerForSessionID: spotifyID, reportedSessionID: unknownID, outcome: .liveControlAppExited)
+        await drainMainActor()
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNotNil(harness.viewModel.activeExperimentalAppID)
+        // No spurious teardown, cache invalidation, or status/diagnostics clobbering.
+        XCTAssertTrue(controller.stoppedSessionIDs.isEmpty)
+        XCTAssertTrue(resolver.invalidatedRequests.isEmpty)
+        XCTAssertEqual(resolver.invalidateAllCount, 0)
+        XCTAssertNil(harness.viewModel.statusMessage)
+    }
+
+    func testGlobalStopWithConfirmedAndPendingSessionStopsConfirmedRejectsPendingLateSuccess() async {
+        // Two simultaneous optimistic/pending Product starts are NOT reachable through the public
+        // API: the isProcessTapTesting guard serialises Product starts, so a second start cannot
+        // begin while the first is still pending (same-app or cross-app). The strongest reachable
+        // mix is therefore one confirmed session plus one pending optimistic start.
+        let controller = FakeControlledLiveController()
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeControlledHarness(liveController: controller, appAudioTargetResolver: resolver)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // A confirmed.
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+
+        // B pending optimistic (start suspended, not yet confirmed).
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+        XCTAssertEqual(controller.startedSessionIDs.count, 2)
+        let musicID = controller.startedSessionIDs[1]
+
+        // Global stop (Real App Control OFF).
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        // The confirmed session is stopped by its own id; the pending one carries no live id yet.
+        XCTAssertEqual(controller.stoppedSessionIDs, [spotifyID])
+
+        // B's late success arrives — it is stale (pending request invalidated) and must not
+        // reactivate; its orphan engine session is torn down by its own id.
+        controller.completeNextStart(success: true)
+        await waitFor { controller.stoppedSessionIDs.count == 2 }
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.activeExperimentalAppID)
+        XCTAssertEqual(Set(controller.stoppedSessionIDs), Set([spotifyID, musicID]))
+        // Global helper cache clear preserved on the toggle-off path.
+        XCTAssertEqual(resolver.invalidateAllCount, 1)
+    }
+
+    func testVisibleAppExitWhileHelperLingersTearsDownOnlyThatSessionLeavesOtherActive() async {
+        // A = youtube via a resolved helper PID 201; B = spotify direct. When youtube's visible
+        // app exits the app list (its helper PID may briefly linger), refreshApplications tears
+        // down only youtube's session by its own id and leaves spotify untouched.
+        let resolver = FakeAppAudioTargetResolver(results: [
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        ])
+        let liveController = FakeLiveControlController()
+        let harness = makeHarness(
+            liveController: liveController,
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        // Pin the Advanced diagnostic selection to a surviving app so removing youtube does not
+        // also trip refreshProcessTapSelectionAfterAppRefresh's selection-driven global stop —
+        // this test isolates the per-session app-exit teardown, not that orthogonal path.
+        harness.viewModel.selectProcessTapApp("spotify")
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // Wait for each start to FULLY settle (post-await confirmation ran, session id recorded,
+        // isProcessTapTesting back to false). isExperimentalControlActive alone is not a reliable
+        // confirm signal for the second app: once the first session is confirmed the derived
+        // live-control flag is already true, so it would read active during the second app's
+        // optimistic (pre-confirm) window. This mirrors testSecondAppStartsConcurrentProductSession.
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+
+        // youtube's visible app exits; its helper PID 201 stays eligible (lingers).
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "youtube" }
+        harness.viewModel.refreshApplications()
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "youtube") }
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+        // Only youtube's session was stopped, and for the target-app-exited reason.
+        XCTAssertEqual(liveController.stopReasons, [.targetAppExited])
+    }
+
     private func makeControlledHarness(
         liveController: FakeControlledLiveController,
         outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
             makeLiveControlOutputDevice(id: "built-in", isDefault: true)
-        ])
+        ]),
+        appAudioTargetResolver: FakeAppAudioTargetResolver = FakeAppAudioTargetResolver(),
+        eligibilityByPID: [Int32: ProcessTapProcessEligibility] = [:]
     ) -> ControlledHarness {
+        let appLister = FakeLiveControlApplicationLister(apps: makeLiveControlApps())
         let viewModel = MixerViewModel(
-            applicationLister: FakeLiveControlApplicationLister(apps: makeLiveControlApps()),
+            applicationLister: appLister,
             audioController: FakeLiveControlAudioController(),
             outputDeviceLister: outputDeviceLister,
             outputDeviceController: FakeLiveControlOutputDeviceController(),
@@ -1192,15 +1465,23 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             processTapLiveController: liveController,
             twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
             helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
-            appAudioTargetResolver: FakeAppAudioTargetResolver(),
+            appAudioTargetResolver: appAudioTargetResolver,
             processLister: FakeLiveControlProcessLister(),
-            processTapEligibility: { _ in .eligible }
+            processTapEligibility: { processIdentifier in
+                guard let processIdentifier else {
+                    return .unavailable("Core Audio process unavailable")
+                }
+
+                return eligibilityByPID[processIdentifier] ?? .eligible
+            }
         )
 
         return ControlledHarness(
             viewModel: viewModel,
+            appLister: appLister,
             liveController: liveController,
-            outputDeviceLister: outputDeviceLister
+            outputDeviceLister: outputDeviceLister,
+            appAudioTargetResolver: appAudioTargetResolver
         )
     }
 }
@@ -1216,8 +1497,10 @@ private struct LiveControlHarness {
 
 private struct ControlledHarness {
     let viewModel: MixerViewModel
+    let appLister: FakeLiveControlApplicationLister
     let liveController: FakeControlledLiveController
     let outputDeviceLister: FakeLiveControlOutputDeviceLister
+    let appAudioTargetResolver: FakeAppAudioTargetResolver
 }
 
 /// Live controller fake whose Product `startSession` suspends until the test explicitly
@@ -1236,13 +1519,19 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
     private var pendingStarts: [PendingStart] = []
     private var sessionOnStopped: [ProcessTapLiveSessionID: @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void] = [:]
     private var startedTargetsStorage: [ProcessTapTarget] = []
+    private var startedSessionIDsStorage: [ProcessTapLiveSessionID] = []
     private var startTimeoutPoliciesStorage: [ProcessTapLiveTimeoutPolicy] = []
     private var stoppedSessionIDsStorage: [ProcessTapLiveSessionID] = []
+    private var stoppedReasonsStorage: [ProcessTapLiveStopReason] = []
 
     var pendingStartCount: Int { lock.lock(); defer { lock.unlock() }; return pendingStarts.count }
     var startedTargets: [ProcessTapTarget] { lock.lock(); defer { lock.unlock() }; return startedTargetsStorage }
+    /// Session ids handed back by `startSession`, in start order, so multi-session tests can
+    /// address a specific session (e.g. emit an exit callback for app A while B stays active).
+    var startedSessionIDs: [ProcessTapLiveSessionID] { lock.lock(); defer { lock.unlock() }; return startedSessionIDsStorage }
     var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] { lock.lock(); defer { lock.unlock() }; return startTimeoutPoliciesStorage }
     var stoppedSessionIDs: [ProcessTapLiveSessionID] { lock.lock(); defer { lock.unlock() }; return stoppedSessionIDsStorage }
+    var stoppedReasons: [ProcessTapLiveStopReason] { lock.lock(); defer { lock.unlock() }; return stoppedReasonsStorage }
 
     /// Completes the oldest pending start with success or setup failure.
     func completeNextStart(success: Bool = true) {
@@ -1273,6 +1562,36 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
         pending.onDiagnostics(pending.sessionID, Self.makeDiagnostics())
     }
 
+    /// Mirrors the engine delivering a per-session stopped callback (app/helper exit, output
+    /// change) straight to the owning session's `onStopped`, without going through
+    /// `stopSession`. This is how an autonomous teardown reaches the view model.
+    ///
+    /// Pass a distinct `reportedSessionID` to simulate an unknown/stale callback that no longer
+    /// owns a live session: the reported id is forwarded but `handlerForSessionID`'s session is
+    /// left registered, so the real session keeps running. The handler is resumed outside the
+    /// lock.
+    func emitSessionStopped(
+        handlerForSessionID handlerID: ProcessTapLiveSessionID,
+        reportedSessionID: ProcessTapLiveSessionID? = nil,
+        outcome: ProcessTapTestResult.Outcome
+    ) {
+        lock.lock()
+        let handler: (@Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
+        if reportedSessionID == nil {
+            handler = sessionOnStopped.removeValue(forKey: handlerID)
+        } else {
+            handler = sessionOnStopped[handlerID]
+        }
+        lock.unlock()
+
+        let reported = reportedSessionID ?? handlerID
+        handler?(
+            reported,
+            ProcessTapTestResult(outcome: outcome, message: "Live control stopped", severity: .warning),
+            nil
+        )
+    }
+
     // MARK: ProcessTapLiveSessionManaging
 
     var activeSession: ProcessTapLiveSessionState? { nil }
@@ -1297,6 +1616,7 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
         let sessionID = ProcessTapLiveSessionID()
         lock.lock()
         startedTargetsStorage.append(target)
+        startedSessionIDsStorage.append(sessionID)
         startTimeoutPoliciesStorage.append(timeoutPolicy)
         sessionOnStopped[sessionID] = onStopped
         lock.unlock()
@@ -1320,6 +1640,7 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
         lock.lock()
         stoppedSessionIDsStorage.append(id)
+        stoppedReasonsStorage.append(reason)
         let handler = sessionOnStopped.removeValue(forKey: id)
         lock.unlock()
 
