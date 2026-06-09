@@ -378,23 +378,37 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     }
 
     func testDirectVisiblePIDSetupFailureClearsProductStateAndAllowsRetry() async {
-        let liveController = FakeLiveControlController(startResults: [
-            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning),
-            ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
-        ])
+        // Drive both completions explicitly (controlled continuation), mirroring the stable
+        // testDirectVisiblePIDSetupFailureAfterOptimisticStateClearsStateAndAllowsRetry. The
+        // former version used non-waiting startResults, so the test depended on a background
+        // startSession resolving its failure result and post-await within a fixed yield budget —
+        // the window that flaked on loaded CI. Here each start is completed by the test, and the
+        // retry waits on real settled ViewModel signals rather than a fake call count.
+        let liveController = FakeLiveControlController(waitForStartCompletion: true)
         let harness = makeHarness(liveController: liveController)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         harness.viewModel.setAppVolume(50, for: "spotify")
         await waitFor { liveController.startedTargets.count == 1 }
-        await waitFor { harness.viewModel.activeExperimentalAppID == nil }
+        liveController.completeNextStart(
+            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning)
+        )
 
-        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        // Wait for the failure to FULLY settle before retrying: the post-await acceptance ran
+        // (isProcessTapTesting back to false), the optimistic Product state cleared, and the
+        // derived live-control flag is down. These are real state signals, not a call count.
+        await waitFor {
+            harness.viewModel.activeExperimentalAppID == nil
+                && !harness.viewModel.isProcessTapTesting
+                && !harness.viewModel.isProcessTapLiveControlActive
+        }
         XCTAssertNil(harness.viewModel.activeLiveControlAppName)
         XCTAssertEqual(harness.viewModel.statusMessage?.text, "Could not start live control for this app")
 
+        // Retry: a second start must reach the controller and confirm.
         harness.viewModel.setAppVolume(55, for: "spotify")
         await waitFor { liveController.startedTargets.count == 2 }
+        liveController.completeNextStart()
         await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
 
         XCTAssertEqual(liveController.startedTargets.map(\.appID), ["spotify", "spotify"])
