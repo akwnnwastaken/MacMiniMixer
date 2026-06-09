@@ -464,6 +464,13 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
                 detail: detail,
                 severity: .info
             )
+        case .systemSleep:
+            return ProcessTapTestResult(
+                outcome: .liveControlStopped,
+                message: "Live control stopped: system sleep",
+                detail: detail,
+                severity: .info
+            )
         case .setupFailed:
             return ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,

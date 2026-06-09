@@ -585,6 +585,13 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
                 detail: detail,
                 severity: .info
             )
+        case .systemSleep:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .stopped,
+                message: "Two-app test stopped: system sleep",
+                detail: detail,
+                severity: .info
+            )
         case .setupFailed:
             return ProcessTapTwoAppReadinessResult(
                 outcome: .setupFailed,
