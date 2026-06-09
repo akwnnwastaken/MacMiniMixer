@@ -87,19 +87,43 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "YouTube")
     }
 
-    func testOneActiveLiveSessionBlocksSecondProductAndManualStart() async {
-        let harness = makeHarness()
+    // Multi-app cap=2 invariant: a second *confirmed* Product session is allowed (see
+    // testSecondAppStartsConcurrentProductSession / testConcurrentStartLimitOfTwoPreservedWithControlledCompletion),
+    // and a third is blocked by the cap (testThirdProductSessionBlockedByCap). What this test pins
+    // is the transient *serialization* guard: while one Product start is still in flight (pending,
+    // unconfirmed), a second Product start and an Advanced Manual start are both rejected, and only
+    // the first start reaches the controller. Replaces the former stale single-session test
+    // (testOneActiveLiveSessionBlocksSecondProductAndManualStart), which relied on this in-flight
+    // window non-deterministically and flaked once the first start confirmed.
+    func testPendingProductStartBlocksAnotherProductAndManualStart() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
+        // Spotify Product start is held in flight (its completion is suspended), so the
+        // serialization guard (isProcessTapTesting) is deterministically active. Wait on real
+        // state signals — the start reached the controller (pendingStartCount) AND the view model
+        // marked itself busy (isProcessTapTesting) — not a fixed sleep/yield count.
         harness.viewModel.setAppVolume(40, for: "spotify")
-        await waitFor { harness.liveController.startedTargets.count == 1 }
+        await waitFor { controller.pendingStartCount == 1 && harness.viewModel.isProcessTapTesting }
 
+        // While the first start is pending, attempt a second Product start and a manual start.
+        // Both are rejected synchronously (no async work is spawned), so no awaiting is needed.
         harness.viewModel.setAppVolume(60, for: "music")
         harness.viewModel.startProcessTapLiveControl()
-        await drainMainActor()
 
-        XCTAssertEqual(harness.liveController.startedTargets.count, 1)
-        XCTAssertEqual(harness.liveController.startedTargets.first?.appID, "spotify")
+        // Only the first Product start reached the controller; the second never started a session,
+        // and the manual path never reached the engine.
+        XCTAssertEqual(controller.startedTargets.map(\.appID), ["spotify"])
+        XCTAssertEqual(controller.pendingStartCount, 1)
+        XCTAssertEqual(controller.legacyManualStartCount, 0)
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Stop active live control first")
+
+        // Complete the first start so it confirms and the test leaves no in-flight work behind.
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
     }
 
     func testStopActiveSessionForwardsUserStoppedReason() async {
@@ -1857,6 +1881,7 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
     private var startTimeoutPoliciesStorage: [ProcessTapLiveTimeoutPolicy] = []
     private var stoppedSessionIDsStorage: [ProcessTapLiveSessionID] = []
     private var stoppedReasonsStorage: [ProcessTapLiveStopReason] = []
+    private var legacyManualStartCountStorage = 0
 
     var pendingStartCount: Int { lock.lock(); defer { lock.unlock() }; return pendingStarts.count }
     var startedTargets: [ProcessTapTarget] { lock.lock(); defer { lock.unlock() }; return startedTargetsStorage }
@@ -1866,6 +1891,9 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
     var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] { lock.lock(); defer { lock.unlock() }; return startTimeoutPoliciesStorage }
     var stoppedSessionIDs: [ProcessTapLiveSessionID] { lock.lock(); defer { lock.unlock() }; return stoppedSessionIDsStorage }
     var stoppedReasons: [ProcessTapLiveStopReason] { lock.lock(); defer { lock.unlock() }; return stoppedReasonsStorage }
+    /// How many times the Advanced Manual Live path (`startLiveControl`) reached this controller.
+    /// Lets a test assert a manual start was rejected upstream (never reached the engine).
+    var legacyManualStartCount: Int { lock.lock(); defer { lock.unlock() }; return legacyManualStartCountStorage }
 
     /// Completes the oldest pending start with success or setup failure.
     func completeNextStart(success: Bool = true) {
@@ -2005,7 +2033,10 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
-        ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+        lock.lock()
+        legacyManualStartCountStorage += 1
+        lock.unlock()
+        return ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
     }
 
     func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
