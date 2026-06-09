@@ -12,8 +12,8 @@ struct MixerPanelView: View {
             VStack(alignment: .leading, spacing: AppConstants.Layout.sectionSpacing) {
                 header
 
-                if viewModel.isProcessTapLiveControlActive {
-                    activeLiveControlBanner
+                if let banner = viewModel.realControlBannerPresentation {
+                    activeLiveControlBanner(banner)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
@@ -102,24 +102,27 @@ struct MixerPanelView: View {
         .padding(.top, 1)
     }
 
-    private var activeLiveControlBanner: some View {
+    private func activeLiveControlBanner(_ banner: RealControlBannerPresentation) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.orange)
                 .frame(width: 18)
+                .accessibilityHidden(true)
 
-            Text("Real control: \(viewModel.activeLiveControlAppName ?? "Active")")
+            Text(banner.summaryText)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .accessibilityLabel(Text(banner.accessibilityLabel))
 
             Spacer(minLength: 6)
 
             Button {
                 viewModel.stopProcessTapLiveControl()
             } label: {
-                Text("Stop")
+                Text(banner.stopButtonTitle)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -135,6 +138,7 @@ struct MixerPanelView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.orange)
             .help("Stop experimental live control")
+            .accessibilityLabel(Text(banner.stopAccessibilityLabel))
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 7)

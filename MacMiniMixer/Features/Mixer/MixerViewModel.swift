@@ -1,6 +1,24 @@
 import AppKit
 import Foundation
 
+/// Pure, UI-framework-free description of the Real Control banner. Built by `MixerViewModel`
+/// and consumed by the SwiftUI banner so all banner string/label decisions stay testable and
+/// out of the view. Never carries helper PID/process identity.
+struct RealControlBannerPresentation: Equatable {
+    enum Mode: Equatable {
+        case product
+        case advancedManual
+    }
+
+    let mode: Mode
+    let appNames: [String]
+    let confirmedCount: Int
+    let summaryText: String
+    let stopButtonTitle: String
+    let accessibilityLabel: String
+    let stopAccessibilityLabel: String
+}
+
 @MainActor
 final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
@@ -180,6 +198,63 @@ final class MixerViewModel: ObservableObject {
     /// `confirmedProductRealControlAppNames.count`, so name list and count never disagree.
     var confirmedProductRealControlSessionCount: Int {
         confirmedProductRealControlAppNames.count
+    }
+
+    /// Single source of truth for the Real Control banner's text, stop-button title, and
+    /// accessibility wording. Pure (no stored state, no helper identity): Product sessions are
+    /// summarised from `confirmedProductRealControlAppNames` (stable `apps` order); Advanced
+    /// Manual Live keeps its existing single-app wording. `nil` ⟺ the banner should be hidden,
+    /// which is exactly `!isProcessTapLiveControlActive`. Stop wiring is unchanged — only the
+    /// label/accessibility intent is clarified here.
+    var realControlBannerPresentation: RealControlBannerPresentation? {
+        let productNames = confirmedProductRealControlAppNames
+        if !productNames.isEmpty {
+            let count = productNames.count
+            let isMultiple = count >= 2
+            let joined = productNames.joined(separator: ", ")
+            return RealControlBannerPresentation(
+                mode: .product,
+                appNames: productNames,
+                confirmedCount: count,
+                summaryText: "Real control: \(joined)",
+                stopButtonTitle: isMultiple ? "Stop All" : "Stop",
+                accessibilityLabel: isMultiple
+                    ? "Real control active for \(count) apps: \(joined)"
+                    : "Real control active for \(joined)",
+                stopAccessibilityLabel: isMultiple
+                    ? "Stop real control for all apps"
+                    : "Stop real control for \(joined)"
+            )
+        }
+
+        if advancedManualLiveControlActive {
+            let name = activeLiveControlAppName ?? "Active"
+            return RealControlBannerPresentation(
+                mode: .advancedManual,
+                appNames: activeLiveControlAppName.map { [$0] } ?? [],
+                confirmedCount: 0,
+                summaryText: "Real control: \(name)",
+                stopButtonTitle: "Stop",
+                accessibilityLabel: "Real control active for \(name)",
+                stopAccessibilityLabel: "Stop real control for \(name)"
+            )
+        }
+
+        // Transient only: a confirmed session whose visible app momentarily left `apps` (before
+        // teardown). Preserve the legacy generic banner rather than flicker it away.
+        if isProcessTapLiveControlActive {
+            return RealControlBannerPresentation(
+                mode: .product,
+                appNames: [],
+                confirmedCount: 0,
+                summaryText: "Real control: Active",
+                stopButtonTitle: "Stop",
+                accessibilityLabel: "Real control active",
+                stopAccessibilityLabel: "Stop real control"
+            )
+        }
+
+        return nil
     }
 
     var selectedProcessTapAppID: MixerAppItem.ID? {
