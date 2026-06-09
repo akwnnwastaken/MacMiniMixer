@@ -1013,11 +1013,12 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         processTapReplayProbe: FakeLiveControlReplayProbe = FakeLiveControlReplayProbe(),
         helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe = FakeLiveControlCandidateAudioProbe(),
         twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester = FakeLiveControlTwoAppReadinessTester(),
+        systemVolumeReader: FakeLiveControlSystemVolumeReader = FakeLiveControlSystemVolumeReader(volumeScalar: 0.5),
         eligibilityByPID: [Int32: ProcessTapProcessEligibility] = [:]
     ) -> LiveControlHarness {
         let appLister = FakeLiveControlApplicationLister(apps: apps)
         let audioController = FakeLiveControlAudioController()
-        let volumeReader = FakeLiveControlSystemVolumeReader(volumeScalar: 0.5)
+        let volumeReader = systemVolumeReader
         let volumeController = FakeLiveControlSystemVolumeController()
         let viewModel = MixerViewModel(
             applicationLister: appLister,
@@ -1049,7 +1050,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             outputDeviceLister: outputDeviceLister,
             liveController: liveController,
             appAudioTargetResolver: appAudioTargetResolver,
-            twoAppReadinessTester: twoAppReadinessTester
+            twoAppReadinessTester: twoAppReadinessTester,
+            systemVolumeReader: volumeReader
         )
     }
 
@@ -1989,6 +1991,165 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertNil(harness.viewModel.realControlBannerPresentation)
     }
 
+    // MARK: - Phase 4c-3: system wake refresh (handleSystemDidWake)
+    //
+    // handleSystemDidWake() is refresh-only: it reconciles output devices, system volume, and the
+    // app list after wake, but never restarts a Product session, resolves helpers, or changes the
+    // Real App Control toggle. Tests call it directly (no real wake, no panel/onAppear).
+
+    func testSystemDidWakeDoesNotStartProductSession() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+    }
+
+    func testSystemDidWakeDoesNotChangeRealControlToggle() async {
+        let enabledHarness = makeHarness()
+        enabledHarness.viewModel.setExperimentalRealAppControlEnabled(true)
+        enabledHarness.viewModel.handleSystemDidWake()
+        XCTAssertTrue(enabledHarness.viewModel.isExperimentalRealAppControlEnabled)
+
+        let disabledHarness = makeHarness()
+        disabledHarness.viewModel.handleSystemDidWake()
+        XCTAssertFalse(disabledHarness.viewModel.isExperimentalRealAppControlEnabled)
+    }
+
+    func testSystemDidWakeRefreshesOutputDeviceList() async {
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let harness = makeHarness(outputDeviceLister: outputDeviceLister)
+
+        outputDeviceLister.devices = [
+            makeLiveControlOutputDevice(id: "built-in"),
+            makeLiveControlOutputDevice(id: "airpods", isDefault: true)
+        ]
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertTrue(harness.viewModel.outputDevices.contains { $0.id == "airpods" })
+        XCTAssertEqual(harness.viewModel.selectedOutputDeviceName, "airpods")
+    }
+
+    func testSystemDidWakeRefreshesSystemOutputVolume() async {
+        let reader = FakeLiveControlSystemVolumeReader(volumeScalar: 0.5)
+        let harness = makeHarness(systemVolumeReader: reader)
+
+        reader.volumeScalar = 0.9
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertEqual(harness.viewModel.systemVolume, 90, accuracy: 0.5)
+    }
+
+    func testSystemDidWakeRefreshesVisibleAppList() async {
+        let harness = makeHarness()
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "youtube" }
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertFalse(harness.viewModel.apps.contains { $0.id == "youtube" })
+        XCTAssertTrue(harness.viewModel.apps.contains { $0.id == "spotify" })
+    }
+
+    func testSystemSleepThenWakeDoesNotRestoreProductBannerOrSession() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 1)
+
+        harness.viewModel.handleSystemWillSleep()
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+        // No new start was issued by wake (only the single pre-sleep start exists).
+        XCTAssertEqual(harness.liveController.startedSessionIDs.count, 1)
+    }
+
+    func testSystemDidWakeInvalidatesHelperCacheForRemovedAppViaRefresh() async {
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeHarness(appAudioTargetResolver: resolver)
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "youtube" }
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertTrue(resolver.invalidatedRequests.map(\.appID).contains("youtube"))
+    }
+
+    func testSystemDidWakeWithOutputDeviceChangeIsIdempotentAndQuiet() async {
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let resolver = FakeAppAudioTargetResolver()
+        let harness = makeHarness(outputDeviceLister: outputDeviceLister, appAudioTargetResolver: resolver)
+
+        // Output device changed during sleep; nothing is active at wake.
+        outputDeviceLister.devices = [
+            makeLiveControlOutputDevice(id: "built-in"),
+            makeLiveControlOutputDevice(id: "airpods", isDefault: true)
+        ]
+        harness.viewModel.handleSystemDidWake()
+
+        // No teardown of running work (nothing was running) and no user-facing warning.
+        XCTAssertTrue(harness.liveController.stopReasons.isEmpty)
+        XCTAssertNil(harness.viewModel.statusMessage)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+
+        // Repeating wake stays safe.
+        harness.viewModel.handleSystemDidWake()
+        XCTAssertTrue(harness.liveController.stopReasons.isEmpty)
+        XCTAssertNil(harness.viewModel.statusMessage)
+    }
+
+    func testRepeatedSystemDidWakeIsSafe() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.handleSystemDidWake()
+        harness.viewModel.handleSystemDidWake()
+        harness.viewModel.handleSystemDidWake()
+
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+        XCTAssertTrue(harness.viewModel.isExperimentalRealAppControlEnabled)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
+    func testUserCanStartNewProductSessionAfterSystemDidWake() async {
+        let harness = makeHarness()
+        harness.viewModel.handleSystemDidWake()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertEqual(harness.liveController.startedTargets.map(\.appID), ["spotify"])
+    }
+
+    func testSystemSleepThenWakeThenTerminationIsSafe() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+
+        harness.viewModel.handleSystemWillSleep()
+        harness.viewModel.handleSystemDidWake()
+        harness.viewModel.stopProcessTapLiveControlForTermination()
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+        XCTAssertTrue(harness.liveController.stopReasons.contains(.systemSleep))
+        XCTAssertTrue(harness.liveController.stopReasons.contains(.appTerminating))
+    }
+
     // MARK: - Test fake concurrency (regression for the FakeLiveControlController data race)
     //
     // Drives many concurrent startSession/stopSession calls directly against the fake — the same
@@ -2089,6 +2250,7 @@ private struct LiveControlHarness {
     let liveController: FakeLiveControlController
     let appAudioTargetResolver: FakeAppAudioTargetResolver
     let twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester
+    let systemVolumeReader: FakeLiveControlSystemVolumeReader
 }
 
 private struct ControlledHarness {

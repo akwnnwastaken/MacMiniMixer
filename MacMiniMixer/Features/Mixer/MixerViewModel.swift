@@ -52,6 +52,7 @@ final class MixerViewModel: ObservableObject {
     private var statusClearTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     init(
         applicationLister: ApplicationListing,
@@ -163,6 +164,19 @@ final class MixerViewModel: ObservableObject {
                 }
             }
         }
+
+        // `didWake` only refreshes device/app state — it is not time-critical (sessions were torn
+        // down at sleep and are not restored), so a deferred main-actor hop is fine. Same owner and
+        // lifetime as the sleep observer; fires regardless of panel state.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleSystemDidWake()
+            }
+        }
     }
 
     deinit {
@@ -171,6 +185,9 @@ final class MixerViewModel: ObservableObject {
         }
         if let sleepObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
+        }
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
@@ -712,6 +729,19 @@ final class MixerViewModel: ObservableObject {
     /// global Real App Control toggle preference is left untouched. Surfaces no status/warning.
     func handleSystemWillSleep() {
         tearDownAllProcessTapWork(liveStopReason: .systemSleep)
+    }
+
+    /// Refresh-only reconciliation after the system wakes. Output device, default selection,
+    /// system volume/mute, and the visible app list may all have changed during sleep, so this
+    /// pulls them fresh through the existing refresh paths (which also invalidate helper cache for
+    /// removed/changed app PIDs). It deliberately does NOT restart any Product session, resolve
+    /// helpers, re-enable anything, or touch the Real App Control toggle — sessions stay torn down
+    /// and the user re-engages. Idempotent and safe to call repeatedly; `refreshOutputDevices`
+    /// surfaces no "output changed" teardown/warning here because nothing is active post-sleep.
+    func handleSystemDidWake() {
+        refreshOutputDevices()
+        refreshSystemOutputVolume()
+        refreshApplications()
     }
 
     /// Shared teardown body for termination and system sleep. The two differ only in the live stop
