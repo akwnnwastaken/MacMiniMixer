@@ -164,6 +164,24 @@ final class MixerViewModel: ObservableObject {
         productRealControlState.activeVisibleAppID
     }
 
+    /// Visible app display names for every *confirmed* Product Real Control session (one whose
+    /// engine `liveSessionID` is set), in the stable order they appear in `apps`. Helper-controlled
+    /// sessions surface the visible app's name only — the helper process/PID never reaches the UI.
+    /// Pending (optimistic, not-yet-confirmed) starts are excluded, and dictionary iteration order
+    /// is never used. Backs the multi-app banner (Phase 3d-iii); presentation/summary lives in the
+    /// view layer in a later step.
+    var confirmedProductRealControlAppNames: [String] {
+        apps.compactMap { app in
+            productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID != nil ? app.name : nil
+        }
+    }
+
+    /// Number of confirmed Product Real Control sessions reflected in the banner. Equal to
+    /// `confirmedProductRealControlAppNames.count`, so name list and count never disagree.
+    var confirmedProductRealControlSessionCount: Int {
+        confirmedProductRealControlAppNames.count
+    }
+
     var selectedProcessTapAppID: MixerAppItem.ID? {
         advancedProcessTapDiagnostics.selectedAppID
     }

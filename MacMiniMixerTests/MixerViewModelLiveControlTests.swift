@@ -1444,6 +1444,172 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(liveController.stopReasons, [.targetAppExited])
     }
 
+    // MARK: - Phase 3d-iii step 1: confirmed Product Real Control banner model
+    //
+    // These lock in the data the multi-app banner will read: the visible app names of confirmed
+    // Product sessions, in stable apps order, excluding pending starts, hiding helper identity,
+    // and never counting Advanced Manual Live control as a Product session. Pure/computed only —
+    // no SwiftUI here. Deterministic (controlled continuations + real state signals).
+
+    func testBannerModelIsEmptyWithNoConfirmedSessionAndIgnoresPendingStart() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, [])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+
+        // A pending (optimistic, not-yet-confirmed) start must not appear as confirmed.
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, [])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+    }
+
+    func testBannerModelReportsSingleConfirmedDirectSession() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Spotify"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 1)
+    }
+
+    func testBannerModelUsesVisibleAppNameForHelperControlledSessionAndHidesHelperName() async {
+        let resolver = FakeAppAudioTargetResolver(results: [
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    // Helper process name deliberately differs from the visible app name.
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "com.apple.WebKit.GPU", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        ])
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(
+            liveController: controller,
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "youtube", harness: harness, controller: controller)
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["YouTube"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 1)
+        XCTAssertFalse(harness.viewModel.confirmedProductRealControlAppNames.contains("com.apple.WebKit.GPU"))
+    }
+
+    func testBannerModelReportsTwoConfirmedSessionsInAppsOrder() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+
+        // apps order is [spotify, music, youtube].
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Spotify", "Music"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+    }
+
+    func testBannerModelOrderFollowsAppsListNotSessionInsertionOrder() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // Start in reverse apps order: music (apps index 1) before spotify (apps index 0).
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+
+        // Result still follows apps order, not dictionary insertion order.
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Spotify", "Music"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+    }
+
+    func testBannerModelExcludesPendingSessionWhileIncludingConfirmedOne() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+
+        // music is pending optimistic (start suspended, not confirmed).
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Spotify"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 1)
+    }
+
+    func testBannerModelUpdatesWhenOneOfTwoSessionsIsStopped() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Music"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 1)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+    }
+
+    func testBannerModelClearsAfterGlobalStop() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        await waitFor { !harness.viewModel.isProcessTapLiveControlActive }
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, [])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+    }
+
+    func testBannerModelUnchangedByUnknownStoppedCallback() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+
+        // A stopped callback reporting a session id that belongs to no tracked session.
+        let unknownID = ProcessTapLiveSessionID()
+        controller.emitSessionStopped(handlerForSessionID: spotifyID, reportedSessionID: unknownID, outcome: .liveControlAppExited)
+        await drainMainActor()
+
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Spotify", "Music"])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+    }
+
+    func testBannerModelDoesNotCountAdvancedManualLiveControlAsProductSession() async {
+        let harness = makeHarness()
+        harness.viewModel.selectProcessTapApp("music")
+        harness.viewModel.startProcessTapLiveControl()
+        await waitFor { harness.viewModel.isProcessTapLiveControlActive }
+
+        // Advanced Manual Live is active, but it is not a Product session.
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, [])
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 0)
+        // Existing manual banner state is preserved.
+        XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "Music")
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+    }
+
     private func makeControlledHarness(
         liveController: FakeControlledLiveController,
         outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
