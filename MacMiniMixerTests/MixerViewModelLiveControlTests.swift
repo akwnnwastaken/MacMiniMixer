@@ -1989,6 +1989,56 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertNil(harness.viewModel.realControlBannerPresentation)
     }
 
+    // MARK: - Test fake concurrency (regression for the FakeLiveControlController data race)
+    //
+    // Drives many concurrent startSession/stopSession calls directly against the fake — the same
+    // off-actor concurrent access to its `sessionOnStopped` dictionary that previously corrupted
+    // the heap and crashed. With the fake's single lock the bookkeeping stays consistent. Uses
+    // real task-group concurrency (no sleeps); deterministic post-fix (always passes), where the
+    // pre-fix fake would intermittently crash.
+    func testFakeControllerConcurrentStartStopBookkeepingIsRaceFree() async {
+        let controller = FakeLiveControlController()
+        let sessionCount = 64
+
+        let startedIDs = await withTaskGroup(of: ProcessTapLiveSessionID?.self) { group in
+            for index in 0..<sessionCount {
+                group.addTask {
+                    let result = await controller.startSession(
+                        for: ProcessTapTarget(appID: "app\(index)", appName: "App \(index)", processIdentifier: Int32(1000 + index)),
+                        gain: .defaultOption,
+                        onDiagnostics: { _, _ in },
+                        onStopped: { _, _, _ in }
+                    )
+                    return result.sessionID
+                }
+            }
+
+            var ids: [ProcessTapLiveSessionID] = []
+            for await id in group {
+                if let id {
+                    ids.append(id)
+                }
+            }
+            return ids
+        }
+
+        XCTAssertEqual(startedIDs.count, sessionCount)
+        XCTAssertEqual(controller.startedSessionIDs.count, sessionCount)
+        XCTAssertEqual(Set(startedIDs).count, sessionCount)
+
+        await withTaskGroup(of: Void.self) { group in
+            for id in startedIDs {
+                group.addTask {
+                    _ = await controller.stopSession(id: id, reason: .userStopped)
+                }
+            }
+            for await _ in group {}
+        }
+
+        XCTAssertEqual(controller.stopReasons.count, sessionCount)
+        XCTAssertTrue(controller.stopReasons.allSatisfy { $0 == .userStopped })
+    }
+
     private func makeControlledHarness(
         liveController: FakeControlledLiveController,
         outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
@@ -2164,44 +2214,42 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
         onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapLiveSessionStartResult {
         let sessionID = ProcessTapLiveSessionID()
-        lock.lock()
-        startedTargetsStorage.append(target)
-        startedSessionIDsStorage.append(sessionID)
-        startTimeoutPoliciesStorage.append(timeoutPolicy)
-        sessionOnStopped[sessionID] = onStopped
-        lock.unlock()
+        lock.withLock {
+            startedTargetsStorage.append(target)
+            startedSessionIDsStorage.append(sessionID)
+            startTimeoutPoliciesStorage.append(timeoutPolicy)
+            sessionOnStopped[sessionID] = onStopped
+        }
 
         let result = await withCheckedContinuation { (continuation: CheckedContinuation<ProcessTapTestResult, Never>) in
-            lock.lock()
-            pendingStarts.append(PendingStart(sessionID: sessionID, onDiagnostics: onDiagnostics, continuation: continuation))
-            lock.unlock()
+            lock.withLock {
+                pendingStarts.append(PendingStart(sessionID: sessionID, onDiagnostics: onDiagnostics, continuation: continuation))
+            }
         }
 
         if result.outcome == .liveControlStarted {
             return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
         }
 
-        lock.lock()
-        sessionOnStopped.removeValue(forKey: sessionID)
-        lock.unlock()
+        lock.withLock {
+            _ = sessionOnStopped.removeValue(forKey: sessionID)
+        }
         return ProcessTapLiveSessionStartResult(sessionID: nil, result: result)
     }
 
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
-        lock.lock()
-        stoppedSessionIDsStorage.append(id)
-        stoppedReasonsStorage.append(reason)
-        let handler = sessionOnStopped.removeValue(forKey: id)
-        lock.unlock()
+        let handler = lock.withLock { () -> (@Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)? in
+            stoppedSessionIDsStorage.append(id)
+            stoppedReasonsStorage.append(reason)
+            return sessionOnStopped.removeValue(forKey: id)
+        }
 
         handler?(id, ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info), nil)
         return ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
     }
 
     func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult] {
-        lock.lock()
-        let ids = Array(sessionOnStopped.keys)
-        lock.unlock()
+        let ids = lock.withLock { Array(sessionOnStopped.keys) }
 
         var results: [ProcessTapTestResult] = []
         for id in ids {
@@ -2221,9 +2269,7 @@ private final class FakeControlledLiveController: ProcessTapLiveControlling, Pro
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
-        lock.lock()
-        legacyManualStartCountStorage += 1
-        lock.unlock()
+        lock.withLock { legacyManualStartCountStorage += 1 }
         return ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
     }
 
@@ -2387,18 +2433,33 @@ private final class FakeLiveControlReplayProbe: ProcessTapReplayProbing, @unchec
 }
 
 private final class FakeLiveControlController: ProcessTapLiveControlling, ProcessTapLiveSessionManaging, @unchecked Sendable {
+    // Single synchronization policy: every read and write of the mutable state below goes through
+    // `lock` (via `withLock`). The async session methods run off the main actor (the view model
+    // `await`s a non-isolated fake), so two starts/stops can execute in parallel; without the lock
+    // their concurrent mutation of `sessionOnStopped` corrupted the dictionary. Continuations and
+    // onStopped/onDiagnostics callbacks are always invoked OUTSIDE the lock — values are extracted
+    // under the lock first, then resumed/called after it is released (no recursive locking).
+    private let lock = NSLock()
     private var startResults: [ProcessTapTestResult]
-    private(set) var startedTargets: [ProcessTapTarget] = []
-    private(set) var startGains: [ProcessTapReplayGainOption] = []
-    private(set) var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] = []
-    private(set) var gainUpdates: [ProcessTapReplayGainOption] = []
-    private(set) var stopReasons: [ProcessTapLiveStopReason] = []
-    private(set) var startedSessionIDs: [ProcessTapLiveSessionID] = []
-    private(set) var sessionGainUpdates: [(id: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption)] = []
+    private var startedTargetsStorage: [ProcessTapTarget] = []
+    private var startGainsStorage: [ProcessTapReplayGainOption] = []
+    private var startTimeoutPoliciesStorage: [ProcessTapLiveTimeoutPolicy] = []
+    private var gainUpdatesStorage: [ProcessTapReplayGainOption] = []
+    private var stopReasonsStorage: [ProcessTapLiveStopReason] = []
+    private var startedSessionIDsStorage: [ProcessTapLiveSessionID] = []
+    private var sessionGainUpdatesStorage: [(id: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption)] = []
     private var onStopped: (@Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
     private var sessionOnStopped: [ProcessTapLiveSessionID: @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void] = [:]
     private let waitForStartCompletion: Bool
     private var pendingStartContinuations: [CheckedContinuation<ProcessTapTestResult, Never>] = []
+
+    var startedTargets: [ProcessTapTarget] { lock.withLock { startedTargetsStorage } }
+    var startGains: [ProcessTapReplayGainOption] { lock.withLock { startGainsStorage } }
+    var startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] { lock.withLock { startTimeoutPoliciesStorage } }
+    var gainUpdates: [ProcessTapReplayGainOption] { lock.withLock { gainUpdatesStorage } }
+    var stopReasons: [ProcessTapLiveStopReason] { lock.withLock { stopReasonsStorage } }
+    var startedSessionIDs: [ProcessTapLiveSessionID] { lock.withLock { startedSessionIDsStorage } }
+    var sessionGainUpdates: [(id: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption)] { lock.withLock { sessionGainUpdatesStorage } }
 
     init(
         startResults: [ProcessTapTestResult] = [
@@ -2411,7 +2472,7 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, Proces
     }
 
     /// Completes the oldest pending (suspended) Product start with `result`. Resumes outside
-    /// any lock. When no start is pending yet, the result is queued for the next start.
+    /// the lock. When no start is pending yet, the result is queued for the next start.
     func completeNextStart(
         _ result: ProcessTapTestResult = ProcessTapTestResult(
             outcome: .liveControlStarted,
@@ -2419,11 +2480,14 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, Proces
             severity: .info
         )
     ) {
-        guard !pendingStartContinuations.isEmpty else {
-            startResults.append(result)
-            return
+        let continuation: CheckedContinuation<ProcessTapTestResult, Never>? = lock.withLock {
+            guard !pendingStartContinuations.isEmpty else {
+                startResults.append(result)
+                return nil
+            }
+            return pendingStartContinuations.removeFirst()
         }
-        pendingStartContinuations.removeFirst().resume(returning: result)
+        continuation?.resume(returning: result)
     }
 
     func startLiveControl(
@@ -2433,32 +2497,37 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, Proces
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
-        startedTargets.append(target)
-        startGains.append(gain)
-        startTimeoutPolicies.append(timeoutPolicy)
-        self.onStopped = onStopped
-        onDiagnostics(makeLiveDiagnostics(gain: gain))
-        guard !startResults.isEmpty else {
-            return ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+        let result: ProcessTapTestResult = lock.withLock {
+            startedTargetsStorage.append(target)
+            startGainsStorage.append(gain)
+            startTimeoutPoliciesStorage.append(timeoutPolicy)
+            self.onStopped = onStopped
+            guard !startResults.isEmpty else {
+                return ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+            }
+            return startResults.removeFirst()
         }
-
-        return startResults.removeFirst()
+        onDiagnostics(makeLiveDiagnostics(gain: gain))
+        return result
     }
 
     func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
-        stopReasons.append(reason)
+        let (handler, gain) = lock.withLock {
+            stopReasonsStorage.append(reason)
+            return (onStopped, startGainsStorage.last ?? .defaultOption)
+        }
         let result = ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info)
-        onStopped?(result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
+        handler?(result, makeLiveDiagnostics(gain: gain))
         return ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
     }
 
     func updateLiveControlGain(_ gain: ProcessTapReplayGainOption) {
-        gainUpdates.append(gain)
+        lock.withLock { gainUpdatesStorage.append(gain) }
     }
 
     @discardableResult
     func stopLiveControlNow(reason: ProcessTapLiveStopReason) -> ProcessTapTestResult? {
-        stopReasons.append(reason)
+        lock.withLock { stopReasonsStorage.append(reason) }
         return ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info)
     }
 
@@ -2489,47 +2558,58 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, Proces
             // already resumable by completeNextStart(_:) (avoids a count-visible-before-pending
             // race). An initial diagnostics callback is surfaced during the pending window.
             let sessionID = ProcessTapLiveSessionID()
-            sessionOnStopped[sessionID] = onStopped
+            lock.withLock { sessionOnStopped[sessionID] = onStopped }
             let result = await withCheckedContinuation { continuation in
-                pendingStartContinuations.append(continuation)
-                startedTargets.append(target)
-                startGains.append(gain)
-                startTimeoutPolicies.append(timeoutPolicy)
+                lock.withLock {
+                    pendingStartContinuations.append(continuation)
+                    startedTargetsStorage.append(target)
+                    startGainsStorage.append(gain)
+                    startTimeoutPoliciesStorage.append(timeoutPolicy)
+                }
                 onDiagnostics(sessionID, makeLiveDiagnostics(gain: gain))
             }
             guard result.outcome == .liveControlStarted else {
-                sessionOnStopped[sessionID] = nil
+                lock.withLock { sessionOnStopped[sessionID] = nil }
                 return ProcessTapLiveSessionStartResult(sessionID: nil, result: result)
             }
-            startedSessionIDs.append(sessionID)
+            lock.withLock { startedSessionIDsStorage.append(sessionID) }
             return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
         }
 
-        startedTargets.append(target)
-        startGains.append(gain)
-        startTimeoutPolicies.append(timeoutPolicy)
-        let result = startResults.isEmpty
-            ? ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
-            : startResults.removeFirst()
-        guard result.outcome == .liveControlStarted else {
-            return ProcessTapLiveSessionStartResult(sessionID: nil, result: result)
+        let started: (sessionID: ProcessTapLiveSessionID?, result: ProcessTapTestResult) = lock.withLock {
+            startedTargetsStorage.append(target)
+            startGainsStorage.append(gain)
+            startTimeoutPoliciesStorage.append(timeoutPolicy)
+            let result = startResults.isEmpty
+                ? ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+                : startResults.removeFirst()
+            guard result.outcome == .liveControlStarted else {
+                return (nil, result)
+            }
+            let sessionID = ProcessTapLiveSessionID()
+            startedSessionIDsStorage.append(sessionID)
+            sessionOnStopped[sessionID] = onStopped
+            return (sessionID, result)
         }
-        let sessionID = ProcessTapLiveSessionID()
-        startedSessionIDs.append(sessionID)
-        sessionOnStopped[sessionID] = onStopped
+        guard let sessionID = started.sessionID else {
+            return ProcessTapLiveSessionStartResult(sessionID: nil, result: started.result)
+        }
         onDiagnostics(sessionID, makeLiveDiagnostics(gain: gain))
-        return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
+        return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: started.result)
     }
 
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
-        stopReasons.append(reason)
+        let (handler, gain) = lock.withLock {
+            stopReasonsStorage.append(reason)
+            return (sessionOnStopped.removeValue(forKey: id), startGainsStorage.last ?? .defaultOption)
+        }
         let result = ProcessTapTestResult(outcome: .liveControlStopped, message: "Live control stopped", severity: .info)
-        sessionOnStopped.removeValue(forKey: id)?(id, result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
+        handler?(id, result, makeLiveDiagnostics(gain: gain))
         return ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
     }
 
     func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult] {
-        let ids = Array(sessionOnStopped.keys)
+        let ids = lock.withLock { Array(sessionOnStopped.keys) }
         var results: [ProcessTapTestResult] = []
         for id in ids {
             results.append(await stopSession(id: id, reason: reason))
@@ -2538,16 +2618,23 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, Proces
     }
 
     func updateGain(sessionID: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption) {
-        gainUpdates.append(gain)
-        sessionGainUpdates.append((sessionID, gain))
+        lock.withLock {
+            gainUpdatesStorage.append(gain)
+            sessionGainUpdatesStorage.append((sessionID, gain))
+        }
     }
 
     func emitStopped(_ result: ProcessTapTestResult) {
-        onStopped?(result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
-        for (id, handler) in sessionOnStopped {
-            handler(id, result, makeLiveDiagnostics(gain: startGains.last ?? .defaultOption))
+        let (legacyHandler, sessionHandlers, gain) = lock.withLock {
+            let legacy = onStopped
+            let handlers = sessionOnStopped
+            sessionOnStopped.removeAll()
+            return (legacy, handlers, startGainsStorage.last ?? .defaultOption)
         }
-        sessionOnStopped.removeAll()
+        legacyHandler?(result, makeLiveDiagnostics(gain: gain))
+        for (id, handler) in sessionHandlers {
+            handler(id, result, makeLiveDiagnostics(gain: gain))
+        }
     }
 
     private func makeLiveDiagnostics(gain: ProcessTapReplayGainOption) -> ProcessTapLiveDiagnostics {
