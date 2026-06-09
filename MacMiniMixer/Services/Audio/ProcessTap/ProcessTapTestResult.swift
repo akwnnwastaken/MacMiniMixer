@@ -66,3 +66,38 @@ struct ProcessTapTestResult: Identifiable, Equatable, Sendable {
         self.severity = severity
     }
 }
+
+extension ProcessTapTestResult {
+    /// User-facing warning to surface for a live-control outcome, or `nil` when the outcome
+    /// needs no warning. Pure mapping extracted from `MixerViewModel` so it can be unit
+    /// tested without driving the whole view model.
+    var liveControlWarningMessage: String? {
+        switch outcome {
+        case .tapCleanupFailed:
+            return "Live control cleanup warning"
+        case .liveControlTimedOut:
+            return "Live control stopped: timeout"
+        case .liveControlOutputChanged:
+            return "Live control stopped: output device changed"
+        case .liveControlAppExited:
+            return "Live control stopped: app exited"
+        case .liveControlSetupFailed:
+            return "Could not start live control"
+        case .missingUsageDescription:
+            return ProcessTapPermissionMessage.missingUsageDescription
+        case .permissionDenied:
+            return ProcessTapPermissionMessage.permissionRequired
+        case .unsupportedOS:
+            return ProcessTapCoreAudio.unsupportedOSMessage
+        default:
+            return nil
+        }
+    }
+
+    /// Whether this outcome is fixable by the user granting System Audio Recording in System
+    /// Settings. Only `.permissionDenied` qualifies: `.missingUsageDescription` is a build
+    /// configuration problem, not something a user can resolve in Settings.
+    var suggestsSystemAudioRecordingSettings: Bool {
+        outcome == .permissionDenied
+    }
+}

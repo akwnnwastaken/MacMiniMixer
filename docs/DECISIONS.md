@@ -80,6 +80,12 @@ mappings only when needed.
 
 ## Why main product remains one active session
 
+> **Update (Phase 3):** Superseded — the product cap was raised to two. After Phase 0
+> sustained characterization (two simultaneous sessions for 5 minutes at 0 drops, 0 failures,
+> stable CPU) and the incremental Phase 1–3 refactor, `maxConcurrentLiveSessions` is now 2 and
+> two-app control is manually validated on real hardware. The original single-session
+> reasoning below is kept for history. Growth beyond two (Phase 5) remains evidence-gated.
+
 **Decision**: `ProcessTapLiveSessionManager` for the main product path has `maxSessions = 1`.
 
 **Reasoning**:
@@ -179,3 +185,93 @@ self-contained subsystems are being extracted one coordinator at a time.
 **Would revisit**: Continue the split in small steps. Product Real App Control should only
 move after a read-only boundary plan and more characterization tests confirm the safest
 interface.
+
+---
+
+## Why a `ProductRealControlCoordinator` is deferred (post-extraction reassessment)
+
+**Decision**: After extracting the pure `ProductRealControlState` state/model helpers, a
+read-only reassessment was done to decide whether the remaining Product Real Control
+orchestration should move into its own coordinator (mirroring the other five). The decision
+is **not yet** — keep the orchestration in `MixerViewModel` for now.
+
+**What was measured**: ~142 references in `MixerViewModel` touch the Product Real Control
+cluster (`productRealControlState`, `isProcessTapLiveControlActive`,
+`activeLiveControlAppName`, `processTapLiveDiagnostics`, the `advancedProcessTapDiagnostics`
+coordinator, `appAudioTargetResolver`, and `showStatus`).
+
+**Reasoning (why it is different from the coordinators already extracted)**:
+- The five extracted coordinators each own a *self-contained* slice of state and report back
+  through a single `onWillChange` callback. Product Real Control is the opposite: it is the
+  central arbiter that mutates four `@Published` properties the SwiftUI panel binds to
+  (`isProcessTapLiveControlActive`, `activeLiveControlAppName`, `processTapLiveDiagnostics`,
+  and the active session in `productRealControlState`).
+- Those same `@Published` properties are read by *other* `MixerViewModel` logic
+  (output-device-change teardown, app-refresh teardown). Moving them into a coordinator would
+  force either duplication or extra callback threading — likely a net increase in complexity.
+- Product Real Control drives the **Advanced diagnostics display** (`setResult`,
+  `setProgress`, `setRunning` on `AdvancedProcessTapDiagnosticsCoordinator`). A new
+  coordinator would need a hard dependency on another coordinator, a coupling the codebase
+  has deliberately minimized.
+- Start/guard logic reads the running state of five other subsystems (Two-App Readiness,
+  Process Tap testing, helper probe, auto-detect, app-audio resolution) for mutual
+  exclusion. A coordinator would need all of them injected or passed per call.
+
+**What was done instead (low-risk simplifications that fell out of the review)**:
+- The live-control warning mapping moved to a pure, tested
+  `ProcessTapTestResult.liveControlWarningMessage` computed property.
+- The app-refresh teardown was split into named helpers
+  (`stopRealControlForExitedTargetApps`, `refreshProcessTapSelectionAfterAppRefresh`).
+- The output-device-change teardown was consolidated into
+  `stopActiveAudioWorkForOutputDeviceChange`.
+- The duplicated `beginSession` call (early optimistic set + post-`await` re-assertion) is
+  intentional and is now documented inline rather than removed.
+
+**Would revisit if**: the four shared `@Published` properties can be reduced to a single
+observable session value, AND the dependency on `AdvancedProcessTapDiagnosticsCoordinator`
+for display is broken (e.g. Product control gets its own result/progress surface). At that
+point a narrow coordinator owning only the resolution + session lifecycle would be a clean,
+low-risk extraction.
+
+---
+
+## Diagnostic tooling classification (sunset decision)
+
+**Context**: The Advanced section carries a large diagnostic surface (Process Tap Test,
+Mute Probe, Replay Probe, Two-App Readiness, Helper Discovery + Candidate Probe +
+auto-detect). This decision classifies each so future cleanup is principled rather than
+ad hoc.
+
+**Stated product goal (from the maintainer)**: a true Windows-Volume-Mixer experience —
+*simultaneous, independent per-app volume control for every app shown in the audio list*,
+not just one or two at a time. This makes full multi-app Product Real Control the
+north-star goal, not a deferred curiosity. The current one-active-session limit remains the
+*incremental* path toward it (see "Why main product remains one active session").
+
+**Decision**: **Retain all diagnostic tooling for now.** Nothing is removed or debug-gated,
+because every tool is on the critical path to the multi-app goal — either as evidence or as
+a building-block diagnostic used while developing it. The value of this entry is the
+classification and the sunset *triggers*, not removal.
+
+**Classification**:
+- **Permanent product engine (never sunset)** — the product depends on these directly:
+  `ProcessTapLiveController` (live control), `AppAudioTargetResolver` (browser/helper
+  resolution), and the probing it reuses internally (`ProcessTapCandidateAudioProbing`,
+  `HelperProcessCandidateDiscovery`, see `AppAudioTargetResolving.swift`).
+- **Evidence on the critical path (retain through multi-app development)** —
+  **Two-App Readiness** (~1670 LOC across tester/view/coordinator) is the multi-session
+  prototype that measures whether simultaneous sessions stay stable. It is the evidence base
+  for the headline feature and must not be removed before multi-app ships.
+- **Building-block diagnostics (retain; first sunset candidates after multi-app ships)** —
+  Process Tap Test, Mute Probe, Replay Probe, and the manual Helper Discovery UI. These are
+  the tools used to validate per-app tap-ability, muting, playback gain, and helper
+  resolution during development.
+
+**Sunset trigger**: once production multi-app control exists *and* is validated, re-evaluate
+this list. Replay Probe and Mute Probe are the most likely to become redundant first (their
+questions — "can captured audio be replayed at a gain?" / "does tap-muting work?" — are
+answered once full multi live-control is proven). The manual Helper Discovery *UI* can then
+be debug-gated while its *engine* stays (the product still needs it).
+
+**Would revisit if**: the multi-app goal is ever abandoned — in that case Two-App Readiness
+(~1670 LOC) becomes the single largest removal candidate.

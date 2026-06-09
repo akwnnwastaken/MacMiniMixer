@@ -73,6 +73,46 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.result?.outcome, .running)
     }
 
+    func testSelectedDurationForwardsToTester() async {
+        let tester = FakeCoordinatorReadinessTester()
+        let coordinator = makeCoordinator(tester: tester)
+
+        XCTAssertEqual(coordinator.selectedDuration, .short)
+        coordinator.selectDuration(.fiveMinutes)
+        XCTAssertEqual(coordinator.selectedDuration, .fiveMinutes)
+
+        coordinator.startTest(
+            apps: makeCoordinatorApps(),
+            advancedTarget: nil,
+            isProcessTapTesting: false,
+            isLiveControlActive: false,
+            isAppAudioTargetResolving: false,
+            onWarning: { _ in }
+        )
+        await waitFor { coordinator.result?.outcome == .running }
+
+        XCTAssertEqual(tester.startRequests.first?.duration, ProcessTapTwoAppReadinessDurationOption.fiveMinutes.duration)
+    }
+
+    func testDurationSelectionIsBlockedWhileRunning() async {
+        let tester = FakeCoordinatorReadinessTester()
+        let coordinator = makeCoordinator(tester: tester)
+
+        coordinator.startTest(
+            apps: makeCoordinatorApps(),
+            advancedTarget: nil,
+            isProcessTapTesting: false,
+            isLiveControlActive: false,
+            isAppAudioTargetResolving: false,
+            onWarning: { _ in }
+        )
+        await waitFor { coordinator.isRunning }
+
+        coordinator.selectDuration(.oneMinute)
+
+        XCTAssertEqual(coordinator.selectedDuration, .short)
+    }
+
     func testVisibleAppPlusHelperTargetStartForwardsHelperPID() async throws {
         let tester = FakeCoordinatorReadinessTester()
         let helper = makeAdvancedTarget(pid: 201)
@@ -387,7 +427,7 @@ private func makeAdvancedTarget(pid: Int32) -> AdvancedProcessTapTarget {
 }
 
 private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
-    private(set) var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption)] = []
+    private(set) var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption, duration: TimeInterval)] = []
     private(set) var stopReasons: [ProcessTapLiveStopReason] = []
     private var lastSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
     private var onFinished: (@Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void)?
@@ -396,10 +436,11 @@ private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTes
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
+        duration: TimeInterval,
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) async -> ProcessTapTwoAppReadinessResult {
-        startRequests.append((appA, appB, gain))
+        startRequests.append((appA, appB, gain, duration))
         self.onFinished = onFinished
         lastSnapshot = ProcessTapTwoAppReadinessSnapshot(
             sessions: [

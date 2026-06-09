@@ -155,6 +155,10 @@ struct MixerPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
+                if !viewModel.isSystemOutputVolumeWritable {
+                    nonWritableVolumeBadge
+                }
+
                 Spacer()
 
                 Text(viewModel.selectedOutputDeviceName)
@@ -174,6 +178,7 @@ struct MixerPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .help(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output")
+                .accessibilityLabel(Text(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output"))
 
                 Text("Output")
                     .font(.callout.weight(.medium))
@@ -195,11 +200,35 @@ struct MixerPanelView: View {
                         }
                     }
                 )
+                .accessibilityLabel(Text("System output volume"))
+                .accessibilityValue(Text("\(Int(viewModel.systemVolume.rounded())) percent"))
+                .accessibilityHint(Text(viewModel.isSystemOutputVolumeWritable
+                    ? "Adjusts the system output volume"
+                    : "This output device does not expose writable volume"))
 
                 volumeText(viewModel.systemVolume)
             }
         }
         .sectionStyle(tintOpacity: 0.32)
+    }
+
+    private var nonWritableVolumeBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 8, weight: .bold))
+
+            Text("Read-only")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+        )
+        .help("This output device does not expose a writable volume API. Use the device's own controls to change volume.")
+        .accessibilityLabel(Text("Volume is read-only on this output device"))
     }
 
     private var appMixerSection: some View {
@@ -378,12 +407,14 @@ struct MixerPanelView: View {
                         selectedAppAID: viewModel.selectedTwoAppReadinessAppAID,
                         selectedAppBID: viewModel.selectedTwoAppReadinessAppBID,
                         selectedGain: viewModel.selectedTwoAppReadinessGain,
+                        selectedDuration: viewModel.selectedTwoAppReadinessDuration,
                         snapshot: viewModel.twoAppReadinessSnapshot,
                         result: viewModel.twoAppReadinessResult,
                         isRunning: viewModel.isTwoAppReadinessRunning,
                         selectAppA: viewModel.selectTwoAppReadinessAppA,
                         selectAppB: viewModel.selectTwoAppReadinessAppB,
                         selectGain: viewModel.selectTwoAppReadinessGain,
+                        selectDuration: viewModel.selectTwoAppReadinessDuration,
                         startTest: viewModel.startTwoAppReadinessTest,
                         stopAll: viewModel.stopTwoAppReadinessTest
                     )
@@ -492,6 +523,10 @@ struct MixerPanelView: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            if let action = message.action {
+                statusActionButton(action)
+            }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
@@ -503,6 +538,33 @@ struct MixerPanelView: View {
                         .stroke(message.style.tint.opacity(0.22), lineWidth: 1)
                 )
         )
+    }
+
+    private func statusActionButton(_ action: MixerStatusMessage.Action) -> some View {
+        Button {
+            perform(action)
+        } label: {
+            Text(action.label)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.blue.opacity(0.14))
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.blue)
+        .accessibilityHint(Text("Opens Privacy and Security settings to grant System Audio Recording"))
+    }
+
+    private func perform(_ action: MixerStatusMessage.Action) {
+        switch action {
+        case .openSystemAudioRecordingSettings:
+            if let url = ProcessTapPermissionMessage.systemAudioRecordingSettingsURL {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     private var panelBackground: some View {

@@ -51,6 +51,9 @@ struct OutputDeviceSelectorView: View {
                     .background(rowBackground(isSelected: device.id == selectedDeviceID))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(Text(device.name))
+                .accessibilityHint(Text("Switch system output to this device"))
+                .accessibilityAddTraits(device.id == selectedDeviceID ? .isSelected : [])
             }
         }
         .padding(6)

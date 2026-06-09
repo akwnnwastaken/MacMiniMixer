@@ -11,6 +11,14 @@ protocol ProcessTapLiveSessionManaging: Sendable {
         onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapLiveSessionStartResult
 
+    func startSession(
+        for target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult
+
     func stopSession(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult
     func stopAll(reason: ProcessTapLiveStopReason) async -> [ProcessTapTestResult]
     func updateGain(sessionID: ProcessTapLiveSessionID, gain: ProcessTapReplayGainOption)
@@ -67,7 +75,9 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         )
     }
 
-    private func startSession(
+    // Non-private so multi-session callers (e.g. Two-App Readiness) can choose a timeout
+    // policy other than `.standard`; the protocol method keeps the `.standard` default.
+    func startSession(
         for target: ProcessTapTarget,
         gain: ProcessTapReplayGainOption,
         timeoutPolicy: ProcessTapLiveTimeoutPolicy,

@@ -64,6 +64,207 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertNil(state.activeDisplayName)
     }
 
+    func testActiveSessionsAreTrackedByVisibleAppIDCollection() {
+        var state = ProductRealControlState()
+
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+
+        XCTAssertEqual(Set(state.activeVisibleAppIDs), ["spotify", "youtube"])
+        XCTAssertEqual(state.activeSessions.count, 2)
+        XCTAssertTrue(state.isActive(appID: "spotify", isLiveControlActive: true))
+        XCTAssertTrue(state.isActive(appID: "youtube", isLiveControlActive: true))
+        XCTAssertEqual(state.activeSessionsByAppID["youtube"]?.controlledProcessIdentifier, 201)
+    }
+
+    func testBeginningSessionForSameAppReplacesThatAppsSession() {
+        var state = ProductRealControlState()
+
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 202,
+            source: .cachedHelper
+        )
+
+        XCTAssertEqual(state.activeSessions.count, 1)
+        XCTAssertEqual(state.activeSessionsByAppID["youtube"]?.controlledProcessIdentifier, 202)
+        XCTAssertEqual(state.activeSessionsByAppID["youtube"]?.source, .cachedHelper)
+    }
+
+    func testClearSessionForAppRemovesOnlyThatAppSession() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+
+        state.clearSession(for: "spotify")
+
+        XCTAssertEqual(state.activeVisibleAppIDs, ["youtube"])
+        XCTAssertFalse(state.isActive(appID: "spotify", isLiveControlActive: true))
+        XCTAssertTrue(state.isActive(appID: "youtube", isLiveControlActive: true))
+    }
+
+    func testClearActiveSessionRemovesAllSessions() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper
+        )
+
+        state.clearActiveSession()
+
+        XCTAssertTrue(state.activeSessions.isEmpty)
+        XCTAssertTrue(state.activeVisibleAppIDs.isEmpty)
+        XCTAssertNil(state.activeSession)
+    }
+
+    // MARK: - Per-app start-request tokens
+
+    func testEachAppGetsIndependentStartRequestTokens() {
+        var state = ProductRealControlState()
+
+        let spotifyRequest = state.beginStartRequest(for: "spotify")
+        let youtubeRequest = state.beginStartRequest(for: "youtube")
+
+        XCTAssertNotEqual(spotifyRequest, youtubeRequest)
+        XCTAssertTrue(state.isCurrentStartRequest(spotifyRequest, for: "spotify"))
+        XCTAssertTrue(state.isCurrentStartRequest(youtubeRequest, for: "youtube"))
+        // A token is only current for its own app.
+        XCTAssertFalse(state.isCurrentStartRequest(spotifyRequest, for: "youtube"))
+        XCTAssertFalse(state.isCurrentStartRequest(youtubeRequest, for: "spotify"))
+    }
+
+    func testNewStartRequestForSameAppSupersedesPrevious() {
+        var state = ProductRealControlState()
+
+        let first = state.beginStartRequest(for: "spotify")
+        let second = state.beginStartRequest(for: "spotify")
+
+        XCTAssertNotEqual(first, second)
+        XCTAssertFalse(state.isCurrentStartRequest(first, for: "spotify"))
+        XCTAssertTrue(state.isCurrentStartRequest(second, for: "spotify"))
+    }
+
+    func testNewStartRequestForOtherAppDoesNotDisturbExistingRequest() {
+        var state = ProductRealControlState()
+
+        let spotifyRequest = state.beginStartRequest(for: "spotify")
+        _ = state.beginStartRequest(for: "youtube")
+
+        XCTAssertTrue(state.isCurrentStartRequest(spotifyRequest, for: "spotify"))
+    }
+
+    func testClearStartRequestClearsOnlyThatApp() {
+        var state = ProductRealControlState()
+        let spotifyRequest = state.beginStartRequest(for: "spotify")
+        let youtubeRequest = state.beginStartRequest(for: "youtube")
+
+        state.clearStartRequest(for: "spotify")
+
+        XCTAssertFalse(state.isCurrentStartRequest(spotifyRequest, for: "spotify"))
+        XCTAssertTrue(state.isCurrentStartRequest(youtubeRequest, for: "youtube"))
+        XCTAssertEqual(Array(state.pendingStartRequestByAppID.keys), ["youtube"])
+    }
+
+    func testClearAllStartRequestsClearsEveryPendingRequest() {
+        var state = ProductRealControlState()
+        let spotifyRequest = state.beginStartRequest(for: "spotify")
+        let youtubeRequest = state.beginStartRequest(for: "youtube")
+
+        state.clearAllStartRequests()
+
+        XCTAssertFalse(state.isCurrentStartRequest(spotifyRequest, for: "spotify"))
+        XCTAssertFalse(state.isCurrentStartRequest(youtubeRequest, for: "youtube"))
+        XCTAssertTrue(state.pendingStartRequestByAppID.isEmpty)
+    }
+
+    func testBeginSessionStoresStartRequestIDInActiveMetadata() {
+        var state = ProductRealControlState()
+        let request = state.beginStartRequest(for: "spotify")
+
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID,
+            startRequestID: request
+        )
+
+        XCTAssertEqual(state.activeSessionsByAppID["spotify"]?.startRequestID, request)
+    }
+
+    func testHelperSessionWithStartRequestKeepsVisibleNameAndHidesHelperIdentity() {
+        var state = ProductRealControlState()
+        let request = state.beginStartRequest(for: "youtube")
+
+        state.beginSession(
+            visibleAppID: "youtube",
+            displayName: "YouTube",
+            controlledProcessIdentifier: 201,
+            source: .discoveredHelper,
+            startRequestID: request
+        )
+
+        let session = state.activeSessionsByAppID["youtube"]
+        XCTAssertEqual(session?.displayName, "YouTube")
+        XCTAssertEqual(session?.startRequestID, request)
+        // Helper PID is kept internally as the controlled process; the display name never
+        // exposes the helper process identity.
+        XCTAssertEqual(session?.controlledProcessIdentifier, 201)
+        XCTAssertNotEqual(session?.displayName, "com.apple.WebKit.GPU")
+    }
+
+    func testStartRequestsDoNotDisturbActiveSessionCollection() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID
+        )
+
+        _ = state.beginStartRequest(for: "youtube")
+        state.clearStartRequest(for: "youtube")
+
+        // Pending-request bookkeeping must not change the active session collection.
+        XCTAssertEqual(state.activeVisibleAppIDs, ["spotify"])
+        XCTAssertEqual(state.activeSessionsByAppID["spotify"]?.controlledProcessIdentifier, 101)
+    }
+
     func testResolutionStateIsTrackedByVisibleRowID() {
         var state = ProductRealControlState()
 

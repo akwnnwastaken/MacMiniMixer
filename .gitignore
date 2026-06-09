@@ -39,3 +39,6 @@ debug-output/
 # Local environment overrides
 .env
 .env.*
+
+# Claude Code local settings
+.claude/

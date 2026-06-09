@@ -17,6 +17,7 @@ struct MixerAppRowView: View {
             }
             .buttonStyle(.plain)
             .help(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)")
+            .accessibilityLabel(Text(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)"))
 
             Text(app.name)
                 .font(.callout.weight(.medium))
@@ -25,6 +26,13 @@ struct MixerAppRowView: View {
 
             Slider(value: $volume, in: AppConstants.volumeRange, step: 1)
                 .disabled(isMuted || isExperimentalControlResolving)
+                .accessibilityLabel(Text("\(app.name) volume"))
+                .accessibilityValue(Text("\(Int(volume.rounded())) percent"))
+                .accessibilityHint(Text(isExperimentalControlResolving
+                    ? "Finding the audio helper for this app"
+                    : isExperimentalControlActive
+                        ? "Adjusts real audio level for this app"
+                        : "Adjusts the volume for this app"))
 
             Text("\(Int(volume.rounded()))")
                 .font(.caption.monospacedDigit())
@@ -191,5 +199,6 @@ struct MixerAppRowView: View {
                 )
         )
         .help("Finding the audio helper for \(app.name)")
+        .accessibilityLabel(Text("Resolving real app control for \(app.name)"))
     }
 }
