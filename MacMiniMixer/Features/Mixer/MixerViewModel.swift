@@ -261,11 +261,21 @@ final class MixerViewModel: ObservableObject {
             let count = productNames.count
             let isMultiple = count >= 2
             let joined = productNames.joined(separator: ", ")
+            // Visible summary stays one line: for 3+ apps show the first two names plus a
+            // "+N more" count so the narrow panel does not truncate mid-name. The accessibility
+            // label below keeps the full list, so nothing is lost for assistive tech.
+            let summaryText: String
+            if count > 2 {
+                let firstTwo = productNames.prefix(2).joined(separator: ", ")
+                summaryText = "Real control: \(firstTwo) +\(count - 2) more"
+            } else {
+                summaryText = "Real control: \(joined)"
+            }
             return RealControlBannerPresentation(
                 mode: .product,
                 appNames: productNames,
                 confirmedCount: count,
-                summaryText: "Real control: \(joined)",
+                summaryText: summaryText,
                 stopButtonTitle: isMultiple ? "Stop All" : "Stop",
                 accessibilityLabel: isMultiple
                     ? "Real control active for \(count) apps: \(joined)"

@@ -14,9 +14,11 @@ enum AppConstants {
     static let processTapLiveControlMaxDuration: TimeInterval = 60
     static let processTapTwoAppReadinessDuration: TimeInterval = 10
     /// Maximum concurrent live Process Tap sessions the shared session manager will run.
-    /// Raised to 2 to begin incremental multi-app real control (see docs/PLAN_MULTI_APP.md);
-    /// product orchestration still enforces its own limit until the Phase 3 guard relaxation.
-    static let maxConcurrentLiveSessions = 2
+    /// Raised to 3 (Phase 5a) after the cap=2 Release CPU gate passed and a real-hardware
+    /// three-session smoke (see docs/PLAN_MULTI_APP.md / DECISIONS.md). Product orchestration
+    /// reads this single constant for its count-based guard and the user-facing limit message;
+    /// N>3 remains a separate gate (resolver serialization, resource provisioning).
+    static let maxConcurrentLiveSessions = 3
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
     static let processTapLivePrimingBufferCount = 2

@@ -87,9 +87,9 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "YouTube")
     }
 
-    // Multi-app cap=2 invariant: a second *confirmed* Product session is allowed (see
-    // testSecondAppStartsConcurrentProductSession / testConcurrentStartLimitOfTwoPreservedWithControlledCompletion),
-    // and a third is blocked by the cap (testThirdProductSessionBlockedByCap). What this test pins
+    // Multi-app cap invariant: confirmed Product sessions are allowed up to the cap (see
+    // testThirdProductSessionAllowedUnderCapOfThree / testConcurrentStartUpToCapPreservedWithControlledCompletion),
+    // and the (cap+1)th is blocked (testFourthProductSessionBlockedByCap). What this test pins
     // is the transient *serialization* guard: while one Product start is still in flight (pending,
     // unconfirmed), a second Product start and an Advanced Manual start are both rejected, and only
     // the first start reaches the controller. Replaces the former stale single-session test
@@ -483,25 +483,97 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
     }
 
-    func testThirdProductSessionBlockedByCap() async {
+    // Cap=3 (Phase 5a): a third confirmed Product session is now allowed. Drives three direct
+    // sessions (all default-eligible in the harness) and asserts all three are active.
+    func testThirdProductSessionAllowedUnderCapOfThree() async {
         let harness = makeHarness()
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         harness.viewModel.setAppVolume(50, for: "spotify")
-        // Wait until the start has fully settled: the session id is recorded by startSession
-        // and the post-await has run (isProcessTapTesting back to false means setRunning(false)
-        // and the confirming beginSession in the same synchronous block have completed). This
-        // is deterministic, unlike a fixed drainMainActor yield count (which flakes on CI).
         await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
         harness.viewModel.setAppVolume(50, for: "music")
         await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
-
         harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.liveController.startedSessionIDs.count == 3 && !harness.viewModel.isProcessTapTesting }
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 3)
+    }
+
+    // The (cap+1)th product start is rejected with the dynamic cap message; the existing
+    // sessions stay active. Reads the cap from AppConstants so the assertion does not need to
+    // change if the cap moves again.
+    func testFourthProductSessionBlockedByCap() async {
+        let apps = makeLiveControlApps() + [
+            MixerAppItem(id: "podcasts", name: "Podcasts", icon: .systemSymbol("mic"), processIdentifier: 103, volume: 50)
+        ]
+        let harness = makeHarness(apps: apps)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.liveController.startedSessionIDs.count == 3 && !harness.viewModel.isProcessTapTesting }
+
+        harness.viewModel.setAppVolume(50, for: "podcasts")
         await drainMainActor()
 
-        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
-        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Real app control supports 2 apps at a time")
-        XCTAssertEqual(harness.liveController.startedSessionIDs.count, 2)
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "podcasts"))
+        XCTAssertEqual(
+            harness.viewModel.statusMessage?.text,
+            "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
+        )
+        XCTAssertEqual(harness.liveController.startedSessionIDs.count, 3)
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 3)
+    }
+
+    func testStoppingOneOfThreeProductSessionsLeavesTwoActive() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.liveController.startedSessionIDs.count == 3 && !harness.viewModel.isProcessTapTesting }
+
+        harness.viewModel.toggleExperimentalControl(for: "music")
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "music") }
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+    }
+
+    func testOutputDeviceChangeStopsAllThreeProductSessions() async {
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let harness = makeHarness(outputDeviceLister: outputDeviceLister)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.liveController.startedSessionIDs.count == 3 && !harness.viewModel.isProcessTapTesting }
+
+        outputDeviceLister.devices = [
+            makeLiveControlOutputDevice(id: "built-in"),
+            makeLiveControlOutputDevice(id: "airpods", isDefault: true)
+        ]
+        harness.viewModel.refreshOutputDevices()
+        await waitFor { harness.viewModel.confirmedProductRealControlSessionCount == 0 }
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.outputDeviceChanged, .outputDeviceChanged, .outputDeviceChanged])
+        XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
     }
 
     func testHelperResolvedSetupFailureInvalidatesMappingClearsStateAndAllowsLaterResolve() async {
@@ -1187,33 +1259,23 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
     }
 
-    func testConcurrentStartLimitOfTwoPreservedWithControlledCompletion() async {
+    func testConcurrentStartUpToCapPreservedWithControlledCompletion() async {
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
-        harness.viewModel.setAppVolume(50, for: "spotify")
-        await waitFor { controller.pendingStartCount == 1 }
-        controller.completeNextStart(success: true)
-        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        // Cap is 3 (Phase 5a): three apps are confirmed one at a time through controlled
+        // completion. `startConfirmedProductSession` waits for each start to fully settle
+        // (session id recorded, isProcessTapTesting back to false) before the next, which keeps
+        // the serialized start path deterministic instead of racing the next start.
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "youtube", harness: harness, controller: controller)
 
-        harness.viewModel.setAppVolume(50, for: "music")
-        await waitFor { controller.pendingStartCount == 1 }
-        controller.completeNextStart(success: true)
-        // Music is the second app, so the global "live control active" flag is already true;
-        // wait on the controlled completion draining instead of the (then-imprecise) per-app flag.
-        await waitFor { controller.pendingStartCount == 0 }
-        await drainMainActor()
-
-        // Both still active and indefinite; a third app is rejected by the cap.
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
-        XCTAssertEqual(controller.startTimeoutPolicies, [.indefinite, .indefinite])
-
-        harness.viewModel.setAppVolume(50, for: "youtube")
-        await drainMainActor()
-        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
-        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Real app control supports 2 apps at a time")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertEqual(controller.startTimeoutPolicies, [.indefinite, .indefinite, .indefinite])
     }
 
     // MARK: - Phase 4a: multi-app lifecycle isolation characterization
@@ -1690,6 +1752,27 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(banner.summaryText, "Real control: Spotify, Music")
         XCTAssertEqual(banner.stopButtonTitle, "Stop All")
         XCTAssertEqual(banner.accessibilityLabel, "Real control active for 2 apps: Spotify, Music")
+        XCTAssertEqual(banner.stopAccessibilityLabel, "Stop real control for all apps")
+    }
+
+    // Cap=3 banner: the visible summary collapses to "first two + N more" so the one-line panel
+    // does not truncate mid-name, while the accessibility label keeps the full ordered list.
+    func testBannerPresentationThreeSessionsShowsFirstTwoPlusMore() async throws {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+        _ = await startConfirmedProductSession(for: "youtube", harness: harness, controller: controller)
+
+        let banner = try XCTUnwrap(harness.viewModel.realControlBannerPresentation)
+        XCTAssertEqual(banner.mode, .product)
+        XCTAssertEqual(banner.appNames, ["Spotify", "Music", "YouTube"])
+        XCTAssertEqual(banner.confirmedCount, 3)
+        XCTAssertEqual(banner.summaryText, "Real control: Spotify, Music +1 more")
+        XCTAssertEqual(banner.stopButtonTitle, "Stop All")
+        XCTAssertEqual(banner.accessibilityLabel, "Real control active for 3 apps: Spotify, Music, YouTube")
         XCTAssertEqual(banner.stopAccessibilityLabel, "Stop real control for all apps")
     }
 
