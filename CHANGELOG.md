@@ -10,6 +10,8 @@ active at a time, and production multi-app per-application control is not implem
 
 ## [Unreleased]
 
+## [v0.13] - 2026-06-10
+
 ### Added
 - System sleep/wake lifecycle handling: a typed `.systemSleep` live-stop reason; on system
   sleep all active and pending Process Tap work (Product Real Control, Advanced manual live
@@ -34,6 +36,11 @@ active at a time, and production multi-app per-application control is not implem
 - `SystemOutputCoordinator` now tracks per-device volume writability
   (`isSystemOutputVolumeWritable`), updated from the most recent write attempt and reset
   when the selected output device changes.
+
+### Fixed
+- Two-App Readiness coordinator tests were made deterministic (thread-safe test doubles and
+  waits bound to the asserted state) to remove intermittent CI failures. Test-only; no runtime
+  behaviour change.
 
 ## [v0.12] — Browser/helper row resolution
 
