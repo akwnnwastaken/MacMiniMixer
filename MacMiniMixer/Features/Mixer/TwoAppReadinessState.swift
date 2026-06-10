@@ -122,6 +122,97 @@ enum TwoAppReadinessState {
         return processIdentifier > 0
     }
 
+    /// Maps a finished Two-App Readiness run to its aggregate result.
+    ///
+    /// Failure precedence: if **any** session did not tear down cleanly (`phase == .failed` —
+    /// set when the controller returned `.tapCleanupFailed`, or when a session never completed),
+    /// the run reports a visible `.cleanupWarning` instead of a normal `.timedOut`/`.stopped`
+    /// result. This is the fix for the reporting gap where a per-session Core Audio cleanup
+    /// failure (e.g. a Process Tap that failed to destroy) was hidden under the normal stop
+    /// outcome, so a user saw "stopped" while a muted tap lingered. On the clean path the result
+    /// is identical to before. Pure and side-effect-free so it can be unit-tested directly.
+    static func aggregateResult(
+        reason: ProcessTapLiveStopReason,
+        snapshot: ProcessTapTwoAppReadinessSnapshot
+    ) -> ProcessTapTwoAppReadinessResult {
+        let detail = snapshot.sessions
+            .map { session in
+                let diagnostics = session.diagnostics
+                return "\(session.appName): \(diagnostics?.callbackCount ?? 0) cb, drops \(diagnostics?.droppedBufferCount ?? 0), fail \(diagnostics?.totalFailureCount ?? 0)"
+            }
+            .joined(separator: " | ")
+
+        let failedSessions = snapshot.sessions.filter { $0.phase == .failed }
+        if !failedSessions.isEmpty {
+            let failureDetail = failedSessions
+                .map { "\($0.appName): \($0.cleanupFailureDetail ?? $0.message ?? "cleanup failed")" }
+                .joined(separator: " | ")
+            let cleanSessions = snapshot.sessions.filter { $0.phase != .failed }
+            let cleanNote = cleanSessions.isEmpty
+                ? ""
+                : " | clean: \(cleanSessions.map(\.appName).joined(separator: ", "))"
+
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .cleanupWarning,
+                message: "Two-app test stopped with cleanup warnings",
+                detail: failureDetail + cleanNote,
+                severity: .warning
+            )
+        }
+
+        switch reason {
+        case .timedOut:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .timedOut,
+                message: "Two-app test stopped: timeout",
+                detail: detail,
+                severity: .warning
+            )
+        case .outputDeviceChanged:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .outputDeviceChanged,
+                message: "Two-app test stopped: output changed",
+                detail: detail,
+                severity: .warning
+            )
+        case .targetAppExited:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .appExited,
+                message: "Two-app test stopped: app exited",
+                detail: detail,
+                severity: .warning
+            )
+        case .appTerminating:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .stopped,
+                message: "Two-app test stopped for quit",
+                detail: detail,
+                severity: .info
+            )
+        case .systemSleep:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .stopped,
+                message: "Two-app test stopped: system sleep",
+                detail: detail,
+                severity: .info
+            )
+        case .setupFailed:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .setupFailed,
+                message: "Two-app setup failed",
+                detail: detail,
+                severity: .warning
+            )
+        case .userStopped:
+            return ProcessTapTwoAppReadinessResult(
+                outcome: .stopped,
+                message: "Two-app test stopped",
+                detail: detail,
+                severity: .info
+            )
+        }
+    }
+
     static func startingSnapshot(
         appA: ProcessTapTarget,
         appB: ProcessTapTarget,

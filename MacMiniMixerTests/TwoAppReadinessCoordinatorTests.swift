@@ -409,6 +409,168 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         XCTAssertTrue(idleTester.stopReasons.isEmpty)
     }
 
+    // MARK: - Aggregate cleanup-failure reporting (Faz 4f-1)
+    //
+    // These exercise the pure aggregation `TwoAppReadinessState.aggregateResult(reason:snapshot:)`
+    // directly with synthesized snapshots. They prove a per-session cleanup failure is surfaced
+    // (not masked under a normal timeout/stopped result) and that the clean path is unchanged.
+    // NOTE: these fakes model only per-session result/phase forwarding — they do NOT and cannot
+    // reproduce real Core Audio Process Tap destroy behavior, the muted-tap symptom, or audio
+    // glitches; those remain real-hardware concerns.
+
+    func testTimeoutWithAppACleanupFailureIsNotReportedAsCleanTimeout() {
+        let snapshot = makeReadinessSnapshot(
+            appA: failedSession(slot: .appA, appName: "Spotify", detail: "destroy tap 'who?'"),
+            appB: cleanSession(slot: .appB, appName: "Music")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .timedOut, snapshot: snapshot)
+
+        XCTAssertNotEqual(result.outcome, .timedOut)
+        XCTAssertEqual(result.outcome, .cleanupWarning)
+        XCTAssertEqual(result.severity, .warning)
+        XCTAssertTrue(result.detail?.contains("Spotify") == true)
+        XCTAssertTrue(result.detail?.contains("destroy tap 'who?'") == true)
+    }
+
+    func testUserStopWithAppBCleanupFailureIsNotReportedAsCleanStop() {
+        let snapshot = makeReadinessSnapshot(
+            appA: cleanSession(slot: .appA, appName: "Spotify"),
+            appB: failedSession(slot: .appB, appName: "Music", detail: "destroy aggregate 'err'")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .userStopped, snapshot: snapshot)
+
+        XCTAssertNotEqual(result.outcome, .stopped)
+        XCTAssertEqual(result.outcome, .cleanupWarning)
+        XCTAssertEqual(result.severity, .warning)
+        XCTAssertTrue(result.detail?.contains("Music") == true)
+        XCTAssertTrue(result.detail?.contains("destroy aggregate 'err'") == true)
+    }
+
+    func testOneCleanOneFailedKeepsFailureAndNotesCleanSession() {
+        let snapshot = makeReadinessSnapshot(
+            appA: cleanSession(slot: .appA, appName: "Spotify"),
+            appB: failedSession(slot: .appB, appName: "Music", detail: "destroy tap 'err'")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .timedOut, snapshot: snapshot)
+
+        XCTAssertEqual(result.outcome, .cleanupWarning)
+        // Failed session info is not lost...
+        XCTAssertTrue(result.detail?.contains("Music") == true)
+        XCTAssertTrue(result.detail?.contains("destroy tap 'err'") == true)
+        // ...and the clean session is still acknowledged.
+        XCTAssertTrue(result.detail?.contains("Spotify") == true)
+    }
+
+    func testBothSessionsCleanupFailureSurfaceBothInDetail() {
+        let snapshot = makeReadinessSnapshot(
+            appA: failedSession(slot: .appA, appName: "Spotify", detail: "destroy tap A"),
+            appB: failedSession(slot: .appB, appName: "Music", detail: "destroy tap B")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .userStopped, snapshot: snapshot)
+
+        XCTAssertEqual(result.outcome, .cleanupWarning)
+        XCTAssertEqual(result.severity, .warning)
+        XCTAssertTrue(result.detail?.contains("Spotify") == true)
+        XCTAssertTrue(result.detail?.contains("destroy tap A") == true)
+        XCTAssertTrue(result.detail?.contains("Music") == true)
+        XCTAssertTrue(result.detail?.contains("destroy tap B") == true)
+    }
+
+    func testTwoCleanSessionsTimeoutKeepsExistingTimedOutResult() {
+        let snapshot = makeReadinessSnapshot(
+            appA: cleanSession(slot: .appA, appName: "Spotify"),
+            appB: cleanSession(slot: .appB, appName: "Music")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .timedOut, snapshot: snapshot)
+
+        XCTAssertEqual(result.outcome, .timedOut)
+        XCTAssertEqual(result.message, "Two-app test stopped: timeout")
+        XCTAssertEqual(result.severity, .warning)
+    }
+
+    func testTwoCleanSessionsUserStopKeepsExistingStoppedResult() {
+        let snapshot = makeReadinessSnapshot(
+            appA: cleanSession(slot: .appA, appName: "Spotify"),
+            appB: cleanSession(slot: .appB, appName: "Music")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .userStopped, snapshot: snapshot)
+
+        XCTAssertEqual(result.outcome, .stopped)
+        XCTAssertEqual(result.message, "Two-app test stopped")
+        XCTAssertEqual(result.severity, .info)
+    }
+
+    func testTwoCleanSessionsSystemSleepKeepsControlledStoppedResult() {
+        let snapshot = makeReadinessSnapshot(
+            appA: cleanSession(slot: .appA, appName: "Spotify"),
+            appB: cleanSession(slot: .appB, appName: "Music")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .systemSleep, snapshot: snapshot)
+
+        XCTAssertEqual(result.outcome, .stopped)
+        XCTAssertEqual(result.message, "Two-app test stopped: system sleep")
+        XCTAssertEqual(result.severity, .info)
+    }
+
+    func testTwoCleanSessionsOutputDeviceChangeKeepsExistingOutcome() {
+        let snapshot = makeReadinessSnapshot(
+            appA: cleanSession(slot: .appA, appName: "Spotify"),
+            appB: cleanSession(slot: .appB, appName: "Music")
+        )
+
+        let result = TwoAppReadinessState.aggregateResult(reason: .outputDeviceChanged, snapshot: snapshot)
+
+        XCTAssertEqual(result.outcome, .outputDeviceChanged)
+        XCTAssertEqual(result.message, "Two-app test stopped: output changed")
+        XCTAssertEqual(result.severity, .warning)
+    }
+
+    private func cleanSession(
+        slot: ProcessTapTwoAppReadinessSlot,
+        appName: String
+    ) -> ProcessTapTwoAppReadinessSessionSnapshot {
+        ProcessTapTwoAppReadinessSessionSnapshot(
+            slot: slot,
+            sessionID: ProcessTapLiveSessionID(),
+            appName: appName,
+            phase: .stopped,
+            selectedGain: ProcessTapReplayGainOption.options[0],
+            diagnostics: nil,
+            message: nil
+        )
+    }
+
+    private func failedSession(
+        slot: ProcessTapTwoAppReadinessSlot,
+        appName: String,
+        detail: String
+    ) -> ProcessTapTwoAppReadinessSessionSnapshot {
+        ProcessTapTwoAppReadinessSessionSnapshot(
+            slot: slot,
+            sessionID: ProcessTapLiveSessionID(),
+            appName: appName,
+            phase: .failed,
+            selectedGain: ProcessTapReplayGainOption.options[0],
+            diagnostics: nil,
+            message: "Live control cleanup warning",
+            cleanupFailureDetail: detail
+        )
+    }
+
+    private func makeReadinessSnapshot(
+        appA: ProcessTapTwoAppReadinessSessionSnapshot,
+        appB: ProcessTapTwoAppReadinessSessionSnapshot
+    ) -> ProcessTapTwoAppReadinessSnapshot {
+        ProcessTapTwoAppReadinessSnapshot(sessions: [appA, appB])
+    }
+
     private func makeCoordinator(
         apps: [MixerAppItem] = makeCoordinatorApps(),
         tester: FakeCoordinatorReadinessTester = FakeCoordinatorReadinessTester(),

@@ -23,6 +23,12 @@ struct ProcessTapTwoAppReadinessSessionSnapshot: Identifiable, Equatable, Sendab
     let selectedGain: ProcessTapReplayGainOption
     let diagnostics: ProcessTapLiveDiagnostics?
     let message: String?
+    /// Typed metadata for a session that did NOT tear down cleanly (controller returned
+    /// `.tapCleanupFailed`). Carries the cleanup OSStatus detail so the aggregate run result
+    /// can surface *which* session failed and why, instead of hiding it under a normal
+    /// timeout/stopped result. `nil` for cleanly stopped/active sessions. Trailing + defaulted
+    /// so existing memberwise-init call sites are unaffected.
+    var cleanupFailureDetail: String? = nil
 
     static func starting(
         slot: ProcessTapTwoAppReadinessSlot,
@@ -554,64 +560,7 @@ final class CoreAudioProcessTapTwoAppReadinessTester: ProcessTapTwoAppReadinessT
         _ reason: ProcessTapLiveStopReason,
         snapshot: ProcessTapTwoAppReadinessSnapshot
     ) -> ProcessTapTwoAppReadinessResult {
-        let detail = snapshot.sessions
-            .map { session in
-                let diagnostics = session.diagnostics
-                return "\(session.appName): \(diagnostics?.callbackCount ?? 0) cb, drops \(diagnostics?.droppedBufferCount ?? 0), fail \(diagnostics?.totalFailureCount ?? 0)"
-            }
-            .joined(separator: " | ")
-
-        switch reason {
-        case .timedOut:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .timedOut,
-                message: "Two-app test stopped: timeout",
-                detail: detail,
-                severity: .warning
-            )
-        case .outputDeviceChanged:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .outputDeviceChanged,
-                message: "Two-app test stopped: output changed",
-                detail: detail,
-                severity: .warning
-            )
-        case .targetAppExited:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .appExited,
-                message: "Two-app test stopped: app exited",
-                detail: detail,
-                severity: .warning
-            )
-        case .appTerminating:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .stopped,
-                message: "Two-app test stopped for quit",
-                detail: detail,
-                severity: .info
-            )
-        case .systemSleep:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .stopped,
-                message: "Two-app test stopped: system sleep",
-                detail: detail,
-                severity: .info
-            )
-        case .setupFailed:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .setupFailed,
-                message: "Two-app setup failed",
-                detail: detail,
-                severity: .warning
-            )
-        case .userStopped:
-            return ProcessTapTwoAppReadinessResult(
-                outcome: .stopped,
-                message: "Two-app test stopped",
-                detail: detail,
-                severity: .info
-            )
-        }
+        TwoAppReadinessState.aggregateResult(reason: reason, snapshot: snapshot)
     }
 }
 
@@ -693,11 +642,13 @@ private final class TwoAppReadinessRun: @unchecked Sendable {
         diagnostics: ProcessTapLiveDiagnostics?,
         sessionID: ProcessTapLiveSessionID
     ) {
+        let isCleanupFailure = result.outcome == .tapCleanupFailed
         updateSession(
             sessionID: sessionID,
-            phase: result.outcome == .tapCleanupFailed ? .failed : .stopped,
+            phase: isCleanupFailure ? .failed : .stopped,
             diagnostics: diagnostics,
-            message: result.message
+            message: result.message,
+            cleanupFailureDetail: isCleanupFailure ? (result.detail ?? result.message) : nil
         )
     }
 
@@ -819,7 +770,8 @@ private final class TwoAppReadinessRun: @unchecked Sendable {
         sessionID: ProcessTapLiveSessionID,
         phase: ProcessTapLiveSessionPhase,
         diagnostics: ProcessTapLiveDiagnostics?,
-        message: String?
+        message: String?,
+        cleanupFailureDetail: String? = nil
     ) {
         lock.lock()
         guard let slot = sessionSlots[sessionID],
@@ -835,7 +787,8 @@ private final class TwoAppReadinessRun: @unchecked Sendable {
             phase: phase,
             selectedGain: diagnostics?.selectedGain ?? session.selectedGain,
             diagnostics: diagnostics ?? session.diagnostics,
-            message: message
+            message: message,
+            cleanupFailureDetail: cleanupFailureDetail
         )
         lock.unlock()
     }
