@@ -119,7 +119,11 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isAppAudioTargetResolving: false,
             onWarning: { _ in }
         )
-        await waitFor { coordinator.result?.outcome == .running }
+        // Wait on the exact observable this test asserts — the duration the fake tester recorded —
+        // not the coordinator's separately-propagated `.running` result. The fake appends the
+        // request before returning, so this is the earliest and most direct settle signal; waiting
+        // on the later `result` hop is what let this flake under loaded CI.
+        await waitFor { tester.startRequests.first?.duration == 1_800 }
 
         XCTAssertEqual(tester.startRequests.first?.duration, 1_800)
     }
@@ -640,10 +644,22 @@ private func makeAdvancedTarget(pid: Int32) -> AdvancedProcessTapTarget {
 }
 
 private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
-    private(set) var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption, duration: TimeInterval)] = []
-    private(set) var stopReasons: [ProcessTapLiveStopReason] = []
+    // The coordinator drives these methods from an off-MainActor task while tests read the
+    // recorded arrays on the MainActor. Guard all mutable state with a lock and run callbacks
+    // outside the lock, so reads are never racing a partial mutation (the source of the CI flake).
+    private let lock = NSLock()
+    private var startRequestsStorage: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption, duration: TimeInterval)] = []
+    private var stopReasonsStorage: [ProcessTapLiveStopReason] = []
     private var lastSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
     private var onFinished: (@Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void)?
+
+    var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption, duration: TimeInterval)] {
+        lock.withLock { startRequestsStorage }
+    }
+
+    var stopReasons: [ProcessTapLiveStopReason] {
+        lock.withLock { stopReasonsStorage }
+    }
 
     func startTest(
         appA: ProcessTapTarget,
@@ -653,15 +669,18 @@ private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTes
         onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
         onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
     ) async -> ProcessTapTwoAppReadinessResult {
-        startRequests.append((appA, appB, gain, duration))
-        self.onFinished = onFinished
-        lastSnapshot = ProcessTapTwoAppReadinessSnapshot(
+        let snapshot = ProcessTapTwoAppReadinessSnapshot(
             sessions: [
                 activeSnapshot(slot: .appA, target: appA, gain: gain),
                 activeSnapshot(slot: .appB, target: appB, gain: gain)
             ]
         )
-        onUpdate(lastSnapshot)
+        lock.withLock {
+            startRequestsStorage.append((appA, appB, gain, duration))
+            self.onFinished = onFinished
+            lastSnapshot = snapshot
+        }
+        onUpdate(snapshot)
         return ProcessTapTwoAppReadinessResult(
             outcome: .running,
             message: "Two-app test running",
@@ -670,27 +689,35 @@ private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTes
     }
 
     func stopAll(reason: ProcessTapLiveStopReason) async -> ProcessTapTwoAppReadinessResult {
-        stopReasons.append(reason)
         let result = stopResult(for: reason)
-        let snapshot = stoppedSnapshot(from: lastSnapshot)
-        lastSnapshot = snapshot
-        onFinished?(result, snapshot)
+        let (snapshot, finished) = lock.withLock { () -> (ProcessTapTwoAppReadinessSnapshot, (@Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void)?) in
+            stopReasonsStorage.append(reason)
+            let snapshot = stoppedSnapshot(from: lastSnapshot)
+            lastSnapshot = snapshot
+            return (snapshot, onFinished)
+        }
+        finished?(result, snapshot)
         return result
     }
 
     func stopAllNow(reason: ProcessTapLiveStopReason) -> ProcessTapTwoAppReadinessResult? {
-        guard !lastSnapshot.sessions.isEmpty else {
-            return nil
-        }
+        lock.withLock { () -> ProcessTapTwoAppReadinessResult? in
+            guard !lastSnapshot.sessions.isEmpty else {
+                return nil
+            }
 
-        stopReasons.append(reason)
-        return stopResult(for: reason)
+            stopReasonsStorage.append(reason)
+            return stopResult(for: reason)
+        }
     }
 
     func emitFinished(result: ProcessTapTwoAppReadinessResult) {
-        let snapshot = stoppedSnapshot(from: lastSnapshot)
-        lastSnapshot = snapshot
-        onFinished?(result, snapshot)
+        let (snapshot, finished) = lock.withLock { () -> (ProcessTapTwoAppReadinessSnapshot, (@Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void)?) in
+            let snapshot = stoppedSnapshot(from: lastSnapshot)
+            lastSnapshot = snapshot
+            return (snapshot, onFinished)
+        }
+        finished?(result, snapshot)
     }
 
     private func activeSnapshot(
