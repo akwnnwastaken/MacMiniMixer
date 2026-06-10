@@ -312,6 +312,29 @@ proof for all hardware, longer runs, or N > 2.
 
 ---
 
+### Three-app cap (cap=3) enabled — done (real-hardware smoke passed)
+
+**Priority**: High | **Risk**: Low | **Status**: `maxConcurrentLiveSessions = 3`; three-session
+smoke passed on one real Mac
+
+Cap 3 is enabled for Product Real Control — it now supports up to three apps controlled live at
+the same time. A three-session smoke passed on one real Mac (M4 Pro, Release; two direct apps +
+one helper, panel mostly closed):
+
+- Measured CPU was approximately 19% in Release profile — within the expected ~17–25% PASS band
+  for three sessions and a reasonable scale-up from cap=2; memory ≈ 59 MB, ~16 threads, thermal
+  nominal. Main/SwiftUI/AppKit remained the relative cost centre; the audio path measured low
+  (not a red flag).
+- The banner correctly summarised three apps (first two names + "+1 more", "Stop All").
+- Per-app stop left the other two sessions running with no audio disruption; Stop All, repeated
+  start/stop, and an output-device change all torn down cleanly — no drops/failures/cleanup
+  warnings, CPU returning to ~0%. CI is green.
+
+**Caveat**: one real Mac, short smoke runs. Not a proof for all hardware, hours-long runs, or
+N > 3. Raising the cap beyond 3 (`N > 3`) remains deferred (see below and `docs/DECISIONS.md`).
+
+---
+
 ### Release packaging and distribution
 
 **Priority**: Medium | **Risk**: Low-Medium
@@ -339,11 +362,13 @@ is the evidence base and the development instrument for this goal.
 3. Per-row real control state in the main UI (remove the one-active-session limit).
 4. Resource/latency characterization under many simultaneous sessions.
 
-Two-app control (`maxSessions = 2`) is implemented and its Release CPU/resource gate is
-considered passed for current scope (see "Two-app Release CPU/resource profiling" above).
-Raising the cap beyond 2 (`N > 2`) remains **deferred to a dedicated Phase 5 plan** — CPU is no
-longer a hard blocker, but N > 2 is not a config bump (see `PLAN_MULTI_APP.md` Phase 5 and
-`docs/DECISIONS.md`).
+Three-app control (`maxConcurrentLiveSessions = 3`) is implemented and its Release CPU/resource
+gate is considered passed for current scope (see "Three-app cap (cap=3) enabled" above).
+Raising the cap beyond 3 (`N > 3`) remains **deferred to a dedicated plan** — CPU is no longer a
+hard blocker, but N > 3 is not a config bump: it needs resolver serialization / multi-helper UX,
+N-session Core Audio resource-scale evidence, larger-N UI/banner behaviour, sustained long-run
+characterization, the orphan-tap repro, and AudioQueue underrun/jitter measurement (see
+`PLAN_MULTI_APP.md` Phase 5 and `docs/DECISIONS.md`).
 
 The detailed, phased implementation plan lives in [`PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md).
 The first concrete step is **Phase 0: sustained characterization** of two simultaneous

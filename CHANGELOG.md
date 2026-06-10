@@ -25,6 +25,12 @@ active at a time, and production multi-app per-application control is not implem
   selection rows.
 
 ### Changed
+- Product Real App Control now supports up to **three** simultaneous apps (raised from two).
+  A three-session smoke passed on one real Mac (Release; measured CPU ≈ 19%, thermal nominal,
+  clean per-app stop / Stop All / output-change / repeated start-stop). The active banner
+  summarises three or more apps as "first two names +1 more" with "Stop All". Going beyond three
+  (`N > 3`) remains deferred (see `docs/DECISIONS.md`). The Advanced Two-App Readiness diagnostic
+  is unrelated and stays a two-session measurement tool.
 - `SystemOutputCoordinator` now tracks per-device volume writability
   (`isSystemOutputVolumeWritable`), updated from the most recent write attempt and reset
   when the selected output device changes.

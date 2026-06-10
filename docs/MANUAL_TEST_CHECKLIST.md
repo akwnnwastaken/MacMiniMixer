@@ -393,11 +393,11 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
 
 ---
 
-## 16. Release CPU / Resource Profiling (cap=2 baseline)
+## 16. Release CPU / Resource Profiling (cap=3 baseline)
 
-Use this when re-checking two-session resource cost or before considering N > 2. **Always
-profile a Release build** — Debug (`-Onone`) inflates the per-sample audio loops and is not
-representative.
+Use this when re-checking two- or three-session resource cost or before considering N > 3.
+**Always profile a Release build** — Debug (`-Onone`) inflates the per-sample audio loops and is
+not representative.
 
 ### 16.1 Setup
 - Xcode → Product → Scheme → Edit Scheme → **Profile → Build Configuration = Release**.
@@ -421,13 +421,15 @@ Measured values, for comparison — not hard pass thresholds:
 | 1 direct | Closed | ~7.1% | ~53.9 MB | 13 | ~6–7 s |
 | 2 direct | Closed | ~12.2% | ~56.8 MB | 16 | ~returns |
 | 2 / direct+helper | Closed | ~13.6% | ~57.7 MB | 14 | ~returns |
+| 3 / 2 direct+helper | Closed | ~19% | ~59.1 MB | ~16 | ~returns |
 
-- **Expected**: idle ≈ 0%; two-session ≲ 2× single; CPU returns to ~0% within ~10 s of stop;
-  no drops/failures/cleanup warnings; memory/threads stable across runs. The relative cost
-  centre is Main Thread / SwiftUI / AppKit, not the audio callback path.
-- **Red flags**: idle CPU that stays high; two-session > 2× single; near a full core sustained
-  in Release; audio callback threads still alive long after stop; memory/threads growing each
-  run; any drop/failure/cleanup warning.
+- **Expected**: idle ≈ 0%; two-session ≲ 2× single, three-session within ~17–25%; CPU returns
+  to ~0% within ~10 s of stop; no drops/failures/cleanup warnings; memory/threads stable across
+  runs. The relative cost centre is Main Thread / SwiftUI / AppKit, not the audio callback path.
+  The banner should summarise 3 apps as "first two names +1 more" with "Stop All".
+- **Red flags**: idle CPU that stays high; two-session > 2× single or three-session well above
+  ~25%; near a full core sustained in Release; audio callback threads still alive long after
+  stop; memory/threads growing each run; any drop/failure/cleanup warning.
 
 ---
 

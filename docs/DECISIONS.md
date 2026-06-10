@@ -103,14 +103,18 @@ latency across a range of app combinations and macOS versions.
 
 ---
 
-## Why the session cap stays at 2 even though the CPU profiling gate passed
+## Why the session cap is 3 (and N>3 is deferred)
 
-**Decision**: `maxConcurrentLiveSessions` stays at 2. Release CPU profiling cleared CPU as a
-blocker for two simultaneous sessions, but raising the cap beyond 2 (`N > 2`) remains deferred
-to a dedicated Phase 5 plan.
+> **Update (Phase 5a):** the cap was raised from 2 to 3 after a three-session real-hardware
+> smoke passed (see below). The original cap=2 reasoning and measurements are kept for history;
+> the same deferral logic now applies to N>3 rather than N>2.
 
-**What was measured** (Instruments Time Profiler + Activity Monitor, one real Mac, M4 Pro,
-Release build, short 1–3 min runs):
+**Decision**: `maxConcurrentLiveSessions` is 3. Release CPU profiling cleared CPU as a blocker
+for two and then three simultaneous sessions, but raising the cap beyond 3 (`N > 3`) remains
+deferred to a dedicated plan.
+
+**What was measured — cap=2 gate** (Instruments Time Profiler + Activity Monitor, one real Mac,
+M4 Pro, Release, short 1–3 min runs):
 - Idle ≈ 0% CPU; one direct session ≈ 7.1%; two direct ≈ 12.2%; direct + helper ≈ 13.6%.
 - Two-session ≈ 1.7× the single-session cost (below 2× — no scaling red flag).
 - Memory ~54–58 MB and 13–16 threads were stable; CPU returns to ~0% within ~6–7 s after stop;
@@ -120,24 +124,36 @@ Release build, short 1–3 min runs):
   UI), not the audio callback path (per-sample peak/RMS, buffer copy, AudioQueue), which
   measured low. Earlier Debug (`-Onone`) figures (~50–80%) were **not** representative.
 
+**What was measured — cap=3 smoke** (one real Mac, M4 Pro, Release; two direct + one helper,
+panel mostly closed):
+- Measured CPU was approximately 19% in Release profile — within the expected ~17–25% PASS band
+  for three sessions, and a reasonable scale-up from cap=2. Memory ≈ 59 MB, ~16 threads, thermal
+  nominal. Instruments still showed Main/SwiftUI/AppKit as the relative cost centre and the audio
+  path (IOThread/AQConverter) low — not a red flag.
+- The banner correctly summarised three apps (first two names + "+1 more", "Stop All").
+- Per-app stop left the other two sessions running with no audio disruption; Stop All, repeated
+  start/stop, and an output-device change all torn down cleanly with no drops/failures/cleanup
+  warnings and CPU returning to ~0%.
+
 **Reasoning**:
-- The cap=2 *performance* gate is considered passed for the current scope, so the audio path
+- The cap=3 *performance* gate is considered passed for the current scope, so the audio path
   does not need a large refactor (e.g. vDSP) right now.
 - If optimization is ever pursued, Release profiling points at reducing MainActor/SwiftUI
   publication (e.g. throttling the 10 Hz diagnostics update, or gating publication while the
-  panel is closed) **before** any audio-buffer/vDSP work. This is noted as the likely future
-  direction, not a current requirement.
-- N > 2 is **not** a configuration change: each extra session is another tap + private
-  aggregate device + `AudioQueue`, and needs N-row UI, a cap policy, helper/cache behaviour at
-  scale, repeated-teardown safety, the still-open real-hardware orphan-tap repro, AudioQueue
-  underrun/jitter measurement (the `drops==0` counter does not cover starvation/jitter), and
-  resolver serialization / N-session resource provisioning.
+  panel is closed) **before** any audio-buffer/vDSP work. This is the likely future direction,
+  not a current requirement.
+- N > 3 is **not** a configuration change: each extra session is another tap + private
+  aggregate device + `AudioQueue`, and needs the still-single-lane resolver promoted to a real
+  queue (multi-helper UX), N-session Core Audio resource-scale evidence, N-row UI/banner
+  behaviour, repeated-teardown safety at scale, the still-open real-hardware orphan-tap repro,
+  AudioQueue underrun/jitter measurement (the `drops==0` counter does not cover
+  starvation/jitter), and sustained long-run characterization.
 
-**Caveat**: this is one machine, short runs. It is not a proof for all hardware, hours-long
-runs, or N > 2.
+**Caveat**: measured on one machine, short smoke runs. It is not a proof for all hardware,
+hours-long runs, or N > 3.
 
-**Would revisit if**: a dedicated Phase 5 plan establishes the resource/UI/cleanup story above
-and repeated long-run characterization stays clean — then the cap can rise past 2 incrementally.
+**Would revisit if**: a dedicated plan establishes the resource/UI/cleanup story above and
+repeated long-run characterization stays clean — then the cap can rise past 3 incrementally.
 
 ---
 
