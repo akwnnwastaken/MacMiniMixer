@@ -103,6 +103,44 @@ latency across a range of app combinations and macOS versions.
 
 ---
 
+## Why the session cap stays at 2 even though the CPU profiling gate passed
+
+**Decision**: `maxConcurrentLiveSessions` stays at 2. Release CPU profiling cleared CPU as a
+blocker for two simultaneous sessions, but raising the cap beyond 2 (`N > 2`) remains deferred
+to a dedicated Phase 5 plan.
+
+**What was measured** (Instruments Time Profiler + Activity Monitor, one real Mac, M4 Pro,
+Release build, short 1–3 min runs):
+- Idle ≈ 0% CPU; one direct session ≈ 7.1%; two direct ≈ 12.2%; direct + helper ≈ 13.6%.
+- Two-session ≈ 1.7× the single-session cost (below 2× — no scaling red flag).
+- Memory ~54–58 MB and 13–16 threads were stable; CPU returns to ~0% within ~6–7 s after stop;
+  no drops/failures/cleanup warnings; thermal nominal. `%100` ≈ one full core, so ~12–14% is a
+  small fraction of one core.
+- The **relative** cost centre is the Main Thread / SwiftUI / AppKit (diagnostics publication +
+  UI), not the audio callback path (per-sample peak/RMS, buffer copy, AudioQueue), which
+  measured low. Earlier Debug (`-Onone`) figures (~50–80%) were **not** representative.
+
+**Reasoning**:
+- The cap=2 *performance* gate is considered passed for the current scope, so the audio path
+  does not need a large refactor (e.g. vDSP) right now.
+- If optimization is ever pursued, Release profiling points at reducing MainActor/SwiftUI
+  publication (e.g. throttling the 10 Hz diagnostics update, or gating publication while the
+  panel is closed) **before** any audio-buffer/vDSP work. This is noted as the likely future
+  direction, not a current requirement.
+- N > 2 is **not** a configuration change: each extra session is another tap + private
+  aggregate device + `AudioQueue`, and needs N-row UI, a cap policy, helper/cache behaviour at
+  scale, repeated-teardown safety, the still-open real-hardware orphan-tap repro, AudioQueue
+  underrun/jitter measurement (the `drops==0` counter does not cover starvation/jitter), and
+  resolver serialization / N-session resource provisioning.
+
+**Caveat**: this is one machine, short runs. It is not a proof for all hardware, hours-long
+runs, or N > 2.
+
+**Would revisit if**: a dedicated Phase 5 plan establishes the resource/UI/cleanup story above
+and repeated long-run characterization stays clean — then the cap can rise past 2 incrementally.
+
+---
+
 ## Why system wake is refresh-only (no automatic session restart)
 
 **Decision**: On `NSWorkspace.willSleepNotification` the app synchronously tears down every

@@ -393,6 +393,44 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
 
 ---
 
+## 16. Release CPU / Resource Profiling (cap=2 baseline)
+
+Use this when re-checking two-session resource cost or before considering N > 2. **Always
+profile a Release build** — Debug (`-Onone`) inflates the per-sample audio loops and is not
+representative.
+
+### 16.1 Setup
+- Xcode → Product → Scheme → Edit Scheme → **Profile → Build Configuration = Release**.
+- Quit any running MacMiniMixer; confirm in Activity Monitor that **no** MacMiniMixer process
+  remains (Force Quit leftovers) so only one Release process is measured.
+- Xcode → Product → Profile (⌘I) → **Time Profiler** → Choose.
+
+### 16.2 Procedure (per scenario)
+- Record 60 s idle (no session, panel closed), then ~2–3 min each for: one direct session,
+  two direct sessions, two direct with panel open, and direct + helper.
+- Call Tree: Separate by Thread, Invert Call Tree, Hide System Libraries.
+- Record per scenario: Activity Monitor CPU avg/peak, memory, thread count, time for CPU to
+  return to ~0% after stop, drops/failures, and the top symbols (self/total weight, thread).
+
+### 16.3 Reference baseline (one real Mac, M4 Pro, Release)
+Measured values, for comparison — not hard pass thresholds:
+
+| Scenario | Panel | CPU avg | Memory | Threads | Stop→~0 |
+|---|---|---:|---:|---:|---:|
+| Idle | Closed | ~0% | ~21 MB | ~7 | — |
+| 1 direct | Closed | ~7.1% | ~53.9 MB | 13 | ~6–7 s |
+| 2 direct | Closed | ~12.2% | ~56.8 MB | 16 | ~returns |
+| 2 / direct+helper | Closed | ~13.6% | ~57.7 MB | 14 | ~returns |
+
+- **Expected**: idle ≈ 0%; two-session ≲ 2× single; CPU returns to ~0% within ~10 s of stop;
+  no drops/failures/cleanup warnings; memory/threads stable across runs. The relative cost
+  centre is Main Thread / SwiftUI / AppKit, not the audio callback path.
+- **Red flags**: idle CPU that stays high; two-session > 2× single; near a full core sustained
+  in Release; audio callback threads still alive long after stop; memory/threads growing each
+  run; any drop/failure/cleanup warning.
+
+---
+
 ## Notes
 
 - All Process Tap tests require macOS 14.2 or later. On older macOS, all Process Tap

@@ -278,9 +278,37 @@ behavior.
 **Still open**: automatic post-wake restart/recovery research (deferred — see DECISIONS);
 longer-duration and repeated sleep/wake characterization; varied output-device and
 helper-PID-replacement combinations; behavior under N > 2 sessions; and the broader long-idle
-/ app-exit / helper-exit / Core Audio failure resource characterization. Product sessions
-persist while healthy, but sustained (hours-long) CPU/latency/resource behavior is still
-unmeasured.
+/ app-exit / helper-exit / Core Audio failure resource characterization. Short-run Release CPU
+for one and two sessions has now been profiled (see below), but sustained (hours-long)
+CPU/latency/resource behavior is still unmeasured.
+
+---
+
+### Two-app Release CPU/resource profiling — done (cap=2 gate passed)
+
+**Priority**: High | **Risk**: Low | **Status**: Measured on one real Mac; cap=2 performance
+gate considered passed for current scope
+
+Release profiling (Instruments Time Profiler + Activity Monitor, one real Mac, M4 Pro)
+indicates the two-session Product Real Control path is healthy for the current `maxSessions = 2`
+scope:
+
+- Idle ≈ 0% CPU (no idle leak; audio/diagnostics do not run with no active session).
+- One direct session ≈ 7.1% CPU; two direct sessions ≈ 12.2%; direct + helper ≈ 13.6%.
+- Two-session scales roughly 1.7× the single-session cost — below 2×, no scaling red flag.
+- Memory ~54–58 MB and thread counts (13–16) were stable across these runs; CPU returns to
+  ~0% within ~6–7 s after stop; no drops/failures/cleanup warnings; thermal nominal.
+- `%100` Activity Monitor CPU ≈ one full core, so ~12–14% is a small fraction of one core on
+  this machine — not 12–14% of the whole computer.
+
+Release profiling also indicates the **relative** cost centre is the Main Thread /
+SwiftUI / AppKit (diagnostics publication + UI) rather than the audio callback path
+(`ProcessTapDiagnosticsAccumulator.observe`, `ProcessTapOutputBufferCopier`, AudioQueue),
+which measured low. Earlier Debug (`-Onone`) CPU figures (~50–80%) were **not**
+representative; performance decisions must use Release measurements.
+
+**Caveat**: measured on a single Mac, short runs (1–3 min). This is the cap=2 gate, not a
+proof for all hardware, longer runs, or N > 2.
 
 ---
 
@@ -310,6 +338,12 @@ is the evidence base and the development instrument for this goal.
 2. N-app session management in `ProcessTapLiveSessionManager` (raise `maxSessions`).
 3. Per-row real control state in the main UI (remove the one-active-session limit).
 4. Resource/latency characterization under many simultaneous sessions.
+
+Two-app control (`maxSessions = 2`) is implemented and its Release CPU/resource gate is
+considered passed for current scope (see "Two-app Release CPU/resource profiling" above).
+Raising the cap beyond 2 (`N > 2`) remains **deferred to a dedicated Phase 5 plan** — CPU is no
+longer a hard blocker, but N > 2 is not a config bump (see `PLAN_MULTI_APP.md` Phase 5 and
+`docs/DECISIONS.md`).
 
 The detailed, phased implementation plan lives in [`PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md).
 The first concrete step is **Phase 0: sustained characterization** of two simultaneous

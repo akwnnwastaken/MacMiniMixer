@@ -33,7 +33,7 @@ assumption to multi-session, and proving stability under sustained (not 10-secon
 | D | Diagnostics-display coupling — product drives the single `advancedProcessTapDiagnostics` result/progress surface | Give product its own per-row state instead of the shared Advanced surface | Medium (the coupling flagged in the coordinator reassessment) |
 | E | Lifecycle is not per-session — output change / app exit / termination tear down *the* session | Map an exited app id to its session; selective stop (the manager has `stopAll`, needs selective product use) | Medium |
 | F | App wiring uses `init(controller:)` (maxSessions=1) | Switch to `init(maxSessions: 2, controllerFactory:)` | Low (one line, but triggers A–E) |
-| G | Resource reality — 2× independent `AudioQueue` + aggregate device; sustained (hours), sleep/wake, and N>2 CPU/latency are unmeasured | Characterization evidence | **Gating** |
+| G | Resource reality — 2× independent `AudioQueue` + aggregate device; **short-run** two-session Release CPU is now measured (~12–14%, ~1.7× single; see Phase 5 note), but sustained (hours), and N>2 CPU/latency remain unmeasured | Characterization evidence | **Partly met for cap=2; still gating for N>2** |
 
 ## Phased plan (each phase gated by evidence)
 
@@ -63,7 +63,14 @@ reason, wake is refresh-only (device/volume/app state) with no auto-restart (see
 `DECISIONS.md`). Auto-restart/recovery and longer-duration sleep/wake characterization remain
 open.*
 
-**Phase 5 — N > 2.** Raise the cap as evidence allows, toward the full mixer.
+**Phase 5 — N > 2.** Raise the cap as evidence allows, toward the full mixer. *Status:
+deferred, not started. Release profiling on one real Mac indicates two-session CPU is healthy
+(~12–14%, ~1.7× single; cap=2 gate passed — see `ROADMAP.md` and `DECISIONS.md`), so CPU is no
+longer a hard blocker. But N > 2 is **not** a config bump: it needs its own plan covering N-row
+UI, session-cap policy, helper/cache behaviour, repeated-teardown safety at scale, the
+real-hardware orphan-tap repro, AudioQueue underrun/jitter measurement (drops==0 does not cover
+it), resolver serialization / N-session resource provisioning, and repeated direct+helper /
+long-run characterization. Go/no-go is a Phase 5 decision; do not raise the cap before it.*
 
 ## Recommended order
 
