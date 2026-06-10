@@ -112,6 +112,7 @@ enum ProcessTapTwoAppReadinessDurationOption: String, CaseIterable, Identifiable
     case short
     case oneMinute
     case fiveMinutes
+    case thirtyMinutes
 
     var id: String { rawValue }
 
@@ -123,6 +124,8 @@ enum ProcessTapTwoAppReadinessDurationOption: String, CaseIterable, Identifiable
             return 60
         case .fiveMinutes:
             return 300
+        case .thirtyMinutes:
+            return 1_800
         }
     }
 
@@ -134,6 +137,8 @@ enum ProcessTapTwoAppReadinessDurationOption: String, CaseIterable, Identifiable
             return "1 min"
         case .fiveMinutes:
             return "5 min"
+        case .thirtyMinutes:
+            return "30 min"
         }
     }
 

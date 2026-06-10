@@ -73,6 +73,57 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.result?.outcome, .running)
     }
 
+    func testThirtyMinuteDurationOptionHasExpectedValueAndLabel() {
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.thirtyMinutes.duration, 1_800)
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.thirtyMinutes.label, "30 min")
+    }
+
+    func testThirtyMinuteOptionAppearsExactlyOnceInAllCases() {
+        let matches = ProcessTapTwoAppReadinessDurationOption.allCases.filter { $0 == .thirtyMinutes }
+        XCTAssertEqual(matches.count, 1)
+    }
+
+    func testExistingDurationOptionValuesAreUnchanged() {
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.short.duration, 10)
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.oneMinute.duration, 60)
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.fiveMinutes.duration, 300)
+    }
+
+    func testExistingDurationOptionLabelsAndIDsAreUnchanged() {
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.short.label, "10s")
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.oneMinute.label, "1 min")
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.fiveMinutes.label, "5 min")
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.short.id, "short")
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.oneMinute.id, "oneMinute")
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.fiveMinutes.id, "fiveMinutes")
+    }
+
+    func testDefaultDurationOptionIsUnchanged() {
+        XCTAssertEqual(ProcessTapTwoAppReadinessDurationOption.defaultOption, .short)
+        let coordinator = makeCoordinator()
+        XCTAssertEqual(coordinator.selectedDuration, .short)
+    }
+
+    func testSelectedThirtyMinuteDurationForwardsAsExactly1800Seconds() async {
+        let tester = FakeCoordinatorReadinessTester()
+        let coordinator = makeCoordinator(tester: tester)
+
+        coordinator.selectDuration(.thirtyMinutes)
+        XCTAssertEqual(coordinator.selectedDuration, .thirtyMinutes)
+
+        coordinator.startTest(
+            apps: makeCoordinatorApps(),
+            advancedTarget: nil,
+            isProcessTapTesting: false,
+            isLiveControlActive: false,
+            isAppAudioTargetResolving: false,
+            onWarning: { _ in }
+        )
+        await waitFor { coordinator.result?.outcome == .running }
+
+        XCTAssertEqual(tester.startRequests.first?.duration, 1_800)
+    }
+
     func testSelectedDurationForwardsToTester() async {
         let tester = FakeCoordinatorReadinessTester()
         let coordinator = makeCoordinator(tester: tester)
