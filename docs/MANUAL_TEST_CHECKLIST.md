@@ -373,6 +373,32 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
 - **Expected**: Same as 14.1 — the session was torn down at sleep even though the panel was
   closed. The reopened panel shows no active banner.
 
+### 14.6 Three-session sleep/wake smoke (cap=3 evidence gate)
+The sleep/wake teardown is collection-based and expected to be N-safe; this confirms it on real
+hardware with three concurrent sessions (v0.14 stability evidence). It does **not** enable N > 3.
+
+Procedure:
+1. Launch the app from a **Release** build.
+2. Play audio in **2 direct + 1 helper** app (e.g. Music + Spotify + a YouTube/browser helper).
+3. Make all three Real.
+4. Confirm the banner reads "first two names +1 more" with **Stop All**.
+5. Close the panel.
+6. Put the Mac to sleep briefly (Apple menu → Sleep, or close the lid).
+7. Wake, then reopen the panel.
+
+- **Expected**: no Real session remains active; the banner is gone; the "Real app control"
+  toggle may stay ON; **all three apps' audio returns to normal without quitting/relaunching the
+  app**; no cleanup warning / drop / failure; CPU returns to ~0%.
+- **Red flags**: after wake an app stays silent/muted; audio only recovers when MacMiniMixer is
+  quit (orphan tap); a session still shows active (resurrection); any cleanup warning / drop /
+  failure; CPU does not drop after stop; crash.
+
+Notes:
+- This test is for the Product cap=3 path.
+- The Advanced Two-App Readiness diagnostic is a separate two-session measurement tool and must
+  not be conflated with this.
+- N > 3 requires its own gate; passing this only strengthens cap=3 stability evidence.
+
 ---
 
 ## 15. CI Build and Test

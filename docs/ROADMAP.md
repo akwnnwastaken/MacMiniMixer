@@ -282,6 +282,13 @@ helper-PID-replacement combinations; behavior under N > 2 sessions; and the broa
 for one and two sessions has now been profiled (see below), but sustained (hours-long)
 CPU/latency/resource behavior is still unmeasured.
 
+**v0.14 stability evidence (next gate)**: a three-session sleep/wake smoke is the next evidence
+gate (procedure in `docs/MANUAL_TEST_CHECKLIST.md` §14.6). The existing sleep/wake code is
+collection-based and is expected to be N-safe, but cap=3 needs one real-hardware confirmation.
+Passing it does **not** enable N > 3 — it only strengthens cap=3 stability evidence; alongside a
+30–60 min three-session long-run and callback-jitter/output-starvation measurement, these form
+the v0.14 "stability polish" track.
+
 ---
 
 ### Two-app Release CPU/resource profiling — done (cap=2 gate passed)
