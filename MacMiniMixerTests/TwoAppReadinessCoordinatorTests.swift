@@ -241,9 +241,9 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
     func testSnapshotUpdatesNotifyAndAreStored() async {
         let tester = FakeCoordinatorReadinessTester()
         let coordinator = makeCoordinator(tester: tester)
-        var changeCount = 0
+        let changeSpy = CallbackSpy<Void>()
         coordinator.setOnWillChange {
-            changeCount += 1
+            changeSpy.record(())
         }
 
         coordinator.startTest(
@@ -256,14 +256,14 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         )
         await waitFor { coordinator.snapshot.sessions.map(\.phase) == [.active, .active] }
 
-        XCTAssertGreaterThan(changeCount, 0)
+        XCTAssertGreaterThan(changeSpy.count, 0)
         XCTAssertEqual(coordinator.snapshot.sessions.map(\.appName), ["Spotify", "Music"])
     }
 
     func testFinishClearsRunningStateAndWarningCallbackFiresOnce() async {
         let tester = FakeCoordinatorReadinessTester()
         let coordinator = makeCoordinator(tester: tester)
-        var warnings: [String] = []
+        let warningSpy = CallbackSpy<String>()
 
         coordinator.startTest(
             apps: makeCoordinatorApps(),
@@ -271,7 +271,7 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isProcessTapTesting: false,
             isLiveControlActive: false,
             isAppAudioTargetResolving: false,
-            onWarning: { warnings.append($0) }
+            onWarning: { warningSpy.record($0) }
         )
         await waitFor { coordinator.result?.outcome == .running }
 
@@ -282,10 +282,19 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
                 severity: .warning
             )
         )
-        await waitFor { !coordinator.isRunning }
+        // Wait on the full final state the test asserts (running cleared, result settled, warning
+        // delivered exactly once) instead of the `!isRunning` proxy alone. The finish callback
+        // hops through `Task { @MainActor }`, so observing only `!isRunning` could race ahead of
+        // the warning record under load; this single combined condition removes that window.
+        await waitFor {
+            !coordinator.isRunning
+                && coordinator.result?.outcome == .timedOut
+                && warningSpy.values == ["Two-app test timed out"]
+        }
 
+        XCTAssertFalse(coordinator.isRunning)
         XCTAssertEqual(coordinator.result?.outcome, .timedOut)
-        XCTAssertEqual(warnings, ["Two-app test timed out"])
+        XCTAssertEqual(warningSpy.values, ["Two-app test timed out"])
     }
 
     func testExplicitStopAllForwardsUserStopped() async {
@@ -641,6 +650,27 @@ private func makeAdvancedTarget(pid: Int32) -> AdvancedProcessTapTarget {
         eligibility: .eligible,
         probeResult: ProcessTapTestResult(outcome: .streamDiagnosticsDetectedAudio, message: "Audio detected", severity: .info)
     )
+}
+
+/// Thread-safe sink for callbacks (onWarning / onWillChange). The coordinator invokes these
+/// from `Task { @MainActor }` continuations while the test asserts on the MainActor; recording
+/// through a lock removes the raw captured-`var` data race that made finish-callback tests flake
+/// under full-suite load.
+private final class CallbackSpy<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Value] = []
+
+    func record(_ value: Value) {
+        lock.withLock { storage.append(value) }
+    }
+
+    var values: [Value] {
+        lock.withLock { storage }
+    }
+
+    var count: Int {
+        lock.withLock { storage.count }
+    }
 }
 
 private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
