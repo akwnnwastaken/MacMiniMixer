@@ -309,10 +309,14 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isAppAudioTargetResolving: false,
             onWarning: { _ in }
         )
-        await waitFor { coordinator.isRunning }
+        // Wait for the start to fully settle (the start task has run `tester.startTest`, so the
+        // fake's `onFinished` is wired) before stopping. `isRunning` alone is set synchronously
+        // and would let the stop race ahead of the start under load, leaving the stop's completion
+        // (which clears `isRunning`) unfired.
+        await waitForStartConfirmed(coordinator)
 
         coordinator.stop(reason: .userStopped)
-        await waitFor { !tester.stopReasons.isEmpty }
+        await waitForStopReasons([.userStopped], on: tester)
 
         XCTAssertEqual(tester.stopReasons, [.userStopped])
         await waitFor { !coordinator.isRunning }
@@ -330,10 +334,10 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isAppAudioTargetResolving: false,
             onWarning: { _ in }
         )
-        await waitFor { coordinator.isRunning }
+        await waitForStartConfirmed(coordinator)
 
         coordinator.stop(reason: .outputDeviceChanged)
-        await waitFor { !tester.stopReasons.isEmpty }
+        await waitForStopReasons([.outputDeviceChanged], on: tester)
 
         XCTAssertEqual(tester.stopReasons, [.outputDeviceChanged])
     }
@@ -386,13 +390,13 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isAppAudioTargetResolving: false,
             onWarning: { _ in }
         )
-        await waitFor { coordinator.isRunning }
+        await waitForStartConfirmed(coordinator)
 
         coordinator.handleRemovedTarget(
             id: helperID,
             targets: coordinator.targetOptions(apps: makeCoordinatorApps(), advancedTarget: nil)
         )
-        await waitFor { !tester.stopReasons.isEmpty }
+        await waitForStopReasons([.userStopped], on: tester)
 
         XCTAssertEqual(tester.stopReasons, [.userStopped])
     }
@@ -617,6 +621,30 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         }
 
         XCTFail("Timed out waiting for condition", file: file, line: line)
+    }
+
+    /// Waits until the start has fully settled — `result.outcome == .running`, which the
+    /// coordinator sets only after `await tester.startTest(...)` returns and the fake's
+    /// `onFinished` has been wired. Stop/forwarding tests must wait on this (not the
+    /// synchronously-set `isRunning`) before issuing a stop, or the stop can race ahead of the
+    /// start under load and its completion never fires.
+    private func waitForStartConfirmed(
+        _ coordinator: TwoAppReadinessCoordinator,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        await waitFor({ coordinator.result?.outcome == .running }, file: file, line: line)
+    }
+
+    /// Waits until the fake tester has recorded exactly `expected` — the precise observable a
+    /// stop-forwarding test asserts — instead of an earlier proxy like `!stopReasons.isEmpty`.
+    private func waitForStopReasons(
+        _ expected: [ProcessTapLiveStopReason],
+        on tester: FakeCoordinatorReadinessTester,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        await waitFor({ tester.stopReasons == expected }, file: file, line: line)
     }
 }
 
