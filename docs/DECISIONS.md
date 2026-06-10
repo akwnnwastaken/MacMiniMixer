@@ -103,6 +103,46 @@ latency across a range of app combinations and macOS versions.
 
 ---
 
+## Why system wake is refresh-only (no automatic session restart)
+
+**Decision**: On `NSWorkspace.willSleepNotification` the app synchronously tears down every
+active and pending Process Tap audio work item — Product Real Control sessions, Advanced
+manual live control, Two-App Readiness, and the related diagnostic/probe/resolver work —
+invalidating pending Product start-request tokens and the in-memory helper cache. On
+`NSWorkspace.didWakeNotification` it does **refresh-only** reconciliation — re-reads output
+devices, the default-device selection, system volume/mute, and the visible app list — and
+deliberately does **not** restart any session or re-resolve any helper.
+
+**Reasoning**:
+- After sleep, the state the sessions were built on may have moved: the tap can be stale, a
+  resolved helper PID may now belong to a different (or dead) process, and the default output
+  device may have changed. Restarting blindly would tap the wrong process or fight a
+  device-change teardown.
+- Tearing everything down at sleep, then only refreshing at wake, keeps a clean invariant:
+  after wake nothing is running, so the existing output-device-change and app-refresh paths
+  reconcile state without spurious "output changed" warnings or restart loops.
+- The pending-start guards already in place (request-token invalidation + session-ID-keyed
+  teardown) mean any start that lands mid-sleep is rejected as stale and its orphan engine
+  session is torn down by id — no resurrection.
+- The global Real App Control opt-in is a user *preference*, not session state, so it is left
+  ON across sleep/wake; the sessions are simply not restored. The user re-engages by touching
+  a row slider again, which starts a fresh, freshly-resolved session.
+- The sleep/wake observers are owned by the app-lifetime `MixerViewModel` (alongside the
+  existing termination observer), not the menu-bar panel, so the teardown happens whether or
+  not the panel is open during sleep/wake.
+
+**Validated**: a basic real-hardware sleep/wake smoke test passed, and the fake-backed suite
+covers both the sleep teardown and the wake refresh-only behavior. Longer-duration, repeated,
+and varied output-device / helper-PID-replacement sleep/wake characterization is still open
+(see ROADMAP "Sleep/wake and long-running resource characterization").
+
+**Would revisit if**: automatic post-wake restart/recovery is investigated and shown safe —
+i.e. a session can be re-validated (tap still eligible, helper PID still the right process,
+output device unchanged or re-resolved) before any audio is re-engaged, without restart-loop
+risk. That research is deferred; refresh-only is the conservative default until then.
+
+---
+
 ## Why Advanced diagnostics are separated from the main UI
 
 **Decision**: Process Tap Test, Replay Probe, Two-App Readiness, and Helper Process

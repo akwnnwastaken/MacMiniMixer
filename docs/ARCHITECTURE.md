@@ -554,8 +554,21 @@ holder. Its `cleanup()` method:
 `beginStopping()` is also idempotent.
 
 On app termination (`NSApplication.willTerminateNotification` + `deinit`),
-`stopProcessTapLiveControlForTermination()` calls `stopLiveControlNow` (synchronous, no
-async) and cancels all tasks and probes.
+`stopProcessTapLiveControlForTermination()` runs a synchronous (no async) teardown of every
+active/pending Process Tap work item via the shared `tearDownAllProcessTapWork(liveStopReason:)`
+helper — `stopLiveControlNow`, Two-App Readiness stop, and cancellation of all tasks, probes,
+and helper resolution.
+
+`MixerViewModel` also owns two app-lifetime `NSWorkspace` observers for system sleep/wake
+(registered in `init`, removed in `deinit`), independent of the menu-bar panel lifecycle:
+- **`willSleepNotification` → `handleSystemWillSleep()`** reuses the same
+  `tearDownAllProcessTapWork(liveStopReason:)` path with a typed `.systemSleep` reason, so a
+  sleep tears down all active/pending work exactly like termination but with accurate
+  logs/diagnostics. Pending Product start tokens are invalidated and any late start is rejected
+  as stale (session-ID-keyed teardown), preventing resurrection across sleep.
+- **`didWakeNotification` → `handleSystemDidWake()`** is refresh-only: it re-reads output
+  devices, system volume/mute, and the visible app list, and deliberately does not restart any
+  session. See `docs/DECISIONS.md` ("Why system wake is refresh-only").
 
 ---
 

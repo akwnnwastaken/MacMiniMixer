@@ -57,7 +57,11 @@ relax the mutual-exclusion guard to allow a second product session, route per-ap
 session ids. **Two only, first.**
 
 **Phase 4 — Per-session lifecycle.** Tear down app-exit / output-change / termination per
-session rather than globally.
+session rather than globally. *Status: per-session teardown done; system sleep/wake lifecycle
+added — sleep synchronously tears down all active/pending work with a typed `.systemSleep`
+reason, wake is refresh-only (device/volume/app state) with no auto-restart (see
+`DECISIONS.md`). Auto-restart/recovery and longer-duration sleep/wake characterization remain
+open.*
 
 **Phase 5 — N > 2.** Raise the cap as evidence allows, toward the full mixer.
 

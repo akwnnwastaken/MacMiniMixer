@@ -11,6 +11,13 @@ active at a time, and production multi-app per-application control is not implem
 ## [Unreleased]
 
 ### Added
+- System sleep/wake lifecycle handling: a typed `.systemSleep` live-stop reason; on system
+  sleep all active and pending Process Tap work (Product Real Control, Advanced manual live
+  control, Two-App Readiness, and the related diagnostic/probe/resolver work) is torn down
+  synchronously; on system wake the app performs refresh-only reconciliation (output devices,
+  system volume/mute, visible app list) and does not automatically restart any session. The
+  global Real App Control preference is preserved across sleep/wake; the user re-engages by
+  interacting with a row again.
 - Persistent read-only indicator for output devices that do not expose a writable volume
   API, replacing the previous transient-only warning.
 - Accessibility labels, values, and hints for app rows (volume slider, mute button,

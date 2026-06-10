@@ -338,19 +338,56 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 
 ---
 
-## 14. CI Build and Test
+## 14. System Sleep / Wake
 
-### 14.1 Clean build succeeds
+These verify the deliberate sleep-teardown / wake-refresh-only behavior. No automatic
+session restart is expected after wake — the user re-engages manually. The sleep/wake
+observers are app-lifetime (in `MixerViewModel`), so they fire whether or not the panel is open.
+
+### 14.1 Sleep tears down active Product live control
+- Start Product Real Control for an app (section 4). Confirm the banner and menu bar waveform.
+- Put the Mac to sleep (Apple menu → Sleep, or close the lid), wait a few seconds, then wake.
+- **Expected**: After wake, live control is no longer active (no banner, menu bar icon
+  reverted). The app's audio plays at its normal volume. No crash, no hung Core Audio
+  resources (check Console for cleanup logs). The "Real app control" global toggle is still ON.
+
+### 14.2 Sleep stops Two-App Readiness and Advanced work
+- Start a Two-App Readiness test (section 10) or Advanced manual live control. Sleep, wake.
+- **Expected**: The test / live control is stopped after wake; nothing resumes on its own.
+
+### 14.3 Wake refreshes device, volume, and app state
+- Before sleep, note the current output device and system volume. Optionally change the
+  default output device or quit an app during sleep.
+- Sleep, then wake and open the panel.
+- **Expected**: Output device list, the selected default device, system volume/mute, and the
+  visible app list reflect post-wake reality. No spurious "output device changed" warning
+  appears merely from waking (nothing was active to stop).
+
+### 14.4 User re-engages after wake
+- After a wake that tore down a session (14.1), move the app's slider again.
+- **Expected**: A fresh live-control session starts normally (fresh helper resolution for
+  browser rows). Behavior is identical to a first-time start.
+
+### 14.5 Sleep/wake with the panel closed
+- Start live control, close the panel, sleep, wake, reopen the panel.
+- **Expected**: Same as 14.1 — the session was torn down at sleep even though the panel was
+  closed. The reopened panel shows no active banner.
+
+---
+
+## 15. CI Build and Test
+
+### 15.1 Clean build succeeds
 - `xcodebuild build -scheme MacMiniMixer`
 - **Expected**: Build succeeds, zero warnings that are errors.
 
-### 14.2 Tests pass
+### 15.2 Tests pass
 - `xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS'`
 - **Expected**: The full XCTest suite passes, including fake-backed coordinator,
   helper discovery/resolver, live-control, Two-App Readiness, diagnostics accumulator,
   and output buffer copier tests.
 
-### 14.3 GitHub Actions build passes
+### 15.3 GitHub Actions build passes
 - Push to main or open a PR.
 - **Expected**: CI build/test workflow passes. Check Actions tab.
 

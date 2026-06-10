@@ -47,6 +47,9 @@ not yet a finished Windows Volume Mixer replacement.
   selection.
 - Consolidated output-device-change teardown in `MixerViewModel`
   (`stopActiveAudioWorkForOutputDeviceChange`).
+- System sleep/wake lifecycle handling: app-lifetime observers in `MixerViewModel`
+  synchronously tear down all active/pending Process Tap work on sleep (typed `.systemSleep`
+  stop reason) and do refresh-only reconciliation on wake, with no automatic session restart.
 
 ---
 
@@ -66,6 +69,9 @@ not yet a finished Windows Volume Mixer replacement.
 - Helper PID/process names stay hidden from the main mixer UI.
 - Process Tap features are guarded for macOS 14.2+ while deployment target remains
   macOS 13.0.
+- System sleep tears down all active/pending Product, Advanced manual, Two-App Readiness, and
+  diagnostic work (no resurrection of stale starts); system wake only refreshes
+  device/volume/app state and never auto-restarts sessions. Rationale in `docs/DECISIONS.md`.
 - Safety constraints remain:
   - Public APIs only.
   - No HAL driver.
@@ -258,10 +264,23 @@ characterization tests and a narrowly scoped experimental mode.
 
 ### Sleep/wake and long-running resource characterization
 
-**Priority**: Medium | **Risk**: Medium
+**Priority**: Medium | **Risk**: Medium | **Status**: Explicit lifecycle handling done;
+deeper characterization still open
 
-Product sessions can now persist while healthy. Characterize behavior across sleep/wake,
-long idle periods, output-device changes, app exit, helper exit, and Core Audio failure.
+**Done**: System sleep/wake now has explicit, deliberate lifecycle handling — sleep tears
+down all active/pending Process Tap work (typed `.systemSleep` reason); wake is refresh-only
+(output devices, system volume/mute, visible app list) with **no** automatic session restart.
+The rationale (conservative; avoids stale tap, stale helper PID, output-device-change, and
+restart-loop risks) is recorded in `docs/DECISIONS.md`. A basic real-hardware sleep/wake
+smoke test passed, and the fake-backed suite covers the sleep teardown and wake refresh-only
+behavior.
+
+**Still open**: automatic post-wake restart/recovery research (deferred — see DECISIONS);
+longer-duration and repeated sleep/wake characterization; varied output-device and
+helper-PID-replacement combinations; behavior under N > 2 sessions; and the broader long-idle
+/ app-exit / helper-exit / Core Audio failure resource characterization. Product sessions
+persist while healthy, but sustained (hours-long) CPU/latency/resource behavior is still
+unmeasured.
 
 ---
 
