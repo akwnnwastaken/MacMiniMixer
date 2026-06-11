@@ -289,6 +289,19 @@ Passing it does **not** enable N > 3 — it only strengthens cap=3 stability evi
 30–60 min three-session long-run and callback-jitter/output-starvation measurement, these form
 the v0.14 "stability polish" track.
 
+**Three-session jitter/starvation short smoke — passed (one real Mac).** The Phase 6c
+diagnostic-only counters (callback jitter / output starvation) are now visible in the live
+Advanced diagnostics card ("Gap … · Late … · Starv …") and at the start of the stop-result
+detail. A ~6–7 min three-session smoke (Music + Spotify + a helper) observed `Starv 0`,
+`Drops 0`, `Fail 0`, `Late 1`, `maxGap` ~70–133 ms, with **no audible glitch or audio loss** —
+treated as PASS. A single late callback / a 70–133 ms max gap is not on its own a failure (a
+brief spike, panel open, around stop, or a helper input pause can produce it); the gate is "no
+audible glitch and clean stop". Panel-open Advanced diagnostics is a known CPU-heavy view
+(panel closed ≈ 25%, panel open / Advanced closed ≈ 39%, panel open / Advanced open ≈ 55% in
+Release) — a future diagnostics/UI publication-throttle candidate, **not** a release blocker and
+not an audio-path red flag. A 30–60 min three-session long-run remains a future gate; N > 3
+stays deferred.
+
 ---
 
 ### Two-app Release CPU/resource profiling — done (cap=2 gate passed)

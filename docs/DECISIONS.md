@@ -157,6 +157,45 @@ repeated long-run characterization stays clean — then the cap can rise past 3 
 
 ---
 
+## Why callback jitter / output starvation are diagnostic-only and Late > 0 is not a failure
+
+**Decision**: The Phase 6c callback-jitter (`maxCallbackGapMilliseconds`, `lateCallbackCount`)
+and output-starvation (`outputStarvationCount`) signals are **diagnostic-only**: they appear in
+the Advanced live diagnostics card and the stop-result detail, never on the normal user banner,
+and they do **not** change cap, session, stop, or cleanup behaviour. A non-zero `Late` or a
+70–133 ms `maxGap` is **not** automatically a failure.
+
+**Reasoning**:
+- These counters exist to close a measurement gap: `drops == 0` only means the output buffer
+  pool was never empty; it does not see callback scheduling jitter or the AudioQueue draining.
+  They are a *signal to investigate*, not a verdict.
+- The "late" threshold (50 ms) is a deliberately coarse absolute bound, not derived from the
+  exact per-callback frame interval, so a single late callback or a short gap spike is expected
+  noise — it can come from a brief scheduling stall, the panel being open, the moment around
+  stop, or a helper input pause (which also drains the queue). The pass/fail gate is **audible
+  glitch and clean stop**, not the raw counter values. A three-session smoke with `Starv 0`,
+  `Drops 0`, `Fail 0`, `Late 1`, `maxGap` ~70–133 ms and no audible glitch is a PASS.
+- Output starvation has a known false-positive: a genuine input pause drains the queue too, so
+  `Starv > 0` means "the queue ran dry; check for an audible glitch", not "definite underrun".
+
+**Why panel-open CPU does not invalidate the panel-closed Release numbers**: with the panel open
+the live Advanced diagnostics view redraws continuously (panel closed ≈ 25%, panel open /
+Advanced closed ≈ 39%, panel open / Advanced open ≈ 55% in Release for three sessions). The
+product's steady state is **panel closed**, so the cap=3 performance gate is judged on the
+panel-closed number; the panel-open cost is a UI rendering cost, not an audio-path cost.
+
+**Why a UI publication throttle is future work, not a blocker**: the relative cost centre is
+Main Thread / SwiftUI / AppKit, so the right (future) optimization is throttling the 10 Hz
+diagnostics publication or gating it while the panel is closed — **before** any audio-buffer
+work. CPU is low enough at cap=3 that this is not required now.
+
+**Would revisit if**: real-hardware runs show `Starv`/`Late` rising *together with* an audible
+glitch (then the counters have found a real defect and the audio path needs work), or if
+panel-open CPU becomes a usability problem (then the publication throttle is promoted from
+future work to a task).
+
+---
+
 ## Why system wake is refresh-only (no automatic session restart)
 
 **Decision**: On `NSWorkspace.willSleepNotification` the app synchronously tears down every

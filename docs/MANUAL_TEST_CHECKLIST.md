@@ -457,6 +457,25 @@ Measured values, for comparison — not hard pass thresholds:
   ~25%; near a full core sustained in Release; audio callback threads still alive long after
   stop; memory/threads growing each run; any drop/failure/cleanup warning.
 
+### 16.4 Callback jitter / output starvation live smoke (Phase 6c)
+With Real Control active, the live Advanced diagnostics card shows a second line
+"Gap … · Late … · Starv …", and the stop-result detail begins with `maxGap …ms, late …, starv …`.
+Use this to check for glitches that the drop/failure counters miss.
+
+- **Values to record** (per run): `maxGap` (ms), `late`, `starv`, `drops`, `fail`, audible
+  glitch yes/no, panel state, and CPU with the panel closed vs open.
+- **PASS**: `starv` 0 (or very low) and `drops`/`fail` 0; **no audible glitch**; clean stop. A
+  single `late` or a `maxGap` of ~70–133 ms on its own is **not** a failure (a brief spike,
+  panel open, around stop, or a helper input pause can cause it).
+- **Red flags**: `starv` rising **together with** an audible glitch; `late` increasing
+  continuously; `drops`/`fail` non-zero; audio lost until the app is quit; panel-closed CPU
+  staying unexpectedly high.
+
+> Reference (one real Mac, three sessions, Release): observed `Starv 0`, `Drops 0`, `Fail 0`,
+> `Late 1`, `maxGap` ~70–133 ms, no audible glitch — PASS. Panel-open Advanced diagnostics is
+> CPU-heavy (panel closed ≈ 25%, panel open / Advanced closed ≈ 39%, panel open / Advanced open
+> ≈ 55%); judge the cap=3 gate on the panel-closed number.
+
 ---
 
 ## Notes
