@@ -154,3 +154,49 @@ final class ProcessTapCallbackTimingAccumulator: @unchecked Sendable {
         )
     }
 }
+
+/// Rate-limits how often live diagnostics are published to the UI. The audio path keeps measuring
+/// on every callback and the diagnostics timer keeps ticking; this only throttles the SwiftUI-facing
+/// refresh so a 10 Hz tick (× N sessions) does not redraw the panel that often. A sample is published
+/// when it is the first one, when `force` is set (start/stop/final), or when failures/output
+/// starvation escalated since the last publish — otherwise it is limited to the minimum interval, so
+/// no failure/drop/starvation event is ever dropped, only routine level/timing redraws are coalesced.
+/// The clock is injectable so this is unit-testable without sleeping.
+final class ProcessTapDiagnosticsPublishGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let minimumIntervalNanoseconds: UInt64
+    private let now: @Sendable () -> UInt64
+    private var hasPublished = false
+    private var lastPublishTime: UInt64 = 0
+    private var lastFailureCount = 0
+    private var lastStarvationCount = 0
+
+    init(
+        minimumIntervalMilliseconds: Double = AppConstants.processTapLiveDiagnosticsPublishMinimumIntervalMilliseconds,
+        now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+    ) {
+        self.minimumIntervalNanoseconds = UInt64(max(0, minimumIntervalMilliseconds) * 1_000_000)
+        self.now = now
+    }
+
+    func shouldPublish(_ diagnostics: ProcessTapLiveDiagnostics, force: Bool) -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        let escalated = diagnostics.totalFailureCount > lastFailureCount
+            || diagnostics.outputStarvationCount > lastStarvationCount
+        let current = now()
+        let elapsed = (hasPublished && current >= lastPublishTime) ? current - lastPublishTime : UInt64.max
+        let allow = force || !hasPublished || escalated || elapsed >= minimumIntervalNanoseconds
+
+        if allow {
+            hasPublished = true
+            lastPublishTime = current
+            lastFailureCount = diagnostics.totalFailureCount
+            lastStarvationCount = diagnostics.outputStarvationCount
+        }
+        return allow
+    }
+}

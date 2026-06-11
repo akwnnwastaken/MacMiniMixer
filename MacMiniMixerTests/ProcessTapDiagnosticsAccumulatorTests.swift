@@ -154,6 +154,64 @@ final class ProcessTapDiagnosticsAccumulatorTests: XCTestCase {
         XCTAssertEqual(diagnostics.timingSummaryText, "Gap 12.3ms · Late 0 · Starv 0")
     }
 
+    // MARK: - Live diagnostics UI publish throttle (Phase 6e)
+
+    func testPublishGateRateLimitsRoutineSamplesWithinInterval() {
+        let clock = MutableClock(1_000_000_000)
+        let gate = ProcessTapDiagnosticsPublishGate(minimumIntervalMilliseconds: 250, now: { clock.now })
+
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(), force: false))  // first always publishes
+        clock.advance(milliseconds: 100)                                        // < 250 ms
+        XCTAssertFalse(gate.shouldPublish(makeLiveDiagnostics(), force: false)) // routine sample coalesced
+    }
+
+    func testPublishGateAllowsAfterInterval() {
+        let clock = MutableClock(1_000_000_000)
+        let gate = ProcessTapDiagnosticsPublishGate(minimumIntervalMilliseconds: 250, now: { clock.now })
+
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(), force: false))
+        clock.advance(milliseconds: 300)                                       // > 250 ms
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(), force: false))
+    }
+
+    func testPublishGateForcedSampleBypassesRateLimit() {
+        let clock = MutableClock(1_000_000_000)
+        let gate = ProcessTapDiagnosticsPublishGate(minimumIntervalMilliseconds: 250, now: { clock.now })
+
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(), force: false))
+        clock.advance(milliseconds: 10)
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(), force: true))  // start/stop/final always
+    }
+
+    func testPublishGateFailureOrStarvationEscalationBypassesRateLimit() {
+        let clock = MutableClock(1_000_000_000)
+        let gate = ProcessTapDiagnosticsPublishGate(minimumIntervalMilliseconds: 250, now: { clock.now })
+
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(drops: 0, starvation: 0), force: false))
+        clock.advance(milliseconds: 10)
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(drops: 1, starvation: 0), force: false))  // failure escalated
+        clock.advance(milliseconds: 10)
+        XCTAssertTrue(gate.shouldPublish(makeLiveDiagnostics(drops: 1, starvation: 1), force: false))  // starvation escalated
+        clock.advance(milliseconds: 10)
+        XCTAssertFalse(gate.shouldPublish(makeLiveDiagnostics(drops: 1, starvation: 1), force: false)) // no escalation, coalesced
+    }
+
+    private func makeLiveDiagnostics(drops: Int = 0, starvation: Int = 0) -> ProcessTapLiveDiagnostics {
+        ProcessTapLiveDiagnostics(
+            selectedGain: ProcessTapReplayGainOption.options[0],
+            callbackCount: 1,
+            peakLevel: 0,
+            rmsLevel: 0,
+            enqueuedBufferCount: 0,
+            droppedBufferCount: drops,
+            enqueueFailureCount: 0,
+            copyFailureCount: 0,
+            maxCallbackGapMilliseconds: 0,
+            lateCallbackCount: 0,
+            outputStarvationCount: starvation
+        )
+    }
+
     private func hostTicks(forMilliseconds milliseconds: Double) -> UInt64 {
         // Convert a wall-clock millisecond span into mach host-time ticks using the same timebase
         // the accumulator uses, so these tests are deterministic regardless of CPU architecture.
@@ -179,5 +237,23 @@ final class ProcessTapDiagnosticsAccumulatorTests: XCTestCase {
                 accumulator.observe(inputData)
             }
         }
+    }
+}
+
+/// Deterministic, injectable nanosecond clock for the publish-gate tests (no sleeping).
+private final class MutableClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nanoseconds: UInt64
+
+    init(_ nanoseconds: UInt64) {
+        self.nanoseconds = nanoseconds
+    }
+
+    var now: UInt64 {
+        lock.withLock { nanoseconds }
+    }
+
+    func advance(milliseconds: Double) {
+        lock.withLock { nanoseconds += UInt64(milliseconds * 1_000_000) }
     }
 }

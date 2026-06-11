@@ -26,6 +26,11 @@ enum AppConstants {
     static let processTapReplayBufferCount = 8
     static let processTapReplayBufferByteSize: UInt32 = 65_536
     static let processTapLevelMeterUpdateInterval: TimeInterval = 0.1
+    /// Minimum spacing between live-diagnostics publishes to the UI. The audio path still measures
+    /// on every callback and the diagnostics timer still ticks at `processTapLevelMeterUpdateInterval`,
+    /// but the SwiftUI-facing refresh is rate-limited to ~4 Hz so the panel does not redraw on every
+    /// tick (×N sessions). Start/stop/final samples and failure/starvation escalations bypass this.
+    static let processTapLiveDiagnosticsPublishMinimumIntervalMilliseconds: Double = 250
     static let defaultSystemOutputRestoreVolume: Double = 50
 
     enum Layout {

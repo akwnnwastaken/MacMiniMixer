@@ -292,6 +292,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             outputQueue: outputQueue,
             accumulator: accumulator,
             timingAccumulator: timingAccumulator,
+            publishGate: ProcessTapDiagnosticsPublishGate(),
             onDiagnostics: onDiagnostics,
             onStopped: onStopped
         )
@@ -311,7 +312,11 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         didActivateSession = true
 
         startTimers(for: session, timeoutPolicy: timeoutPolicy)
-        onDiagnostics(session.diagnostics())
+        // First publish is forced (and seeds the gate so the imminent first timer tick does not
+        // immediately re-publish within the throttle interval).
+        let initialDiagnostics = session.diagnostics()
+        _ = session.publishGate.shouldPublish(initialDiagnostics, force: true)
+        onDiagnostics(initialDiagnostics)
         AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public)")
 
         return ProcessTapTestResult(
@@ -340,7 +345,13 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
                 return
             }
 
-            session.onDiagnostics(session.diagnostics())
+            // Throttle the routine UI publish: the accumulators keep measuring every audio callback,
+            // but the SwiftUI-facing diagnostics only refresh ~4 Hz (failures/starvation still publish
+            // immediately). Final values are published unthrottled via `onStopped` at teardown.
+            let diagnostics = session.diagnostics()
+            if session.publishGate.shouldPublish(diagnostics, force: false) {
+                session.onDiagnostics(diagnostics)
+            }
         }
 
         let timeoutTimer: DispatchSourceTimer?
@@ -499,6 +510,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
     let outputQueue: ProcessTapLiveOutputQueue
     let accumulator: ProcessTapDiagnosticsAccumulator
     let timingAccumulator: ProcessTapCallbackTimingAccumulator
+    let publishGate: ProcessTapDiagnosticsPublishGate
     let onDiagnostics: @Sendable (ProcessTapLiveDiagnostics) -> Void
     let onStopped: @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
 
@@ -517,6 +529,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         outputQueue: ProcessTapLiveOutputQueue,
         accumulator: ProcessTapDiagnosticsAccumulator,
         timingAccumulator: ProcessTapCallbackTimingAccumulator,
+        publishGate: ProcessTapDiagnosticsPublishGate,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) {
@@ -528,6 +541,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         self.outputQueue = outputQueue
         self.accumulator = accumulator
         self.timingAccumulator = timingAccumulator
+        self.publishGate = publishGate
         self.onDiagnostics = onDiagnostics
         self.onStopped = onStopped
     }
