@@ -1160,11 +1160,19 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setAppVolume(50, for: "spotify")
         await waitFor { controller.pendingStartCount == 1 }
 
+        // Disabling Real App Control synchronously invalidates every pending start request, so the
+        // in-flight Spotify start's token is stale by the time it completes below — no fixed drain.
         harness.viewModel.setExperimentalRealAppControlEnabled(false)
-        await drainMainActor()
 
         controller.completeNextStart(success: true)
-        await drainMainActor()
+        // The stale completion is rejected and its orphan engine session is torn down by id via an
+        // async cleanup; wait on the exact asserted final state instead of a fixed yield count,
+        // which flaked under full-suite scheduling load.
+        await waitFor {
+            !harness.viewModel.isExperimentalControlActive(for: "spotify")
+                && !harness.viewModel.isProcessTapLiveControlActive
+                && controller.stoppedSessionIDs.count == 1
+        }
 
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
         XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
@@ -1218,7 +1226,10 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.toggleExperimentalControl(for: "spotify")
         await drainMainActor()
         controller.completeNextStart(success: true)
-        await drainMainActor()
+        // The stale Spotify completion's orphan session is torn down by id (async). Wait on that
+        // cleanup record so the assertions run after it has actually happened — exactly one stop
+        // (the Spotify orphan), and Music's confirmed session was not the one stopped.
+        await waitFor { controller.stoppedSessionIDs.count == 1 }
 
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
@@ -1261,7 +1272,10 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.toggleExperimentalControl(for: "spotify")
         await drainMainActor()
         controller.completeNextStart(success: true)
-        await drainMainActor()
+        // Per-app stop invalidated only Spotify's pending start; its late completion is rejected and
+        // its orphan session torn down by id (async). Wait on that single cleanup record so the
+        // assertions run after it, confirming Music's session was not stopped.
+        await waitFor { controller.stoppedSessionIDs.count == 1 }
 
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
