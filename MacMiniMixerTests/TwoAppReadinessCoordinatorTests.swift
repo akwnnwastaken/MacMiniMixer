@@ -334,7 +334,11 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isAppAudioTargetResolving: false,
             onWarning: { _ in }
         )
-        await waitForStartConfirmed(coordinator)
+        // `isRunning` is set synchronously; wait on the fake's earliest start signal then on the
+        // asserted stop reason, not the later `.running` result (same hardening as the
+        // helper-removal test). This test asserts only the forwarded stop reason, so it does not
+        // need the full `.running` settle.
+        await waitFor { tester.startRequests.count == 1 }
 
         coordinator.stop(reason: .outputDeviceChanged)
         await waitForStopReasons([.outputDeviceChanged], on: tester)
@@ -390,7 +394,12 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
             isAppAudioTargetResolving: false,
             onWarning: { _ in }
         )
-        await waitForStartConfirmed(coordinator)
+        // The coordinator sets `isRunning = true` synchronously inside `startTest`, so removing the
+        // target stops it regardless of the engine start having propagated `.running`. Wait only on
+        // the fake's earliest signal that the start reached it (the recorded request) and then on
+        // the exact asserted observable (the stop reason) — not the later `.running` result, which
+        // is what made this flake under loaded CI.
+        await waitFor { tester.startRequests.count == 1 }
 
         coordinator.handleRemovedTarget(
             id: helperID,
