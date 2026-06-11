@@ -476,6 +476,49 @@ Use this to check for glitches that the drop/failure counters miss.
 > CPU-heavy (panel closed ≈ 25%, panel open / Advanced closed ≈ 39%, panel open / Advanced open
 > ≈ 55%); judge the cap=3 gate on the panel-closed number.
 
+### 16.5 Long-run three-session characterization (30–60 min, v0.14 stability gate)
+The short smokes (14.6, 16.3, 16.4) only cover minutes of runtime. This run looks for what they
+cannot see: slow resource leaks (memory/threads), accumulating `late`/`starv`, and audio-path
+degradation over time. It does **not** enable N > 3.
+
+Setup:
+- Release build, single process, as in 16.1 (Instruments is optional here; Activity Monitor
+  plus the live diagnostics card is enough).
+- Start **2 direct + 1 helper** sessions and make all three Real, as in 14.6 steps 1–3.
+  Confirm the banner reads "first two names +1 more" with **Stop All**.
+- Use audio sources that keep playing for the full duration (long playlist, long video) so the
+  helper input does not pause mid-run.
+- Close the panel. Keep Activity Monitor open on the MacMiniMixer row.
+
+Procedure:
+- Run for **30 minutes minimum, 60 preferred**.
+- Sample at start and then every ~10 minutes: panel-closed CPU (avg over ~1 min), memory,
+  thread count; then briefly open the panel → Advanced to read "Gap … · Late … · Starv …" and
+  drops/failures, and close it again. Keep the panel open under ~30 s per sample — panel-open
+  CPU is much higher (16.4) and would pollute the panel-closed numbers.
+- Interaction probes around mid-run and near the end: move each of the three sliders and
+  mute/unmute one app. **Expected**: gain still responds immediately on all three.
+- At the end: **Stop All**. Record the stop detail line (`maxGap …ms, late …, starv …`), the
+  time for CPU to return to ~0%, and confirm all three apps' audio returns to normal without
+  quitting/relaunching anything.
+
+Record per sample: elapsed time, CPU (panel closed), memory, threads, `maxGap`, `late`,
+`starv`, drops, failures, audible glitch yes/no.
+
+- **Expected**: panel-closed CPU stays in the ~17–25% band with no upward drift; memory stays
+  near the ~59 MB three-session baseline and stable between samples; thread count stable
+  (~16); `starv`/`drops`/`fail` stay 0 for the whole run; `late` stays low and does **not**
+  grow steadily with time; no audible glitch; sliders responsive throughout; clean Stop All
+  with CPU back to ~0% within ~10 s and audio normal afterwards.
+- **Red flags**: monotonic growth of CPU, memory, or threads across samples (leak); `late` or
+  `starv` accumulating with runtime; any drop/failure/cleanup warning; an audible glitch or
+  dropout mid-run; an app silent until MacMiniMixer is quit (orphan tap); CPU not returning to
+  ~0% after Stop All.
+
+Notes:
+- Record the results as a `> Reference (…)` block under this section once run, as in 16.3/16.4.
+- Passing strengthens the cap=3 stability evidence for v0.14; N > 3 still requires its own gate.
+
 ---
 
 ## Notes
