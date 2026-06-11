@@ -249,8 +249,10 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         let accumulator = ProcessTapDiagnosticsAccumulator()
+        let timingAccumulator = ProcessTapCallbackTimingAccumulator()
         let callbackQueue = DispatchQueue(label: "com.macminimixer.process-tap-live-control.callback")
-        let ioBlock: AudioDeviceIOBlock = { _, inputData, _, _, _ in
+        let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, _, _ in
+            timingAccumulator.record(hostTime: inputTime.pointee.mHostTime)
             accumulator.observe(inputData)
             outputQueue.enqueue(inputData, gain: gainState.scalar)
         }
@@ -289,6 +291,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             resources: resources,
             outputQueue: outputQueue,
             accumulator: accumulator,
+            timingAccumulator: timingAccumulator,
             onDiagnostics: onDiagnostics,
             onStopped: onStopped
         )
@@ -426,7 +429,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             )
         }
 
-        let detail = "Gain \(diagnostics.selectedGain.percentLabel), \(diagnostics.callbackCount) cb, peak \(formatLevel(diagnostics.peakLevel)), RMS \(formatLevel(diagnostics.rmsLevel)), queued \(diagnostics.enqueuedBufferCount), drops \(diagnostics.droppedBufferCount), fail \(diagnostics.totalFailureCount)."
+        let detail = "Gain \(diagnostics.selectedGain.percentLabel), maxGap \(String(format: "%.1f", diagnostics.maxCallbackGapMilliseconds))ms, late \(diagnostics.lateCallbackCount), starv \(diagnostics.outputStarvationCount), \(diagnostics.callbackCount) cb, peak \(formatLevel(diagnostics.peakLevel)), RMS \(formatLevel(diagnostics.rmsLevel)), queued \(diagnostics.enqueuedBufferCount), drops \(diagnostics.droppedBufferCount), fail \(diagnostics.totalFailureCount)."
 
         switch reason {
         case .userStopped:
@@ -495,6 +498,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
     let resources: ProcessTapResourceContext
     let outputQueue: ProcessTapLiveOutputQueue
     let accumulator: ProcessTapDiagnosticsAccumulator
+    let timingAccumulator: ProcessTapCallbackTimingAccumulator
     let onDiagnostics: @Sendable (ProcessTapLiveDiagnostics) -> Void
     let onStopped: @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
 
@@ -512,6 +516,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         resources: ProcessTapResourceContext,
         outputQueue: ProcessTapLiveOutputQueue,
         accumulator: ProcessTapDiagnosticsAccumulator,
+        timingAccumulator: ProcessTapCallbackTimingAccumulator,
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) {
@@ -522,6 +527,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         self.resources = resources
         self.outputQueue = outputQueue
         self.accumulator = accumulator
+        self.timingAccumulator = timingAccumulator
         self.onDiagnostics = onDiagnostics
         self.onStopped = onStopped
     }
@@ -581,6 +587,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
     func diagnostics() -> ProcessTapLiveDiagnostics {
         let inputSnapshot = accumulator.snapshot()
         let outputSnapshot = outputQueue.snapshot()
+        let timingSnapshot = timingAccumulator.snapshot()
 
         return ProcessTapLiveDiagnostics(
             selectedGain: gainState.option,
@@ -590,7 +597,10 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
             enqueuedBufferCount: outputSnapshot.enqueuedBufferCount,
             droppedBufferCount: outputSnapshot.droppedBufferCount,
             enqueueFailureCount: outputSnapshot.enqueueFailureCount,
-            copyFailureCount: outputSnapshot.copyFailureCount
+            copyFailureCount: outputSnapshot.copyFailureCount,
+            maxCallbackGapMilliseconds: timingSnapshot.maxCallbackGapMilliseconds,
+            lateCallbackCount: timingSnapshot.lateCallbackCount,
+            outputStarvationCount: outputSnapshot.outputStarvationCount
         )
     }
 }
@@ -662,6 +672,11 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
     private var droppedBufferCount = 0
     private var enqueueFailureCount = 0
     private var copyFailureCount = 0
+    /// Diagnostic-only: counts times the queue fully drained (every buffer back in the pool) while
+    /// playback was started — a public-API proxy for an AudioQueue underrun. Note the false-positive
+    /// risk: a genuine input pause (no new audio) also drains the queue, so a non-zero count means
+    /// "the queue ran dry; investigate", not "definite glitch".
+    private var outputStarvationCount = 0
     private var gainRamp = ProcessTapLiveGainRamp()
 
     func start(format: ProcessTapLiveOutputFormat) -> OSStatus {
@@ -673,6 +688,7 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
         droppedBufferCount = 0
         enqueueFailureCount = 0
         copyFailureCount = 0
+        outputStarvationCount = 0
         lock.unlock()
 
         gainRampLock.lock()
@@ -761,6 +777,12 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
         }
 
         availableBuffers.append(buffer)
+        // If playback has started and every buffer is back in the pool, nothing is queued ahead of
+        // the device — the queue has drained (underrun proxy). The `!isStopped` guard above keeps
+        // the natural drain during teardown from counting.
+        if isStarted && availableBuffers.count >= AppConstants.processTapReplayBufferCount {
+            outputStarvationCount += 1
+        }
         lock.unlock()
     }
 
@@ -798,7 +820,8 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
             enqueuedBufferCount: enqueuedBufferCount,
             droppedBufferCount: droppedBufferCount,
             enqueueFailureCount: enqueueFailureCount,
-            copyFailureCount: copyFailureCount
+            copyFailureCount: copyFailureCount,
+            outputStarvationCount: outputStarvationCount
         )
     }
 
@@ -967,4 +990,5 @@ private struct ProcessTapLiveOutputSnapshot {
     let droppedBufferCount: Int
     let enqueueFailureCount: Int
     let copyFailureCount: Int
+    let outputStarvationCount: Int
 }

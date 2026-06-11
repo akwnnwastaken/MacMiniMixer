@@ -576,12 +576,21 @@ struct ProcessTapTestView: View {
     }
 
     private func liveDiagnosticsLine(_ diagnostics: ProcessTapLiveDiagnostics) -> some View {
-        HStack(spacing: 7) {
-            Text("Queued \(diagnostics.enqueuedBufferCount)")
-            Text("Drops \(diagnostics.droppedBufferCount)")
-            Text("Fail \(diagnostics.totalFailureCount)")
-            Spacer(minLength: 0)
-            Text(diagnostics.selectedGain.percentLabel)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Text("Queued \(diagnostics.enqueuedBufferCount)")
+                Text("Drops \(diagnostics.droppedBufferCount)")
+                Text("Fail \(diagnostics.totalFailureCount)")
+                Spacer(minLength: 0)
+                Text(diagnostics.selectedGain.percentLabel)
+            }
+
+            // Second line: diagnostic-only jitter/starvation signals (drops/fail do not catch
+            // these). Reliable live visibility instead of the truncation-prone stop-result detail.
+            Text(diagnostics.timingSummaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .accessibilityLabel(Text("Max callback gap \(String(format: "%.1f", diagnostics.maxCallbackGapMilliseconds)) milliseconds, late callbacks \(diagnostics.lateCallbackCount), output starvation \(diagnostics.outputStarvationCount)"))
         }
         .font(.caption2.monospacedDigit())
         .foregroundStyle(.tertiary)
