@@ -1182,12 +1182,20 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setAppVolume(50, for: "spotify")
         await waitFor { controller.pendingStartCount == 1 }
 
+        // `refreshOutputDevices()` is synchronous on the MainActor and invalidates every pending
+        // Product start request before it returns, so the in-flight Spotify start's token is stale
+        // by the time it completes below — no fixed drain needed here.
         outputDeviceLister.devices = [makeLiveControlOutputDevice(id: "airpods", isDefault: true)]
         harness.viewModel.refreshOutputDevices()
-        await drainMainActor()
 
         controller.completeNextStart(success: true)
-        await drainMainActor()
+        // The stale completion is rejected and its orphan engine session is torn down by id via an
+        // async cleanup. Wait on the exact asserted final state instead of a fixed yield count,
+        // which flaked under full-suite scheduling load.
+        await waitFor {
+            !harness.viewModel.isExperimentalControlActive(for: "spotify")
+                && controller.stoppedSessionIDs.count == 1
+        }
 
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
         XCTAssertEqual(controller.stoppedSessionIDs.count, 1)
