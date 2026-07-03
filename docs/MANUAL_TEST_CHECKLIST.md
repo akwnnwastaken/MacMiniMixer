@@ -521,6 +521,41 @@ Notes:
 
 ---
 
+## 17. Product Real teardown/starvation hardening smoke (P177–P182 checkpoint)
+
+Manual smoke for the teardown/starvation hardening checkpoint (commit `88bbed5`; rationale in
+`docs/DECISIONS.md`, roadmap entry "Product Real teardown/starvation hardening"). Use a Release
+build with the panel closed for steady state; open the Advanced diagnostics card only briefly to
+read the counters. Enable global Real App Control first.
+
+Run these steps in order:
+
+1. **One-session start/stop**: start Real for one app, let it play, stop it.
+2. **Two-session combination change**: start Real for two apps.
+3. **Cross-app change**: YouTube + Spotify Real → stop Spotify → start Music while YouTube stays
+   active (the previously failing case). YouTube must stay clean throughout.
+4. **Per-app restart**: with YouTube still active, stop Music Real → start Music Real again. Watch
+   for transient Starv/clicks; a brief "Starting audio…" status is expected, not alarming Starv.
+5. **Three-session rotation**: run three apps Real, then rotate (stop one, start another) a few
+   times, keeping the other two active.
+6. **Output switch**: switch output speakers ↔ headphones while sessions are active.
+7. **Quit / reopen**: quit MacMiniMixer with sessions active, reopen, confirm no orphaned mute.
+8. **Optional long-run**: the 30–60 minute three-session run (§16.5) — the open v0.14 gate.
+
+For each step record: **Starv**, **Drops**, **Fail**, **Gap** (from the Advanced card / stop
+detail), audible **clicks/crackle** (yes/no), and whether audio ever required
+`sudo killall coreaudiod`.
+
+**Expected final-retest result**:
+- Starv / Drops / Fail remain 0 or non-alarming during normal steady state.
+- No audible clicks or crackle.
+- No `coreaudiod` restart required at any point.
+- A silent app shows a neutral audio status ("Waiting for app audio" / "No app audio detected")
+  and a freshly (re)started app may briefly show "Starting audio…" — neither should read as
+  alarming Starv.
+
+---
+
 ## Notes
 
 - All Process Tap tests require macOS 14.2 or later. On older macOS, all Process Tap

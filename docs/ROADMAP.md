@@ -304,6 +304,43 @@ stays deferred.
 
 ---
 
+### Product Real teardown/starvation hardening (P177–P182) — done (v0.14 stability)
+
+**Priority**: High | **Risk**: Low | **Status**: Landed in commit `88bbed5`; real-hardware
+retest passed; 30–60 min three-session long-run remains the open release gate
+
+A focused hardening pass on the Product Real teardown and starvation-diagnostics path, driven
+by real-hardware feedback. The sequence:
+
+- **P177**: process-tap destroy retry with fault reporting (a leaked `.mutedWhenTapped` tap can
+  otherwise leave apps muted inside coreaudiod).
+- **P178**: dispose the output queue *after* IOProc stop/destroy to avoid self-inflicted Drops
+  during teardown.
+- **P179**: Product Real stop→start settle gate (a short window before a new start so a fresh
+  tap/aggregate is not created while coreaudiod is still releasing the previous one).
+- **P180**: gate output-starvation counting on observed real input, with a neutral audio status,
+  so a silent/no-audio app does not show alarming Starv.
+- **P181**: serialize all Product Real Core Audio lifecycle create/destroy operations so private
+  aggregate/tap churn on the shared route no longer overlaps.
+- **P182**: output-queue startup-warmup gate so a fresh queue establishing cadence (e.g. after a
+  per-app Real restart) does not report transient Starv.
+
+**Real-hardware retest summary** (one real Mac, user's repeated manual retest):
+- The previously failing combination-change case improved: YouTube + Spotify clean → stop
+  Spotify → start Music while YouTube stays active → YouTube + Music clean.
+- Repeated per-app Music stop/start after P182 did not reproduce Starv/clicks.
+- Three-session testing was clean in repeated manual retest.
+- No `sudo killall coreaudiod` was needed in the final retest.
+
+**Scope guardrails**: cap remains **3** (`maxConcurrentLiveSessions = 3`); no N > 3 support; the
+unsafe default-output observer was **not** reintroduced. Decision rationale is in
+`docs/DECISIONS.md`; the manual smoke procedure is in `docs/MANUAL_TEST_CHECKLIST.md` §17.
+
+**Open v0.14 gate**: a 30–60 minute three-session long-run smoke (checklist §16.5) is still
+needed before release confidence — it is the main remaining stability gate for this checkpoint.
+
+---
+
 ### Two-app Release CPU/resource profiling — done (cap=2 gate passed)
 
 **Priority**: High | **Risk**: Low | **Status**: Measured on one real Mac; cap=2 performance

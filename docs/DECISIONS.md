@@ -196,6 +196,51 @@ future work to a task).
 
 ---
 
+## Why Product Real teardown and starvation are hardened the way they are (P177–P182)
+
+**Decision**: The Product Real teardown/starvation path was hardened by a sequence of small,
+targeted changes (commit `88bbed5`) rather than a broad audio-path rewrite. Each addresses a
+specific real-hardware failure mode while leaving the audio callback effectively untouched and
+the session cap at 3.
+
+**Reasoning** (one line per change):
+- **Retry + fault-report process-tap destruction (P177)**: live taps carry `.mutedWhenTapped`, so
+  a destroy that silently fails leaves the tapped apps muted inside coreaudiod until the app or
+  coreaudiod restarts. A transient destroy failure during route settling must be retried, and a
+  persistent one surfaced as a fault — never swallowed as a clean stop.
+- **Dispose the output queue after IOProc stop/destroy (P178)**: disposing the queue while the
+  IOProc can still enqueue produces self-inflicted Drops/Fail during teardown. Ordering the
+  dispose after the producer is gone removes that spike.
+- **Serialize Product Real Core Audio lifecycle operations (P181)**: each session owns a private
+  aggregate device wrapping a tap; creating/destroying one churns the shared coreaudiod route.
+  Overlapping a teardown with another session's setup compounded the churn and starved a
+  still-active session (audible clicks on combination change). Serializing create/destroy makes
+  coreaudiod see one route change at a time. This is not an audio-callback lock.
+- **Gate Starv on observed real input (P180) and on startup warmup (P182)**: output starvation is
+  an underrun *proxy* (queue fully drained). A queue draining before any real audio is the
+  "waiting for app audio" idle state, and a fresh queue can drain once or twice while establishing
+  cadence (seen after a per-app Real restart). Counting either would be a misleading false alarm,
+  so both are excluded; a neutral status ("Waiting for app audio" / "Starting audio…") is shown
+  instead, and steady-state starvation still counts.
+- **Keep the settle gate before new starts (P179)**: a short stop→start settle lets coreaudiod
+  release the previous session before a new tap/aggregate is created, avoiding nondeterministic
+  startup starvation.
+
+**Explicitly not done**: the session cap stays **3** (no N > 3), and the previously-tried
+default-output-device observer was **not** reintroduced — it had caused system audio to stay
+silent (surviving app quit, requiring `sudo killall coreaudiod`). Output-device-change teardown
+stays on the existing consolidated path.
+
+**Validated by**: a real-hardware retest (one Mac) — the combination-change and per-app-restart
+cases came back clean with no `coreaudiod` restart required (see ROADMAP "Product Real
+teardown/starvation hardening" and checklist §17).
+
+**Would revisit if**: a real underrun is ever masked (an audible glitch with `Starv 0` after the
+warmup window — then the warmup threshold `processTapReplayStartupWarmupBufferCount` is too high),
+or the 30–60 min three-session long-run reveals accumulating starvation or leaks.
+
+---
+
 ## Why system wake is refresh-only (no automatic session restart)
 
 **Decision**: On `NSWorkspace.willSleepNotification` the app synchronously tears down every
