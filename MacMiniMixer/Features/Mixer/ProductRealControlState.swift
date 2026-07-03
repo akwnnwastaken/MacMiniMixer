@@ -1,5 +1,67 @@
 import Foundation
 
+/// Gates new Product Real session starts behind any in-flight Product Real teardown plus a short
+/// settle interval, so a fresh tap/aggregate/IOProc/AudioQueue is not created while coreaudiod is
+/// still releasing the previous session's private aggregate/tap and resettling the shared output
+/// route. Without this, overlapping a start with a not-yet-settled teardown produces
+/// nondeterministic output-queue starvation. Stop semantics are unchanged (still session-id keyed);
+/// the gate only observes when teardown work is in flight.
+protocol ProductRealStartSettling: Sendable {
+    /// Registers an in-flight Product Real stop/cleanup task whose Core Audio teardown affects the
+    /// shared output route. Safe to call from any thread.
+    func registerStop(_ stop: Task<Void, Never>)
+    /// Awaits every currently-registered stop task, then — only if a Product Real teardown has
+    /// occurred since the last settled start — suspends for one settle interval. Never blocks the
+    /// calling thread (it suspends), and is a no-op when no teardown preceded it.
+    func waitForReadyToStart() async
+}
+
+/// Default `ProductRealStartSettling`. Thread-safe via a lock; the only async work is awaiting the
+/// registered stop tasks and the injected sleeper, so it never holds the lock across a suspension.
+final class ProductRealStartSettleGate: ProductRealStartSettling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var pendingStops: [Task<Void, Never>] = []
+    private var hasUnsettledTeardown = false
+    private let settleDelay: TimeInterval
+    private let sleeper: @Sendable (TimeInterval) async -> Void
+
+    init(
+        settleDelay: TimeInterval = AppConstants.productRealStartAfterStopSettleDelay,
+        sleeper: @escaping @Sendable (TimeInterval) async -> Void = { seconds in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+        }
+    ) {
+        self.settleDelay = settleDelay
+        self.sleeper = sleeper
+    }
+
+    func registerStop(_ stop: Task<Void, Never>) {
+        lock.lock()
+        pendingStops.append(stop)
+        hasUnsettledTeardown = true
+        lock.unlock()
+    }
+
+    func waitForReadyToStart() async {
+        // Snapshot and consume the pending stops and the teardown flag together. A teardown that
+        // registers during the awaits below re-sets the flag, so the next start settles again.
+        lock.lock()
+        let stops = pendingStops
+        pendingStops.removeAll()
+        let shouldSettle = hasUnsettledTeardown
+        hasUnsettledTeardown = false
+        lock.unlock()
+
+        for stop in stops {
+            await stop.value
+        }
+
+        if shouldSettle {
+            await sleeper(settleDelay)
+        }
+    }
+}
+
 enum ProductRealControlStartSource: Equatable, Sendable {
     case directVisiblePID
     case discoveredHelper

@@ -1,5 +1,42 @@
 import Foundation
 
+/// Serializes every Product Real Core Audio *lifecycle* operation — private-aggregate / tap / IOProc
+/// / AudioQueue **create** (a session start) and **destroy** (a session stop) — so no two ever run
+/// concurrently against coreaudiod.
+///
+/// Why this exists: each Product Real session owns its own aggregate device wrapping a process tap.
+/// Creating or destroying one of those aggregates makes coreaudiod reconfigure the shared HAL device
+/// list, which briefly disturbs *every* running IO — including a still-active session's replay queue.
+/// If a teardown of one session overlaps the setup of another (or a second teardown), two of those
+/// reconfigurations land at once and the disturbance compounds, producing the audible starvation /
+/// clicks seen during a combination change (stop B while A stays active, then start C). Funnelling
+/// all setup/teardown through this actor makes coreaudiod see one route change at a time.
+///
+/// This is *not* an audio-callback lock: only session setup/teardown passes through here. The
+/// realtime replay callback path never touches this actor. It also does not impose any delay — it
+/// only prevents overlap; the post-teardown settle window stays owned by `ProductRealStartSettleGate`
+/// on the start path.
+actor ProductRealCoreAudioLifecycleGate {
+    /// Tail of the serial chain: the most recently enqueued operation (which may still be running).
+    /// A new operation awaits this before starting, then installs itself as the new tail, so every
+    /// operation runs strictly after all previously enqueued ones have finished.
+    private var tail: Task<Void, Never>?
+
+    /// Runs `operation` only after every previously enqueued operation has completed, guaranteeing
+    /// Core Audio setup/teardown never overlaps, and returns the operation's own result to its
+    /// caller. Operations are admitted in the order they enter the actor (FIFO).
+    @discardableResult
+    func perform<T: Sendable>(_ operation: @Sendable @escaping () async -> T) async -> T {
+        let previous = tail
+        let work = Task { () -> T in
+            await previous?.value
+            return await operation()
+        }
+        tail = Task { _ = await work.value }
+        return await work.value
+    }
+}
+
 protocol ProcessTapLiveSessionManaging: Sendable {
     var activeSession: ProcessTapLiveSessionState? { get }
     var activeSessions: [ProcessTapLiveSessionState] { get }
@@ -27,22 +64,32 @@ protocol ProcessTapLiveSessionManaging: Sendable {
 final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, ProcessTapLiveControlling, @unchecked Sendable {
     private let controllerFactory: @Sendable () -> ProcessTapLiveControlling
     private let maxSessions: Int
+    /// Serializes all Core Audio session create/destroy across every session this manager owns, so a
+    /// teardown never overlaps a setup (or another teardown) and churns the shared route twice at
+    /// once. Shared by all sessions here because they all target the same coreaudiod route.
+    private let lifecycleGate: ProductRealCoreAudioLifecycleGate
     private let lock = NSLock()
     private var sessions: [ProcessTapLiveSessionID: ProcessTapLiveSessionState] = [:]
     private var controllers: [ProcessTapLiveSessionID: ProcessTapLiveControlling] = [:]
     private var compatibilityActiveSessionID: ProcessTapLiveSessionID?
 
-    init(controller: ProcessTapLiveControlling) {
+    init(
+        controller: ProcessTapLiveControlling,
+        lifecycleGate: ProductRealCoreAudioLifecycleGate = ProductRealCoreAudioLifecycleGate()
+    ) {
         self.controllerFactory = { controller }
         self.maxSessions = 1
+        self.lifecycleGate = lifecycleGate
     }
 
     init(
         maxSessions: Int,
+        lifecycleGate: ProductRealCoreAudioLifecycleGate = ProductRealCoreAudioLifecycleGate(),
         controllerFactory: @escaping @Sendable () -> ProcessTapLiveControlling
     ) {
         self.controllerFactory = controllerFactory
         self.maxSessions = max(1, maxSessions)
+        self.lifecycleGate = lifecycleGate
     }
 
     var activeSession: ProcessTapLiveSessionState? {
@@ -101,16 +148,20 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         }
 
         AppLogger.processTap.info("Live session start reserved sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
-        let result = await controller.startLiveControl(
-            for: target,
-            gain: gain,
-            timeoutPolicy: timeoutPolicy
-        ) { [weak self] diagnostics in
-            self?.recordDiagnostics(diagnostics, for: sessionID)
-            onDiagnostics(sessionID, diagnostics)
-        } onStopped: { [weak self] result, diagnostics in
-            self?.recordStopped(result, diagnostics: diagnostics, for: sessionID)
-            onStopped(sessionID, result, diagnostics)
+        // Core Audio object creation (aggregate/tap/IOProc/AudioQueue) goes through the lifecycle
+        // gate so it never overlaps another session's create or a teardown churning the same route.
+        let result = await lifecycleGate.perform {
+            await controller.startLiveControl(
+                for: target,
+                gain: gain,
+                timeoutPolicy: timeoutPolicy
+            ) { [weak self] diagnostics in
+                self?.recordDiagnostics(diagnostics, for: sessionID)
+                onDiagnostics(sessionID, diagnostics)
+            } onStopped: { [weak self] result, diagnostics in
+                self?.recordStopped(result, diagnostics: diagnostics, for: sessionID)
+                onStopped(sessionID, result, diagnostics)
+            }
         }
 
         if result.outcome == .liveControlStarted {
@@ -139,7 +190,12 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
             )
         }
 
-        let result = await controller.stopLiveControl(reason: reason)
+        // Core Audio teardown goes through the same lifecycle gate as creation, so destroying this
+        // session's aggregate/tap never overlaps another session's create/destroy on the shared
+        // route — the single most likely source of the combination-change starvation/clicks.
+        let result = await lifecycleGate.perform {
+            await controller.stopLiveControl(reason: reason)
+        }
         if result.outcome == .liveControlNotActive {
             removeSession(id)
         }

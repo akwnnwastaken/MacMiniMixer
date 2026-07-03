@@ -253,8 +253,10 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         let callbackQueue = DispatchQueue(label: "com.macminimixer.process-tap-live-control.callback")
         let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, _, _ in
             timingAccumulator.record(hostTime: inputTime.pointee.mHostTime)
-            accumulator.observe(inputData)
-            outputQueue.enqueue(inputData, gain: gainState.scalar)
+            // `observe` returns whether this callback had real (non-silent) audio, reusing the peak
+            // it already computes — no extra scan — so the output queue can gate starvation on it.
+            let hadRealAudioInput = accumulator.observe(inputData)
+            outputQueue.enqueue(inputData, gain: gainState.scalar, hadRealAudioInput: hadRealAudioInput)
         }
 
         let createIOProcStatus = resources.createIOProc(
@@ -586,8 +588,18 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
 
         return resources.cleanup(
             beforeStoppingIO: {
+                // Ramp the gain to silence while the output queue is still live and the IOProc is
+                // still feeding it, so the fade is smooth and no buffers are dropped during it.
                 self.outputQueue.beginFadeOut()
                 Thread.sleep(forTimeInterval: AppConstants.processTapLiveFadeOutDuration)
+            },
+            afterDestroyingIOProc: {
+                // Dispose the output queue only after the IOProc has been stopped and destroyed.
+                // The IOProc's audio callback enqueues into this queue; stopping the queue while
+                // the IOProc is still running (the previous order) made every in-flight enqueue
+                // hit the stopped-queue guard and count as a dropped buffer — the Drops/Fail spike
+                // seen when tearing down during an output-device route change. With the producer
+                // already gone, this dispose drops nothing.
                 self.outputQueue.stop()
             },
             statusFormatter: { "\($0)" }
@@ -614,7 +626,8 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
             copyFailureCount: outputSnapshot.copyFailureCount,
             maxCallbackGapMilliseconds: timingSnapshot.maxCallbackGapMilliseconds,
             lateCallbackCount: timingSnapshot.lateCallbackCount,
-            outputStarvationCount: outputSnapshot.outputStarvationCount
+            outputStarvationCount: outputSnapshot.outputStarvationCount,
+            isWarmingUpOutput: outputSnapshot.isWithinStartupWarmup
         )
     }
 }
@@ -687,10 +700,15 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
     private var enqueueFailureCount = 0
     private var copyFailureCount = 0
     /// Diagnostic-only: counts times the queue fully drained (every buffer back in the pool) while
-    /// playback was started — a public-API proxy for an AudioQueue underrun. Note the false-positive
-    /// risk: a genuine input pause (no new audio) also drains the queue, so a non-zero count means
-    /// "the queue ran dry; investigate", not "definite glitch".
+    /// playback was started — a public-API proxy for an AudioQueue underrun. Only counted once the
+    /// session has observed real (non-silent) input (`hasObservedRealAudioInput`): a queue draining
+    /// before any real audio is the "waiting for app audio" idle state, not an underrun. A genuine
+    /// mid-stream input pause can still drain the queue, so a non-zero count means "the queue ran
+    /// dry; investigate", not "definite glitch".
     private var outputStarvationCount = 0
+    /// Latched true the first time a real (non-silent) input callback is enqueued. Gates
+    /// `outputStarvationCount` so a silent/no-audio Real session does not log false starvation.
+    private var hasObservedRealAudioInput = false
     private var gainRamp = ProcessTapLiveGainRamp()
 
     func start(format: ProcessTapLiveOutputFormat) -> OSStatus {
@@ -703,6 +721,7 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
         enqueueFailureCount = 0
         copyFailureCount = 0
         outputStarvationCount = 0
+        hasObservedRealAudioInput = false
         lock.unlock()
 
         gainRampLock.lock()
@@ -750,8 +769,12 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
         return noErr
     }
 
-    func enqueue(_ inputData: UnsafePointer<AudioBufferList>, gain: Float) {
+    func enqueue(_ inputData: UnsafePointer<AudioBufferList>, gain: Float, hadRealAudioInput: Bool) {
         lock.lock()
+        // Latch under the lock we already hold here — no extra synchronisation on the callback.
+        if hadRealAudioInput {
+            hasObservedRealAudioInput = true
+        }
         guard !isStopped,
               let queue,
               let outputFormat,
@@ -793,8 +816,17 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
         availableBuffers.append(buffer)
         // If playback has started and every buffer is back in the pool, nothing is queued ahead of
         // the device — the queue has drained (underrun proxy). The `!isStopped` guard above keeps
-        // the natural drain during teardown from counting.
-        if isStarted && availableBuffers.count >= AppConstants.processTapReplayBufferCount {
+        // the natural drain during teardown from counting; `hasObservedRealAudioInput` keeps a
+        // silent/no-audio session from counting; and the startup-warmup gate keeps a brand-new
+        // queue's first-cadence drain (the residual per-app-restart Starv) from counting until it
+        // has enqueued enough buffers to be considered warmed up. `enqueuedBufferCount` is mutated
+        // only under this same lock, so reading it here is consistent.
+        if ProcessTapStarvation.shouldCount(
+            isStarted: isStarted,
+            poolIsFull: availableBuffers.count >= AppConstants.processTapReplayBufferCount,
+            hasObservedRealAudioInput: hasObservedRealAudioInput,
+            hasCompletedStartupWarmup: enqueuedBufferCount >= AppConstants.processTapReplayStartupWarmupBufferCount
+        ) {
             outputStarvationCount += 1
         }
         lock.unlock()
@@ -835,7 +867,11 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
             droppedBufferCount: droppedBufferCount,
             enqueueFailureCount: enqueueFailureCount,
             copyFailureCount: copyFailureCount,
-            outputStarvationCount: outputStarvationCount
+            outputStarvationCount: outputStarvationCount,
+            // Real audio is flowing but the fresh queue is still establishing cadence: the neutral
+            // "Starting audio…" window during which a transient drain is not counted as starvation.
+            isWithinStartupWarmup: hasObservedRealAudioInput
+                && enqueuedBufferCount < AppConstants.processTapReplayStartupWarmupBufferCount
         )
     }
 
@@ -1005,4 +1041,5 @@ private struct ProcessTapLiveOutputSnapshot {
     let enqueueFailureCount: Int
     let copyFailureCount: Int
     let outputStarvationCount: Int
+    let isWithinStartupWarmup: Bool
 }

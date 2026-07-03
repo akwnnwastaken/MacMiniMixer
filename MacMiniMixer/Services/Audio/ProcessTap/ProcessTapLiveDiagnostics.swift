@@ -16,6 +16,12 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
     let maxCallbackGapMilliseconds: Double
     let lateCallbackCount: Int
     let outputStarvationCount: Int
+    /// True while real audio is flowing but the fresh output queue is still establishing its
+    /// playback cadence (the startup-warmup window). During it a transient queue drain is not
+    /// counted as `outputStarvationCount`, and the UI shows a neutral "Starting audio…" state
+    /// rather than alarming Starv. Defaulted so existing diagnostics producers/tests need not
+    /// supply it.
+    let isWarmingUpOutput: Bool
 
     init(
         selectedGain: ProcessTapReplayGainOption,
@@ -28,7 +34,8 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
         copyFailureCount: Int,
         maxCallbackGapMilliseconds: Double = 0,
         lateCallbackCount: Int = 0,
-        outputStarvationCount: Int = 0
+        outputStarvationCount: Int = 0,
+        isWarmingUpOutput: Bool = false
     ) {
         self.selectedGain = selectedGain
         self.callbackCount = callbackCount
@@ -41,14 +48,34 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
         self.maxCallbackGapMilliseconds = maxCallbackGapMilliseconds
         self.lateCallbackCount = lateCallbackCount
         self.outputStarvationCount = outputStarvationCount
+        self.isWarmingUpOutput = isWarmingUpOutput
     }
 
     var audioDetected: Bool {
-        peakLevel > 0.001
+        peakLevel > AppConstants.processTapRealAudioPeakThreshold
     }
 
     var totalFailureCount: Int {
         droppedBufferCount + enqueueFailureCount + copyFailureCount
+    }
+
+    /// Neutral live-session status, or nil once the session is in steady state (show normal
+    /// diagnostics then). Three transient states are distinguished so a healthy session is never
+    /// mistaken for a broken route:
+    ///   - no real audio yet → "Waiting for app audio" / "No app audio detected" (silent session);
+    ///   - real audio flowing but the fresh queue still warming up → "Starting audio…" (a transient
+    ///     startup drain here is expected and not counted as Starv);
+    ///   - warmed up, real audio flowing → nil (normal diagnostics; any Starv now is real).
+    var realAudioStatusText: String? {
+        if !audioDetected {
+            return callbackCount == 0 ? "Waiting for app audio" : "No app audio detected"
+        }
+
+        if isWarmingUpOutput {
+            return "Starting audio…"
+        }
+
+        return nil
     }
 
     /// Compact, one-line summary of the diagnostic-only timing/starvation signals, for the live

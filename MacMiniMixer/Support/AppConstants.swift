@@ -25,12 +25,41 @@ enum AppConstants {
     static let processTapReplayFallbackSampleRate: Double = 48_000
     static let processTapReplayBufferCount = 8
     static let processTapReplayBufferByteSize: UInt32 = 65_536
+    /// Number of successful buffer enqueues (including the priming buffers) after which a fresh live
+    /// output queue is considered warmed up, so a drained queue starts counting as real output
+    /// starvation. Below this, the queue is still establishing its playback cadence and a transient
+    /// drain is expected even on a healthy route (the residual Starv seen after a per-app Real
+    /// restart). At ~one IOProc callback per enqueue this is several full pool cycles — a short
+    /// startup grace, not a mask for steady-state starvation. Tunable after real-hardware retest.
+    static let processTapReplayStartupWarmupBufferCount = 48
     static let processTapLevelMeterUpdateInterval: TimeInterval = 0.1
     /// Minimum spacing between live-diagnostics publishes to the UI. The audio path still measures
     /// on every callback and the diagnostics timer still ticks at `processTapLevelMeterUpdateInterval`,
     /// but the SwiftUI-facing refresh is rate-limited to ~4 Hz so the panel does not redraw on every
     /// tick (×N sessions). Start/stop/final samples and failure/starvation escalations bypass this.
     static let processTapLiveDiagnosticsPublishMinimumIntervalMilliseconds: Double = 250
+    /// How many times teardown attempts to destroy the process tap before giving up. The tap
+    /// carries `.mutedWhenTapped`, so a tap that survives teardown leaves the tapped apps muted
+    /// inside coreaudiod until the app or coreaudiod restarts. During an output-device route
+    /// transition the first `AudioHardwareDestroyProcessTap` can fail transiently; retrying gives
+    /// the route time to settle so the mute is released rather than leaked.
+    static let processTapDestroyMaxAttempts = 3
+    /// Delay between process-tap destroy attempts, to let an in-flux Core Audio route settle
+    /// before retrying. Runs off the main thread (teardown already sleeps for the fade-out there).
+    static let processTapDestroyRetryDelay: TimeInterval = 0.15
+    /// How long a new Product Real start waits, after the previous Product Real session teardown
+    /// has finished, before creating its tap/aggregate/IOProc/AudioQueue. coreaudiod releases the
+    /// prior private aggregate/tap and resettles the shared output route asynchronously after our
+    /// Swift cleanup returns; creating a fresh AudioQueue inside that window can start with poor
+    /// cadence and briefly drain (nondeterministic Starv after changing app combinations). This is
+    /// a suspension off the main thread, not a blocking sleep, and only applies when a Product Real
+    /// teardown actually preceded the start.
+    static let productRealStartAfterStopSettleDelay: TimeInterval = 0.2
+    /// Absolute sample-peak above which a Process Tap input callback counts as real (non-silent)
+    /// audio rather than silence. Used both to report "audio detected" and to gate output
+    /// starvation counting: a Real session on an app that has not produced audio yet must not log
+    /// starvation just because its output queue drains (it is waiting for audio, not underrunning).
+    static let processTapRealAudioPeakThreshold: Double = 0.001
     static let defaultSystemOutputRestoreVolume: Double = 50
 
     enum Layout {

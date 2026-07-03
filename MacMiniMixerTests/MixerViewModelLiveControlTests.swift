@@ -1086,6 +1086,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe = FakeLiveControlCandidateAudioProbe(),
         twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester = FakeLiveControlTwoAppReadinessTester(),
         systemVolumeReader: FakeLiveControlSystemVolumeReader = FakeLiveControlSystemVolumeReader(volumeScalar: 0.5),
+        productRealStartSettleGate: ProductRealStartSettling = ProductRealStartSettleGate(sleeper: { _ in }),
         eligibilityByPID: [Int32: ProcessTapProcessEligibility] = [:]
     ) -> LiveControlHarness {
         let appLister = FakeLiveControlApplicationLister(apps: apps)
@@ -1106,6 +1107,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             helperProcessAudioProbe: helperProcessAudioProbe,
             appAudioTargetResolver: appAudioTargetResolver,
             processLister: processLister,
+            productRealStartSettleGate: productRealStartSettleGate,
             processTapEligibility: { processIdentifier in
                 guard let processIdentifier else {
                     return .unavailable("Core Audio process unavailable")
@@ -1207,6 +1209,123 @@ final class MixerViewModelLiveControlTests: XCTestCase {
 
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
         XCTAssertEqual(controller.stoppedSessionIDs.count, 1)
+    }
+
+    // The engine watchdog leg of the same lifecycle: a per-session output-changed stop arriving
+    // from the engine (panel closed, no view-model trigger) must clear that session's row state
+    // and surface the user-visible warning, without disturbing another app's session.
+    func testEngineOutputDeviceChangedStopClearsSessionStateAndShowsWarning() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "music", harness: harness, controller: controller)
+        let spotifyID = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+
+        controller.emitSessionStopped(handlerForSessionID: spotifyID, outcome: .liveControlOutputChanged)
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Live control stopped: output device changed")
+        XCTAssertEqual(harness.viewModel.statusMessage?.style, .warning)
+        XCTAssertEqual(harness.appAudioTargetResolver.invalidateAllCount, 1)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+    }
+
+    // MARK: - Product Real teardown-settle gate wiring
+
+    // A new Product Real start must consult the settle gate before the controller creates any
+    // Core Audio objects, and must not proceed while the gate is still holding it.
+    func testProductStartWaitsForSettleGateBeforeCreatingSession() async {
+        let releaser = TestAsyncReleaser()
+        let spyGate = SpyStartSettleGate(blockOn: releaser)
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller, productRealStartSettleGate: spyGate)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        // The start consulted the gate and is held there; no session has reached the controller.
+        await waitFor { spyGate.waitCount == 1 }
+        XCTAssertEqual(controller.startedTargets.count, 0)
+
+        // Releasing the gate lets the start proceed to create the session. Wait on the pending
+        // start (continuation registered) rather than startedTargets, so completeNextStart below
+        // deterministically finds it under parallel-test load.
+        releaser.release()
+        await waitFor { controller.pendingStartCount == 1 }
+        XCTAssertEqual(controller.startedTargets.count, 1)
+
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+    }
+
+    // Stopping a Product Real session registers its teardown with the gate, so the next start waits.
+    func testProductStopRegistersTeardownWithSettleGate() async {
+        let spyGate = SpyStartSettleGate()
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller, productRealStartSettleGate: spyGate)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        XCTAssertEqual(spyGate.registeredStopCount, 0)
+
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await waitFor { spyGate.registeredStopCount == 1 }
+    }
+
+    // Combination change: with app A active, stopping A and starting B makes B's start settle
+    // exactly once (because A's teardown preceded it), proving the gate bridges stop A → start B.
+    func testCombinationChangeStartBSettlesAfterStopATeardown() async {
+        let sleeper = TestRecordingSleeper()
+        let gate = ProductRealStartSettleGate(sleeper: { await sleeper.sleep($0) })
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller, productRealStartSettleGate: gate)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // First start (A): no prior teardown, so no settle.
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        XCTAssertEqual(sleeper.delays.count, 0)
+
+        // Stop A.
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await waitFor { controller.stoppedSessionIDs.count == 1 }
+
+        // Start B: the gate awaits A's teardown and settles once before B's session is created.
+        // Wait on the pending start (settle already ran, continuation registered) so the
+        // completion below is deterministic under parallel-test load.
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 && controller.startedTargets.contains { $0.appID == "music" } }
+        XCTAssertEqual(sleeper.delays.count, 1)
+
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "music") }
+    }
+
+    // The stale-start orphan-cleanup path (a start that completed after being superseded) also
+    // registers its teardown with the gate, so a later start waits for that orphan teardown too.
+    func testStaleStartOrphanCleanupRegistersTeardownWithSettleGate() async {
+        let spyGate = SpyStartSettleGate()
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(
+            liveController: controller,
+            outputDeviceLister: outputDeviceLister,
+            productRealStartSettleGate: spyGate
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+
+        // Output device change supersedes the pending start before it completes.
+        outputDeviceLister.devices = [makeLiveControlOutputDevice(id: "airpods", isDefault: true)]
+        harness.viewModel.refreshOutputDevices()
+
+        // The stale start completes; its orphan session is cleaned up and registered with the gate.
+        controller.completeNextStart(success: true)
+        await waitFor { controller.stoppedSessionIDs.count == 1 && spyGate.registeredStopCount >= 1 }
     }
 
     func testStaleStartForOneAppDoesNotDisturbAnotherActiveApp() async {
@@ -2311,6 +2430,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             makeLiveControlOutputDevice(id: "built-in", isDefault: true)
         ]),
         appAudioTargetResolver: FakeAppAudioTargetResolver = FakeAppAudioTargetResolver(),
+        productRealStartSettleGate: ProductRealStartSettling = ProductRealStartSettleGate(sleeper: { _ in }),
         eligibilityByPID: [Int32: ProcessTapProcessEligibility] = [:]
     ) -> ControlledHarness {
         let appLister = FakeLiveControlApplicationLister(apps: makeLiveControlApps())
@@ -2328,6 +2448,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
             appAudioTargetResolver: appAudioTargetResolver,
             processLister: FakeLiveControlProcessLister(),
+            productRealStartSettleGate: productRealStartSettleGate,
             processTapEligibility: { processIdentifier in
                 guard let processIdentifier else {
                     return .unavailable("Core Audio process unavailable")
@@ -2609,6 +2730,33 @@ private final class FakeLiveControlAudioController: AudioControlling {
 
     func setMuted(_ isMuted: Bool, for appID: MixerAppItem.ID) {
         appMutedRequests.append((isMuted, appID))
+    }
+}
+
+/// Records gate interactions for Product Real start/stop wiring assertions. Optionally suspends
+/// `waitForReadyToStart` on a releaser so a test can prove a start is held until the gate clears.
+private final class SpyStartSettleGate: ProductRealStartSettling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var registeredStops = 0
+    private var waits = 0
+    private let blockOn: TestAsyncReleaser?
+
+    init(blockOn: TestAsyncReleaser? = nil) {
+        self.blockOn = blockOn
+    }
+
+    var registeredStopCount: Int { lock.withLock { registeredStops } }
+    var waitCount: Int { lock.withLock { waits } }
+
+    func registerStop(_ stop: Task<Void, Never>) {
+        lock.withLock { registeredStops += 1 }
+    }
+
+    func waitForReadyToStart() async {
+        lock.withLock { waits += 1 }
+        if let blockOn {
+            await blockOn.wait()
+        }
     }
 }
 

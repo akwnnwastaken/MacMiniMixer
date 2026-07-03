@@ -8,7 +8,7 @@ struct ProcessTapDiagnosticsSnapshot {
     let rmsLevel: Double
 
     var detectedNonSilentAudio: Bool {
-        peakLevel > 0.001
+        peakLevel > AppConstants.processTapRealAudioPeakThreshold
     }
 
     var progress: ProcessTapDiagnosticProgress {
@@ -28,7 +28,11 @@ final class ProcessTapDiagnosticsAccumulator: @unchecked Sendable {
     private var peakLevel: Double = 0
     private var sumOfSquares: Double = 0
 
-    func observe(_ inputData: UnsafePointer<AudioBufferList>) {
+    /// Observes one input callback and returns whether it contained real (non-silent) audio, so the
+    /// caller can latch "real audio has been seen" without a second scan. The peak used for the
+    /// decision is the same one already computed here — no extra work on the audio callback.
+    @discardableResult
+    func observe(_ inputData: UnsafePointer<AudioBufferList>) -> Bool {
         var localSampleCount: UInt64 = 0
         var localPeak: Double = 0
         var localSumOfSquares: Double = 0
@@ -64,6 +68,8 @@ final class ProcessTapDiagnosticsAccumulator: @unchecked Sendable {
         sumOfSquares += localSumOfSquares
         measuredSampleCount += localSampleCount
         lock.unlock()
+
+        return localPeak > AppConstants.processTapRealAudioPeakThreshold
     }
 
     func snapshot() -> ProcessTapDiagnosticsSnapshot {

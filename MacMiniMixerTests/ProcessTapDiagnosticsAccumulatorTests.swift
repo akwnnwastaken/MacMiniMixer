@@ -18,6 +18,15 @@ final class ProcessTapDiagnosticsAccumulatorTests: XCTestCase {
         XCTAssertTrue(snapshot.detectedNonSilentAudio)
     }
 
+    func testObserveReturnsTrueForNonSilentAudioAndFalseForSilence() {
+        let accumulator = ProcessTapDiagnosticsAccumulator()
+
+        XCTAssertTrue(observeReturningRealAudio([0.0, 0.5, 0.0], with: accumulator))
+        // Below the real-audio peak threshold counts as silence.
+        XCTAssertFalse(observeReturningRealAudio([0.0, 0.0005, -0.0003], with: accumulator))
+        XCTAssertFalse(observeReturningRealAudio([0.0, 0.0, 0.0], with: accumulator))
+    }
+
     func testObserveIgnoresNonFiniteSamples() {
         let accumulator = ProcessTapDiagnosticsAccumulator()
         observe([.nan, .infinity, -.infinity, -0.25], with: accumulator)
@@ -224,19 +233,104 @@ final class ProcessTapDiagnosticsAccumulatorTests: XCTestCase {
     }
 
     private func observe(_ samples: [Float32], with accumulator: ProcessTapDiagnosticsAccumulator) {
+        _ = observeReturningRealAudio(samples, with: accumulator)
+    }
+
+    @discardableResult
+    private func observeReturningRealAudio(_ samples: [Float32], with accumulator: ProcessTapDiagnosticsAccumulator) -> Bool {
         // Synthetic buffers keep these tests deterministic and avoid Process Tap permissions/devices.
         var mutableSamples = samples
-        mutableSamples.withUnsafeMutableBufferPointer { sampleBuffer in
+        return mutableSamples.withUnsafeMutableBufferPointer { sampleBuffer -> Bool in
             var audioBuffer = AudioBuffer(
                 mNumberChannels: 1,
                 mDataByteSize: UInt32(sampleBuffer.count * MemoryLayout<Float32>.stride),
                 mData: sampleBuffer.baseAddress
             )
             var audioBufferList = AudioBufferList(mNumberBuffers: 1, mBuffers: audioBuffer)
-            withUnsafePointer(to: &audioBufferList) { inputData in
+            return withUnsafePointer(to: &audioBufferList) { inputData in
                 accumulator.observe(inputData)
             }
         }
+    }
+}
+
+final class ProcessTapStarvationGateTests: XCTestCase {
+    func testStarvationNotCountedBeforeRealAudioObservedEvenWhenQueueDrained() {
+        // Silent/no-audio session: started and pool full, but no real audio yet → not starvation.
+        XCTAssertFalse(ProcessTapStarvation.shouldCount(
+            isStarted: true,
+            poolIsFull: true,
+            hasObservedRealAudioInput: false,
+            hasCompletedStartupWarmup: true
+        ))
+    }
+
+    func testStarvationCountedAfterRealAudioObservedAndWarmupComplete() {
+        XCTAssertTrue(ProcessTapStarvation.shouldCount(
+            isStarted: true,
+            poolIsFull: true,
+            hasObservedRealAudioInput: true,
+            hasCompletedStartupWarmup: true
+        ))
+    }
+
+    func testStarvationNotCountedDuringStartupWarmupEvenWithRealAudio() {
+        // Fresh queue right after a per-app restart: real audio is flowing and the pool drained, but
+        // the queue is still establishing cadence → transient, must not count as alarming Starv.
+        XCTAssertFalse(ProcessTapStarvation.shouldCount(
+            isStarted: true,
+            poolIsFull: true,
+            hasObservedRealAudioInput: true,
+            hasCompletedStartupWarmup: false
+        ))
+    }
+
+    func testStarvationRequiresStartedAndFullPool() {
+        // Even with real audio and warmup complete, a not-started queue or a non-full pool is not a
+        // drained underrun.
+        XCTAssertFalse(ProcessTapStarvation.shouldCount(isStarted: false, poolIsFull: true, hasObservedRealAudioInput: true, hasCompletedStartupWarmup: true))
+        XCTAssertFalse(ProcessTapStarvation.shouldCount(isStarted: true, poolIsFull: false, hasObservedRealAudioInput: true, hasCompletedStartupWarmup: true))
+    }
+}
+
+final class ProcessTapRealAudioStatusTests: XCTestCase {
+    private func makeDiagnostics(
+        callbackCount: Int,
+        peakLevel: Double,
+        isWarmingUpOutput: Bool = false
+    ) -> ProcessTapLiveDiagnostics {
+        ProcessTapLiveDiagnostics(
+            selectedGain: .defaultOption,
+            callbackCount: callbackCount,
+            peakLevel: peakLevel,
+            rmsLevel: 0,
+            enqueuedBufferCount: 0,
+            droppedBufferCount: 0,
+            enqueueFailureCount: 0,
+            copyFailureCount: 0,
+            outputStarvationCount: 0,
+            isWarmingUpOutput: isWarmingUpOutput
+        )
+    }
+
+    func testWaitingForAppAudioBeforeAnyCallback() {
+        let diagnostics = makeDiagnostics(callbackCount: 0, peakLevel: 0)
+        XCTAssertEqual(diagnostics.realAudioStatusText, "Waiting for app audio")
+    }
+
+    func testNoAppAudioDetectedWhenCallbacksArriveButStaySilent() {
+        let diagnostics = makeDiagnostics(callbackCount: 12, peakLevel: 0.0004)
+        XCTAssertEqual(diagnostics.realAudioStatusText, "No app audio detected")
+    }
+
+    func testStartingAudioShownWhileRealAudioFlowsButQueueStillWarmingUp() {
+        let diagnostics = makeDiagnostics(callbackCount: 12, peakLevel: 0.3, isWarmingUpOutput: true)
+        XCTAssertEqual(diagnostics.realAudioStatusText, "Starting audio…")
+    }
+
+    func testNeutralStatusClearsOnceRealAudioDetectedAndWarmedUp() {
+        let diagnostics = makeDiagnostics(callbackCount: 12, peakLevel: 0.3)
+        XCTAssertNil(diagnostics.realAudioStatusText)
     }
 }
 

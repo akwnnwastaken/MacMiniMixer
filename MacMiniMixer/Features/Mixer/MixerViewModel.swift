@@ -47,6 +47,7 @@ final class MixerViewModel: ObservableObject {
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
     private let advancedHelperDiscovery: AdvancedHelperDiscoveryCoordinator
     private let appAudioTargetResolver: AppAudioTargetResolving
+    private let productRealStartSettleGate: ProductRealStartSettling
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private var appAudioResolutionTask: Task<Void, Never>?
     private var statusClearTask: Task<Void, Never>?
@@ -68,6 +69,7 @@ final class MixerViewModel: ObservableObject {
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
         appAudioTargetResolver: AppAudioTargetResolving,
         processLister: ProcessListing,
+        productRealStartSettleGate: ProductRealStartSettling = ProductRealStartSettleGate(),
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
             ProcessTapCoreAudio.processTapEligibility(for: $0)
         }
@@ -77,6 +79,7 @@ final class MixerViewModel: ObservableObject {
         self.processTapLiveController = processTapLiveController
         self.helperProcessAudioProbe = helperProcessAudioProbe
         self.appAudioTargetResolver = appAudioTargetResolver
+        self.productRealStartSettleGate = productRealStartSettleGate
         self.processTapEligibility = processTapEligibility
 
         let initialApps = applicationLister.listApplications()
@@ -720,11 +723,14 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        Task {
+        // Track this teardown with the settle gate so any new Product Real start waits for it (and
+        // a short coreaudiod settle window) before creating its own Core Audio objects.
+        let stopTask = Task {
             for sessionID in sessionIDs {
                 _ = await processTapLiveController.stopSession(id: sessionID, reason: reason)
             }
         }
+        productRealStartSettleGate.registerStop(stopTask)
     }
 
     func stopProcessTapLiveControlForTermination() {
@@ -834,9 +840,11 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        Task {
+        // Track this per-app teardown with the settle gate (see stopProductLiveSessions).
+        let stopTask = Task {
             _ = await processTapLiveController.stopSession(id: sessionID, reason: reason)
         }
+        productRealStartSettleGate.registerStop(stopTask)
     }
 
     private func updateActiveLiveControlAppNameAfterProductChange() {
@@ -1144,6 +1152,12 @@ final class MixerViewModel: ObservableObject {
         advancedProcessTapDiagnostics.setRunning(true)
 
         Task {
+            // Teardown-settle gate: wait for any in-flight Product Real teardown to finish and for
+            // coreaudiod to settle the shared output route before creating this session's Core
+            // Audio objects. Suspends (does not block the main actor); no-op when nothing was torn
+            // down. The optimistic "Starting…" row set above remains visible during the wait.
+            await self.productRealStartSettleGate.waitForReadyToStart()
+
             let startResult = await processTapLiveController.startSession(
                 for: target,
                 gain: gain,
@@ -1230,8 +1244,12 @@ final class MixerViewModel: ObservableObject {
 
             if !accepted {
                 // Stale start: only the just-started orphan session is torn down, by its own
-                // session id. Current state and other apps' sessions are left untouched.
-                await cleanupStaleProductLiveStart(startResult)
+                // session id. Current state and other apps' sessions are left untouched. Register
+                // the orphan teardown with the settle gate so a concurrent new start waits for it
+                // (and the settle window) before creating its own Core Audio objects.
+                let orphanCleanupTask = Task { await self.cleanupStaleProductLiveStart(startResult) }
+                self.productRealStartSettleGate.registerStop(orphanCleanupTask)
+                await orphanCleanupTask.value
             }
         }
     }

@@ -246,6 +246,7 @@ final class MixerViewModelTwoAppReadinessTests: XCTestCase {
             helperProcessAudioProbe: FakeTwoAppCandidateAudioProbe(),
             appAudioTargetResolver: FakeTwoAppAudioTargetResolver(),
             processLister: processLister,
+            productRealStartSettleGate: ProductRealStartSettleGate(sleeper: { _ in }),
             processTapEligibility: { processIdentifier in
                 guard let processIdentifier else {
                     return .unavailable("Core Audio process unavailable")

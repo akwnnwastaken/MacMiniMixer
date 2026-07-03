@@ -1,6 +1,74 @@
 import CoreAudio
 import Foundation
 
+/// Outcome of attempting to destroy a process tap during teardown. A `.failed` result means the
+/// tap object may still exist inside coreaudiod — and since live taps carry `.mutedWhenTapped`,
+/// that leaves the tapped apps muted system-wide until the app or coreaudiod restarts. Callers
+/// must treat `.failed` as a strong, user-visible warning, never as a clean stop.
+enum ProcessTapDestroyOutcome: Equatable {
+    case succeeded(attempts: Int)
+    case failed(lastStatus: OSStatus, attempts: Int)
+}
+
+/// Pure decision for whether a drained output queue should count as output starvation. Output
+/// starvation only means an underrun once the session has actually received real (non-silent)
+/// audio *and* the fresh output queue has had time to establish its playback cadence. Two false
+/// positives are excluded:
+///   - Before any real audio (`hasObservedRealAudioInput == false`): a drained queue is the
+///     "waiting for app audio" idle state (e.g. starting Real Control on an app that is not
+///     playing).
+///   - During the brief startup window right after real audio first flows into a brand-new queue
+///     (`hasCompletedStartupWarmup == false`): a fresh AudioQueue can drain once or twice while it
+///     builds its buffer lead, even on a healthy route. This is the residual Starv seen after a
+///     per-app Real restart (stop app, start the same app again while another stays active). It is
+///     transient and clears itself; counting it would be a false alarm.
+/// Once warmup completes, a real-audio drain increments normally, so steady-state starvation is
+/// still reported.
+enum ProcessTapStarvation {
+    static func shouldCount(
+        isStarted: Bool,
+        poolIsFull: Bool,
+        hasObservedRealAudioInput: Bool,
+        hasCompletedStartupWarmup: Bool
+    ) -> Bool {
+        isStarted && poolIsFull && hasObservedRealAudioInput && hasCompletedStartupWarmup
+    }
+}
+
+/// Pure teardown helpers, isolated from the Core Audio object state so they can be unit-tested
+/// by injecting the destroy/sleep operations (no real Core Audio, no real sleeping in tests).
+enum ProcessTapTeardown {
+    /// Destroys a process tap, retrying on failure up to `maxAttempts` with `retryDelay` between
+    /// attempts. Retrying matters because the first destroy can fail transiently while an output
+    /// device route change is still settling; a later attempt then succeeds and releases the mute
+    /// rather than leaking a muted tap. Retrying is always safe: once the tap is gone, a further
+    /// destroy of the same id simply returns a (logged, benign) error.
+    static func destroyProcessTapWithRetry(
+        tapID: AudioObjectID,
+        maxAttempts: Int,
+        retryDelay: TimeInterval,
+        destroy: (AudioObjectID) -> OSStatus,
+        sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+    ) -> ProcessTapDestroyOutcome {
+        let attempts = max(1, maxAttempts)
+        var lastStatus: OSStatus = noErr
+
+        for attempt in 1...attempts {
+            let status = destroy(tapID)
+            if status == noErr {
+                return .succeeded(attempts: attempt)
+            }
+
+            lastStatus = status
+            if attempt < attempts {
+                sleep(max(0, retryDelay))
+            }
+        }
+
+        return .failed(lastStatus: lastStatus, attempts: attempts)
+    }
+}
+
 struct ProcessTapProcessEligibility: Equatable, Sendable {
     let isEligible: Bool
     let reason: String?
@@ -354,10 +422,29 @@ final class ProcessTapResourceContext {
             }
         }
 
+        // Destroying the process tap is the step that releases `.mutedWhenTapped`, so it is the
+        // one teardown failure that can leave system audio muted after the app is gone. It is
+        // attempted unconditionally (even if the IO/aggregate steps above errored) and retried,
+        // because a route-transition can make the first attempt fail transiently. A persisted tap
+        // is escalated to `.fault` and flagged distinctly so it is never reported as a clean stop.
         if #available(macOS 14.2, *), tapID != kAudioObjectUnknown {
-            let destroyTapStatus = AudioHardwareDestroyProcessTap(tapID)
-            if destroyTapStatus != noErr {
-                cleanupErrors.append("destroy tap \(statusFormatter(destroyTapStatus))")
+            let tapID = self.tapID
+            let destroyOutcome = ProcessTapTeardown.destroyProcessTapWithRetry(
+                tapID: tapID,
+                maxAttempts: AppConstants.processTapDestroyMaxAttempts,
+                retryDelay: AppConstants.processTapDestroyRetryDelay,
+                destroy: { AudioHardwareDestroyProcessTap($0) }
+            )
+
+            switch destroyOutcome {
+            case .succeeded(let attempts):
+                if attempts > 1 {
+                    AppLogger.cleanup.warning("Process Tap destroy succeeded after \(attempts, privacy: .public) attempts tapID=\(tapID, privacy: .public)")
+                }
+            case .failed(let lastStatus, let attempts):
+                let formattedStatus = statusFormatter(lastStatus)
+                AppLogger.cleanup.fault("CRITICAL: Process Tap destroy failed after \(attempts, privacy: .public) attempts status=\(formattedStatus, privacy: .public) tapID=\(tapID, privacy: .public). Tapped apps may stay muted until MacMiniMixer or coreaudiod restarts.")
+                cleanupErrors.append("destroy tap (audio may stay muted until restart) \(formattedStatus) after \(attempts) attempts")
             }
         }
 

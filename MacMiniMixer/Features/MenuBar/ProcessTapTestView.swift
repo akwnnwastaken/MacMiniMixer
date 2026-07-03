@@ -585,6 +585,15 @@ struct ProcessTapTestView: View {
                 Text(diagnostics.selectedGain.percentLabel)
             }
 
+            // Neutral waiting/no-audio state: the tapped app has not produced real audio yet, so a
+            // drained queue is idle, not starvation. Shown instead of misreading it as a problem.
+            if let realAudioStatusText = diagnostics.realAudioStatusText {
+                Text(realAudioStatusText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityLabel(Text(realAudioStatusText))
+            }
+
             // Second line: diagnostic-only jitter/starvation signals (drops/fail do not catch
             // these). Reliable live visibility instead of the truncation-prone stop-result detail.
             Text(diagnostics.timingSummaryText)
