@@ -307,7 +307,8 @@ stays deferred.
 ### Product Real teardown/starvation hardening (P177–P182) — done (v0.14 stability)
 
 **Priority**: High | **Risk**: Low | **Status**: Landed in commit `88bbed5`; real-hardware
-retest passed; 30–60 min three-session long-run remains the open release gate
+retest passed; **30–60 min three-session long-run smoke PASS (with caveat)** — normal-use v0.14
+gate met
 
 A focused hardening pass on the Product Real teardown and starvation-diagnostics path, driven
 by real-hardware feedback. The sequence:
@@ -336,8 +337,33 @@ by real-hardware feedback. The sequence:
 unsafe default-output observer was **not** reintroduced. Decision rationale is in
 `docs/DECISIONS.md`; the manual smoke procedure is in `docs/MANUAL_TEST_CHECKLIST.md` §17.
 
-**Open v0.14 gate**: a 30–60 minute three-session long-run smoke (checklist §16.5) is still
-needed before release confidence — it is the main remaining stability gate for this checkpoint.
+**Long-run smoke result — PASS (with caveat)** (one real Mac, checklist §16.5): three Product
+Real sessions ran cleanly during normal use; ordinary per-app stop/start during use was clean;
+`Drops`/`Fail`/`Starv` stayed **0** during normal usage; CPU settled roughly in the **20–35%**
+range depending on panel / Activity Monitor state; **no `sudo killall coreaudiod`** was needed;
+output remained usable throughout. This closes the main remaining normal-use stability gate for
+this checkpoint.
+
+**Caveat (not a v0.14 blocker)**: *extremely* rapid repeated Real on/off spam eventually produced
+severe crackle and `Starv`. The intended product flow is Real Control staying **enabled during
+use**, not rapid manual toggling, so this is out of the normal-use envelope the gate covers. It is
+tracked as a **v0.15 candidate**: add UI-level debounce / a disabled pending-operation state on
+the Real toggle so an operation cannot be re-issued while its teardown/create is still in flight
+(see "Rapid Real-toggle protection" below and `docs/DECISIONS.md`).
+
+---
+
+### Rapid Real-toggle protection — v0.15 candidate
+
+**Priority**: Medium | **Risk**: Low | **Status**: Deferred (not a v0.14 blocker)
+
+The long-run smoke found that *extremely* rapid repeated Real on/off toggling can eventually
+overwhelm the settle/lifecycle gates and produce crackle/`Starv`. This is a stress case outside
+the intended flow (Real stays enabled during use). If it becomes necessary, add a UI-level guard —
+debounce the toggle and/or disable it while a pending Product Real lifecycle operation is in
+flight — so the user cannot queue a burst of create/destroy churn faster than coreaudiod settles.
+This is a UI/orchestration concern; it does **not** change cap=3, the audio callback, or the
+existing teardown gates, and it keeps N > 3 deferred.
 
 ---
 

@@ -232,12 +232,24 @@ silent (surviving app quit, requiring `sudo killall coreaudiod`). Output-device-
 stays on the existing consolidated path.
 
 **Validated by**: a real-hardware retest (one Mac) — the combination-change and per-app-restart
-cases came back clean with no `coreaudiod` restart required (see ROADMAP "Product Real
-teardown/starvation hardening" and checklist §17).
+cases came back clean with no `coreaudiod` restart required — and a **30–60 min three-session
+long-run smoke that PASSED for normal use** (`Drops`/`Fail`/`Starv` 0, CPU ~20–35% depending on
+panel state, no `coreaudiod` restart, output usable throughout). See ROADMAP "Product Real
+teardown/starvation hardening" and checklist §16.5 / §17.
+
+**Known caveat (not a v0.14 blocker)**: *extremely* rapid repeated Real on/off toggling can
+eventually overwhelm the settle (P179) and lifecycle-serialization (P181) gates and produce
+crackle/`Starv`. The gates space and serialize one create/destroy at a time; a fast enough manual
+toggle burst still queues route churn faster than coreaudiod settles. This is deliberately out of
+scope for v0.14 because the intended flow is Real Control staying **enabled during use**, not rapid
+manual toggling. The fix, if it becomes necessary, is a **UI-level** guard (debounce the toggle /
+disable it while a Product Real lifecycle operation is in flight), tracked as a v0.15 candidate — it
+would not change cap=3, the audio callback, or these gates, and keeps N > 3 deferred.
 
 **Would revisit if**: a real underrun is ever masked (an audible glitch with `Starv 0` after the
 warmup window — then the warmup threshold `processTapReplayStartupWarmupBufferCount` is too high),
-or the 30–60 min three-session long-run reveals accumulating starvation or leaks.
+the long-run reveals accumulating starvation or leaks over time, or rapid-toggle crackle starts
+affecting normal use (then promote the v0.15 UI debounce/pending-state guard).
 
 ---
 

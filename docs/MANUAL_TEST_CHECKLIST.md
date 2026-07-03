@@ -519,6 +519,18 @@ Notes:
 - Record the results as a `> Reference (…)` block under this section once run, as in 16.3/16.4.
 - Passing strengthens the cap=3 stability evidence for v0.14; N > 3 still requires its own gate.
 
+> **Reference (one real Mac, normal use) — PASS (with caveat).** Three Product Real sessions ran
+> cleanly during normal use; ordinary per-app stop/start during use was clean; `Drops`/`Fail`/`Starv`
+> stayed **0** during normal usage; CPU settled roughly in the **20–35%** range depending on panel /
+> Activity Monitor state; **no `sudo killall coreaudiod`** was needed; output remained usable.
+> This meets the v0.14 normal-use long-run gate.
+>
+> **Caveat (not a v0.14 blocker):** *extremely* rapid repeated Real on/off spam eventually produced
+> severe crackle and `Starv`. The intended flow is Real Control staying enabled during use, not rapid
+> manual toggling, so this is outside the normal-use envelope. Tracked as a v0.15 candidate
+> (UI-level toggle debounce / disabled pending-operation state — see ROADMAP "Rapid Real-toggle
+> protection" and `docs/DECISIONS.md`). N > 3 stays deferred; cap remains 3.
+
 ---
 
 ## 17. Product Real teardown/starvation hardening smoke (P177–P182 checkpoint)
