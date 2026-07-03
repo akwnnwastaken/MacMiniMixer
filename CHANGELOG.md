@@ -10,6 +10,55 @@ active at a time, and production multi-app per-application control is not implem
 
 ## [Unreleased]
 
+## [v0.14] - 2026-07-03
+
+Stability release focused on **Product Real Control** teardown and starvation handling, driven by
+real-hardware feedback. Product Real Control remains experimental and capped at **three**
+simultaneous sessions; going beyond three (`N > 3`) is still deferred. Requires macOS 14.2+ for
+Process Tap support.
+
+### Changed
+- **Product Real teardown hardening.** Process-tap destruction now retries on transient failure and
+  reports a persistent failure as a fault instead of a clean stop. This makes cleanup safer when a
+  `.mutedWhenTapped` tap has trouble tearing down — a leaked muted tap could otherwise leave apps
+  muted inside coreaudiod until the app or coreaudiod restarts.
+- **Output-queue teardown ordering.** The live output queue is now disposed **after** the IOProc is
+  stopped/destroyed, so the producer is gone before the queue goes away. This removes self-inflicted
+  Drops/Fail during output-device transitions and teardown.
+- **Stop→start settle gate.** A Product Real start now waits for any recent teardown to finish and a
+  short settle window before creating new Core Audio objects, so a fresh tap/aggregate is not built
+  while coreaudiod is still releasing the previous one.
+- **Core Audio lifecycle serialization.** Product Real start/stop create/destroy operations are
+  serialized so no two run at once. This reduces shared-route churn during app combination changes
+  (stop one app, start another while a third stays active), which previously caused audible clicks.
+- **Starvation diagnostics improved.** A silent app now shows a neutral "Waiting for app audio" /
+  "No app audio detected" state instead of false starvation, and a freshly (re)started output queue
+  gets a short startup warmup so its first-cadence transient is not reported as a real underrun.
+  Steady-state starvation is still counted.
+
+### Fixed
+- Swift 6 language-mode test failure: `NSLock.lock()/unlock()` called from an async context is
+  replaced with scoped `withLock` (async-safe locking).
+- Full-suite test flake: live-control test waits are now bounded by a wall-clock deadline instead of
+  a fixed `Task.yield()` budget, so they no longer time out spuriously under parallel-suite load.
+
+### Validated
+- Real-hardware normal-use testing (one Mac): three Product Real sessions ran cleanly; per-app
+  stop/start during use was clean; Drops/Fail/Starv stayed 0 during normal usage; CPU settled
+  roughly in the 20–35% range depending on panel / Activity Monitor state; **no
+  `sudo killall coreaudiod`** was needed in the final normal-use retest.
+- The 30–60 minute three-session long-run smoke **PASSED (with caveat)** — see below.
+
+### Known limitations / caveats
+- **Rapid manual toggling.** Extremely rapid repeated Real on/off toggling can still cause
+  crackle/Starv if spammed aggressively. The intended flow is Real Control staying enabled during
+  use, not rapid manual toggling, so this is not a normal-use blocker. Tracked for v0.15 as a
+  UI-level debounce / disabled pending-operation state.
+- Product Real Control remains **experimental**; `N > 3` simultaneous sessions remains deferred.
+- The previously-tried unsafe default-output-device observer was **not** reintroduced;
+  output-device-change teardown stays on the existing consolidated path.
+- Requires **macOS 14.2+** for Process Tap support.
+
 ## [v0.13] - 2026-06-10
 
 ### Added

@@ -1,7 +1,8 @@
 # MacMiniMixer Roadmap
 
-Current repository state: v0.12 with Product Real App Control, Advanced diagnostics,
-fake-backed tests, and incremental coordinator extraction in place.
+Current repository state: v0.14 with Product Real App Control (cap=3), the P177–P182
+teardown/starvation hardening, Advanced diagnostics, fake-backed tests, and incremental
+coordinator extraction in place. See `CHANGELOG.md` for the v0.14 release notes.
 
 This roadmap separates stable foundation, near-term low-risk work, later research, and
 explicitly deferred large-scope ideas. It is intentionally conservative: MacMiniMixer is
