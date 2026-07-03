@@ -1130,20 +1130,26 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     }
 
     private func waitFor(
-        timeoutInYields: Int = 50,
+        timeout: TimeInterval = 5,
         _ predicate: @MainActor () -> Bool,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
-        for _ in 0..<timeoutInYields {
-            if predicate() {
+        // Exact observable wait: returns the instant `predicate` holds, so the happy path adds no
+        // delay. It is bounded by a wall-clock deadline rather than a fixed `Task.yield()` count
+        // because a yield budget does not map to real time — under full-suite parallel load the
+        // background start Task (settle gate → startSession → MainActor propagation) can take longer
+        // than a small yield budget to complete, which spuriously timed out this multi-round-trip
+        // retry test. The deadline is a genuine failure bound (like an XCTest timeout), not a sleep.
+        let deadline = Date().addingTimeInterval(timeout)
+        while !predicate() {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for condition", file: file, line: line)
                 return
             }
 
             await Task.yield()
         }
-
-        XCTFail("Timed out waiting for condition", file: file, line: line)
     }
 
     private func drainMainActor(iterations: Int = 5) async {
