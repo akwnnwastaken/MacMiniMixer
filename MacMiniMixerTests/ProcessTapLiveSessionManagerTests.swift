@@ -513,12 +513,47 @@ final class ProcessTapTeardownTests: XCTestCase {
 }
 
 /// Thread-safe ordered event log for deterministic concurrency assertions (no sleeps/yields).
+/// `waitFor` is event-driven: it suspends on a continuation that is resumed the instant an `append`
+/// makes the predicate true, so waits are exact observable waits with no polling loop and no
+/// arbitrary yield/iteration cap (which could otherwise expire under parallel-suite load).
 final class TestOrderedLog: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String] = []
+    private var waiters: [(predicate: ([String]) -> Bool, continuation: CheckedContinuation<Void, Never>)] = []
 
     var entries: [String] { lock.withLock { storage } }
-    func append(_ event: String) { lock.withLock { storage.append(event) } }
+
+    func append(_ event: String) {
+        lock.lock()
+        storage.append(event)
+        let snapshot = storage
+        var resumed: [CheckedContinuation<Void, Never>] = []
+        waiters.removeAll { waiter in
+            if waiter.predicate(snapshot) {
+                resumed.append(waiter.continuation)
+                return true
+            }
+            return false
+        }
+        lock.unlock()
+        for continuation in resumed {
+            continuation.resume()
+        }
+    }
+
+    /// Suspends until the logged entries satisfy `predicate` (checked now and after every append).
+    func waitFor(_ predicate: @escaping ([String]) -> Bool) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if predicate(storage) {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            waiters.append((predicate, continuation))
+            lock.unlock()
+        }
+    }
 }
 
 /// An awaitable one-shot gate the test fulfills explicitly, so a background task can be held
@@ -630,24 +665,6 @@ final class ProductRealStartSettleGateTests: XCTestCase {
     }
 }
 
-/// Bounded, sleep-free spin on an observable condition. Yields the cooperative pool (letting queued
-/// gate/session work advance) and fails the test if the condition never holds — an exact observable
-/// wait, not a fixed `Task.yield()` count.
-private func waitFor(
-    _ condition: @Sendable () -> Bool,
-    timeoutInYields: Int = 5_000,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) async {
-    for _ in 0..<timeoutInYields {
-        if condition() {
-            return
-        }
-        await Task.yield()
-    }
-    XCTFail("Timed out waiting for condition", file: file, line: line)
-}
-
 /// Covers the actor that serializes Product Real Core Audio create/destroy so no two session
 /// setup/teardown operations overlap on the shared coreaudiod route (the combination-change
 /// starvation/clicks hardening). Serialization is proven by observable event order, not timing.
@@ -664,7 +681,7 @@ final class ProductRealCoreAudioLifecycleGateTests: XCTestCase {
             await firstReleaser.wait()
             log.append("A-exit")
         }
-        await waitFor { log.entries.contains("A-enter") }
+        await log.waitFor { $0.contains("A-enter") }
 
         // B is enqueued while A is still holding the gate.
         async let second: Void = gate.perform {
@@ -677,7 +694,7 @@ final class ProductRealCoreAudioLifecycleGateTests: XCTestCase {
         // B-enter can only appear once A's operation has finished (A-exit). Waiting for B-enter and
         // asserting A-exit precedes it is the deterministic serialization proof: if the gate let B
         // run concurrently, B-enter would appear before A-exit and this order assertion would fail.
-        await waitFor { log.entries.contains("B-enter") }
+        await log.waitFor { $0.contains("B-enter") }
         XCTAssertEqual(log.entries, ["A-enter", "A-exit", "B-enter"])
 
         secondReleaser.release()
@@ -714,7 +731,8 @@ final class ProcessTapLiveSessionLifecycleSerializationTests: XCTestCase {
         let log = TestOrderedLog()
         let controllerA = BlockingLiveController(label: "A", log: log)
         let controllerB = BlockingLiveController(label: "B", log: log, stopReleaser: TestAsyncReleaser())
-        let controllerC = BlockingLiveController(label: "C", log: log)
+        // C's create blocks on a releaser too, so its create can be held in the gate and observed.
+        let controllerC = BlockingLiveController(label: "C", log: log, startReleaser: TestAsyncReleaser())
         let factory = BlockingControllerFactory([controllerA, controllerB, controllerC])
         let manager = ProcessTapLiveSessionManager(maxSessions: 3) { factory.make() }
 
@@ -727,28 +745,32 @@ final class ProcessTapLiveSessionLifecycleSerializationTests: XCTestCase {
 
         // Stop B; its teardown blocks inside the gate, so the gate is held by a destroy.
         async let stopB: ProcessTapTestResult = manager.stopSession(id: idB, reason: .userStopped)
-        await waitFor { log.entries.contains("destroy-enter-B") }
+        await log.waitFor { $0.contains("destroy-enter-B") }
 
         // A must keep rendering while B tears down — the gate does not touch other sessions.
         XCTAssertTrue(manager.activeSessions.map(\.id).contains(idA))
 
-        // Now request C's start. Its Core Audio create must wait behind B's in-flight destroy.
+        // Request C's start while B's destroy holds the gate. C's Core Audio create must wait behind
+        // B's in-flight destroy, so `create-enter-C` cannot appear until B's destroy has completed.
         async let startC: ProcessTapLiveSessionStartResult = manager.startSession(for: lifecycleTarget(303), gain: .defaultOption, onDiagnostics: { _, _ in }, onStopped: { _, _, _ in })
-        // Give C's start every chance to (wrongly) begin creating while B is blocked; it must not.
-        await waitFor { log.entries.count >= 3 || log.entries.contains("create-enter-C") }
-        XCTAssertFalse(log.entries.contains("create-enter-C"))
 
-        // Release B's teardown; only then may C create.
+        // Release B's teardown; only then may C acquire the gate and enter its create.
         controllerB.stopReleaser?.release()
-        _ = await stopB
-        let resultC = await startC
-        let idC = try XCTUnwrap(resultC.sessionID)
+        await log.waitFor { $0.contains("create-enter-C") }
 
-        // C created strictly after B's destroy completed: no overlap of the two Core Audio ops.
+        // Deterministic serialization proof: C's create began strictly after B's destroy finished.
+        // If the gate let them overlap, `create-enter-C` would have been logged while B was still
+        // blocked (before `destroy-exit-B`) and this ordering assertion would fail.
         let entries = log.entries
         let destroyExitIndex = try XCTUnwrap(entries.firstIndex(of: "destroy-exit-B"))
         let createEnterIndex = try XCTUnwrap(entries.firstIndex(of: "create-enter-C"))
         XCTAssertLessThan(destroyExitIndex, createEnterIndex)
+
+        // Let C finish and settle the sessions.
+        controllerC.startReleaser?.release()
+        _ = await stopB
+        let resultC = await startC
+        let idC = try XCTUnwrap(resultC.sessionID)
 
         // Final state: A stayed active, C is active, B is gone. Cap semantics intact (≤ maxSessions).
         XCTAssertEqual(Set(manager.activeSessions.map(\.id)), [idA, idC])
@@ -767,7 +789,7 @@ final class ProcessTapLiveSessionLifecycleSerializationTests: XCTestCase {
 
         // Exactly one create is admitted at a time: while the first is blocked, the second cannot
         // have entered Core Audio creation.
-        await waitFor { log.entries.filter { $0.hasPrefix("create-enter") }.count == 1 }
+        await log.waitFor { $0.filter { $0.hasPrefix("create-enter") }.count == 1 }
         XCTAssertEqual(log.entries.filter { $0.hasPrefix("create-exit") }.count, 0)
 
         // Release both releasers (idempotent, one-shot): the first proceeds, then the second.
@@ -797,7 +819,7 @@ final class ProcessTapLiveSessionLifecycleSerializationTests: XCTestCase {
         async let stopAll: [ProcessTapTestResult] = manager.stopAll(reason: .userStopped)
 
         // Only one teardown is in flight at a time; the second waits for the first to release.
-        await waitFor { log.entries.filter { $0.hasPrefix("destroy-enter") }.count == 1 }
+        await log.waitFor { $0.filter { $0.hasPrefix("destroy-enter") }.count == 1 }
         XCTAssertEqual(log.entries.filter { $0.hasPrefix("destroy-exit") }.count, 0)
 
         controllerA.stopReleaser?.release()
@@ -856,9 +878,9 @@ private final class BlockingLiveController: ProcessTapLiveControlling, @unchecke
         if let startReleaser {
             await startReleaser.wait()
         }
-        lock.lock()
-        storedOnStopped = onStopped
-        lock.unlock()
+        // Scoped `withLock` (not bare lock()/unlock()) because this is an async context:
+        // NSLock.lock/unlock are unavailable from async functions under the Swift 6 language mode.
+        lock.withLock { storedOnStopped = onStopped }
         log.append("create-exit-\(label)")
         return ProcessTapTestResult(outcome: .liveControlStarted, message: "started", severity: .info)
     }
@@ -868,10 +890,12 @@ private final class BlockingLiveController: ProcessTapLiveControlling, @unchecke
         if let stopReleaser {
             await stopReleaser.wait()
         }
-        lock.lock()
-        let callback = storedOnStopped
-        storedOnStopped = nil
-        lock.unlock()
+        // Scoped `withLock` for the same Swift 6 async-context reason as `startLiveControl` above.
+        let callback = lock.withLock { () -> (@Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)? in
+            let stored = storedOnStopped
+            storedOnStopped = nil
+            return stored
+        }
         let result = ProcessTapTestResult(outcome: .liveControlStopped, message: "stopped", severity: .info)
         callback?(result, nil)
         log.append("destroy-exit-\(label)")
