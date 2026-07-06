@@ -6,23 +6,54 @@ The app is not targeting the Mac App Store. It uses native macOS APIs directly, 
 
 ## Current Status
 
-MacMiniMixer is in a v0.12 experimental browser-helper row resolution milestone. The main product path can still run only one real-controlled app/session at a time, but global Real App Control can now resolve a browser/web helper process internally for one user-facing row when the user explicitly interacts with that row.
+MacMiniMixer is at an **internal v0.14 Product Real stability checkpoint**. This is an unreleased,
+internal checkpoint — **not** a public release: no tag has been cut and the app's marketing version
+is unchanged. It remains experimental and is not a finished Windows Volume Mixer replacement.
 
-It provides a cleaner menu bar mixer panel focused on everyday controls, with stable system-level output controls, real output device listing/switching, real running app discovery, a compact global opt-in mode that can make one eligible app row real when the user interacts with it, and technical Process Tap tools tucked into a collapsed Advanced section.
+What works today:
 
-v0.12 keeps the simplified v0.10.1 main UI and the v0.11 internal `ProcessTapLiveSessionManager` foundation. The main UI still does not expose production multi-app mixer control. App rows are mock-only by default, and real row control requires the global Real App Control toggle to be ON.
+- Real system-level output controls: system output volume read/set with live sync, mute-to-zero with
+  restore, real default output device listing/switching, and live device refresh (including sync when
+  the default output changes externally, such as connecting AirPods).
+- Real running-application discovery with app icons.
+- **Product Real Control** — real per-app control using a Core Audio **Process Tap** with audio
+  replay and gain — supporting **up to 3 concurrent Real sessions** (`maxConcurrentLiveSessions = 3`).
+  When the global Real App Control toggle is ON, interacting with an eligible app row starts a real
+  session for that row; up to three rows can be Real at once, and the active banner summarizes three
+  or more apps as "first two names +1 more" with "Stop All".
+- Browser/helper-row resolution (YouTube/Safari-style rows whose visible PID is not tap-eligible)
+  behind the global toggle and only after explicit interaction, keeping helper PIDs/process names
+  hidden from the main UI.
+- A collapsed Advanced section with Process Tap diagnostics, Mute/Replay probes, manual one-app Live
+  Control, helper discovery, and a separate two-session Two-App Readiness diagnostic.
 
-When global Real App Control is ON, visible tap-eligible apps such as Spotify or Music can still use the direct visible PID path. For YouTube/Safari-style browser rows whose visible PID is not tap-eligible, MacMiniMixer can now attempt user-triggered helper resolution: it scans related helper/content candidates, probes eligible candidates with short unmuted diagnostics, selects a best audio-carrying helper, and starts the existing one-app live control path against that helper PID while keeping helper PID/process names hidden from the main mixer UI.
+Stability checkpoint status:
 
-A validation-first in-memory helper cache reuses successful helper mappings only after validating that the helper PID still exists and remains Core Audio tap-eligible. Helper mappings are not persisted across launches, and no background helper scanning starts merely because an app appears.
+- The Product Real teardown/starvation path was hardened: process-tap destroy retry with fault
+  reporting, output-queue disposal after IOProc stop/destroy, a stop→start settle gate, Core Audio
+  lifecycle serialization, and starvation gating so silent apps show a neutral "Waiting for app
+  audio" state and a freshly (re)started queue's startup transient is not reported as a real
+  underrun. See `CHANGELOG.md` (`[v0.14] - Unreleased`) for details.
+- A normal-use three-session long-run smoke **passed (with caveat)** on one Mac: Drops/Fail/Starv
+  stayed 0 during normal use and no `sudo killall coreaudiod` was needed.
+- Going beyond three concurrent sessions (`N > 3`) remains deferred, and Product Real Control remains
+  experimental.
 
-Advanced helper diagnostics can scan helper/content process candidates for visible apps such as Safari or YouTube. Candidate Probe can detect audio on a helper process, such as `com.apple.WebKit.GPU`, and that helper can be manually selected as an Advanced helper target. The `Find audio helper` action can also probe eligible helper candidates sequentially with short unmuted diagnostics, score them by detected audio, RMS, peak, and callback count, and automatically select the best audio-carrying helper as the Advanced target. Process Tap Test, Replay Probe, and Two-App Readiness can then run against that helper PID from Advanced.
+What is still mock / UI-only:
 
-A successful Advanced readiness test was observed with Spotify + a YouTube helper target at 50% gain: Spotify reported 928 callbacks, peak 0.202, RMS 0.060, 928 queued buffers, 0 drops, and 0 failures; the YouTube helper reported 932 callbacks, peak 0.590, RMS 0.174, 932 queued buffers, 0 drops, and 0 failures. Both sessions stopped cleanly by timeout. This is promising, but it does not mean the app is production-ready as a multi-app mixer or that browser/helper row control is stable production behavior.
+- Normal per-app row sliders and mute controls, when Real Control is not active for that row, are
+  **UI-state/preview only** — they do not change any app's real per-app audio. Only the system output
+  slider changes real audio (at the system level), and only an **active** Product Real row drives
+  real per-app gain through the Process Tap. `MockAudioController` backs those preview values and the
+  cached system-volume display; it does **not** mean the app's real audio paths are fake — system
+  output volume and Product Real Control are both real Core Audio.
 
-Recent maintenance work replaced brittle string-based result checks with typed outcomes, made Process Tap resource cleanup thread-safe, added lightweight `os.Logger` diagnostics, added macOS 14.2 Process Tap availability guards while keeping the deployment target at macOS 13.0, added an MIT License, added GitHub Actions build/test CI, added XCTest coverage, unified Process Tap diagnostics accumulation, and extracted shared Process Tap output buffer copying logic with unit tests. `MixerViewModel` has also started an incremental split into coordinators for Advanced helper discovery, system output, Advanced Process Tap diagnostics, manual Advanced Live Control, and Advanced Two-App Readiness.
-
-It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by default, only one real-controlled row/session can be active, and production multi-app per-application control is not implemented.
+Advanced helper diagnostics can scan helper/content process candidates for visible apps such as
+Safari or YouTube, probe them for audio (e.g. `com.apple.WebKit.GPU`), and select the best
+audio-carrying helper — manually or via the `Find audio helper` auto-detect flow — so Process Tap
+Test, Replay Probe, and Two-App Readiness can run against that helper PID. Helper mappings use a
+validation-first in-memory cache, are not persisted across launches, and no background scanning
+starts merely because an app appears.
 
 ## Features
 
@@ -41,7 +72,7 @@ It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by
 - Live system output volume sync while the panel is open
 - Real system output volume setting from the `System Output` slider
 - System output mute/unmute using volume-to-zero plus restore behavior
-- Mock per-app sliders and mute controls for UI/UX development
+- Preview (UI-state) per-app sliders and mute controls when Real Control is not active for a row
 - Collapsed Advanced diagnostics section, hidden by default
 - Experimental Process Tap Test UI inside Advanced
 - Running app selection for Process Tap diagnostics
@@ -68,12 +99,13 @@ It is not a full Windows Volume Mixer replacement yet: app rows are mock-only by
 - Replay Probe against an Advanced helper target
 - Two-App Readiness with a visible app plus one selected Advanced helper target
 - Compact `Real app control` toggle, OFF by default
-- Slider interaction can start real one-app control when the global mode is enabled
-- One active experimental app row at a time
+- Slider interaction can start real per-app control when the global mode is enabled
+- Up to three active experimental app rows at a time (Product cap = 3); `N > 3` deferred
 - Active row slider controls real experimental Process Tap gain
 - Active row mute maps to experimental gain 0
 - Menu bar active indicator and compact panel active banner while real app control is active
-- Non-active app rows remain mock-only
+- Active banner summarizes three or more Real apps as "first two names +1 more" with `Stop All`
+- Non-active app rows remain preview/UI-state only
 - MIT License
 - GitHub Actions build/test CI
 - XCTest target with fake-backed unit and characterization tests
@@ -98,8 +130,8 @@ Experimental Process Tap features:
 - Replay Probe that can capture selected app audio, suppress original output, apply fixed gain, replay through `AudioQueue`, and clean up
 - One-app Live Control that applies a selected fixed gain while active, with Start/Stop smoothing and a 60-second safety timeout
 - Manual one-app Live Control remains available from Advanced when global real app control is OFF
-- Global Experimental Real App Control mode that can start one eligible row automatically from slider/mute interaction
-- While one eligible row is active, that row's slider controls experimental live gain and that row's mute maps to gain 0
+- Global Experimental Real App Control mode that can start real sessions for eligible rows (up to three concurrently) from slider/mute interaction
+- While a row is active, that row's slider controls experimental live gain and that row's mute maps to gain 0
 - Browser/helper row resolution for one YouTube/Safari-style row after user interaction when global Real App Control is ON
 - Validation-first in-memory helper cache for previously resolved helper PIDs
 - Advanced Two-App Readiness diagnostic that can run two explicit, short-lived readiness sessions with per-session diagnostics
@@ -112,13 +144,13 @@ Mock-only today:
 - App row volume sliders when the global mode is OFF, unless manual Live is started from Advanced
 - App row mute controls when the global mode is OFF, unless manual Live is started from Advanced
 - Non-active app row sliders and mute controls
-- Multi-app real row control in the main UI
+- Real control beyond three concurrent rows (`N > 3`)
 - Browser/helper targets as main UI rows
 - General multi-app per-application audio routing, replay, gain, or modification
 
 By default, the global Real app control mode is OFF. In that mode, app rows are UI state only unless the user explicitly starts manual Live control from Advanced. Moving a normal row slider does not change Safari, Music, Spotify, Chrome, Discord, or any other app's real audio.
 
-When the global mode is ON, moving an eligible app row slider or clicking mute on an eligible inactive row can start one real experimental Process Tap live session for that app, as long as no other app is active. For visible tap-eligible apps, this uses the visible app PID directly. For YouTube/Safari-style browser rows whose visible PID is not tap-eligible, MacMiniMixer may resolve an audio helper PID internally after the user interaction, keep the row labeled as the visible app, and hide helper PID/process details from the main UI. The app's audio is captured, the original stream is suppressed, processed audio is replayed, the active row slider maps to live gain, and the active row mute maps to gain 0. Non-active rows remain mock-only. Interacting with another app while one is active shows a warning and does not silently switch.
+When the global mode is ON, moving an eligible app row slider or clicking mute on an eligible inactive row can start a real experimental Process Tap live session for that app. Up to **three** apps can be Real at the same time (`maxConcurrentLiveSessions = 3`); interacting with another eligible app starts an additional session, and attempting a fourth shows a "Real app control supports 3 apps at a time" warning rather than silently switching. For visible tap-eligible apps, this uses the visible app PID directly. For YouTube/Safari-style browser rows whose visible PID is not tap-eligible, MacMiniMixer may resolve an audio helper PID internally after the user interaction, keep the row labeled as the visible app, and hide helper PID/process details from the main UI. For each active row the app's audio is captured, the original stream is suppressed, processed audio is replayed, the row slider maps to live gain, and the row mute maps to gain 0. Non-active rows remain preview/UI-state only.
 
 The Advanced diagnostics section can create short-lived Core Audio process tap diagnostics for a selected running app. During diagnostic tests, it creates temporary private Core Audio resources, shows a live diagnostic level meter, reports callback count plus peak/RMS levels, and then cleans up.
 
@@ -126,24 +158,26 @@ The Advanced Two-App Readiness test is separate from the main mixer. It uses an 
 
 Safari, YouTube, and other browser/web surfaces may not be tap-eligible through the visible app PID because their audio can be rendered by helper/content processes instead of the visible app process. In the main product path, helper resolution is available only behind the global Real App Control toggle and only after user interaction. In Advanced, helper targets remain manually selectable or auto-detected for diagnostics. Helper mappings are not persisted across app launches.
 
-Replay Probe, manual Live Control, and global opt-in row control go further: they can temporarily suppress the selected app's original output, replay captured audio through `AudioQueue`, and apply gain. These paths are experimental, user-triggered, and currently limited to one app. They do not make every row a real mixer control.
+Replay Probe, manual Live Control, and global opt-in row control go further: they can temporarily suppress the selected app's original output, replay captured audio through `AudioQueue`, and apply gain. These paths are experimental and user-triggered. Replay Probe and the Advanced manual Live Control are one-app; global opt-in Product Real Control supports up to three concurrent Real sessions. None of them make every row a real mixer control.
 
 The app includes `NSAudioCaptureUsageDescription` for system audio capture experiments. It does not request system audio recording permission on launch. macOS may ask for System Audio Recording permission when the user explicitly runs a diagnostic or live control action.
 
 ## Architecture Notes
 
-The current live-control implementation is intentionally still limited to one active session. v0.11 adds internal session-management scaffolding without exposing multi-app control in the UI.
+Product Real Control runs up to three concurrent live sessions through `ProcessTapLiveSessionManager`;
+each session owns its own Core Audio process tap, private aggregate device, IOProc, and replay
+`AudioQueue`.
 
-- `ProcessTapLiveSessionManager` wraps the existing Core Audio live controller.
-- `ProcessTapLiveSessionID` and `ProcessTapLiveSessionState` provide a foundation for future per-session tracking.
-- `maxSessions` is currently `1`.
-- Existing global Real app control and Advanced manual Live Control route through this manager-backed path.
-- Future multi-session work can build on this foundation, but multi-app real control is not enabled yet.
+- `ProcessTapLiveSessionManager` wraps the Core Audio live controller and tracks per-session state.
+- `ProcessTapLiveSessionID` and `ProcessTapLiveSessionState` back per-session tracking.
+- The Product cap is `maxConcurrentLiveSessions = 3`; going beyond three (`N > 3`) is deferred.
+- Global Real App Control and Advanced manual Live Control both route through this manager-backed path.
+- Product Real create/destroy operations are serialized and gated (stop→start settle + startup
+  warmup) so overlapping teardown/setup does not churn the shared Core Audio route.
 - Advanced Two-App Readiness uses a separate isolated manager/configuration with `maxSessions = 2` for diagnostics only.
-- The main product path remains one-app-only.
 - Browser and web audio may be rendered by helper/content processes rather than the visible app PID.
 - Helper process PIDs can change as tabs, pages, and browser helpers restart.
-- v0.12 can resolve one browser/web-style main row to a helper PID internally after user interaction when global Real App Control is ON.
+- MacMiniMixer can resolve a browser/web-style main row to a helper PID internally after user interaction when global Real App Control is ON.
 - The main UI continues to show the visible app name and hides helper process names/PIDs.
 - Helper resolution uses a validation-first in-memory cache keyed by the visible app identity/PID.
 - Cached helper mappings are reused only after validating PID existence and Core Audio tap eligibility.
@@ -166,11 +200,28 @@ The current live-control implementation is intentionally still limited to one ac
 
 ## Requirements
 
-- macOS
+- macOS (deployment target macOS 13.0 for non-Process-Tap features)
+- **macOS 14.2 or later for Product Real Control / any Process Tap feature**
+- System Audio Recording permission (requested only when you run a Process Tap or Real Control action)
 - Xcode
 - Swift and SwiftUI
 
 The current project is a native macOS Xcode project. It does not use Flutter and does not require external packages.
+
+## Known Limitations and Caveats
+
+- **Product Real Control is experimental** and capped at **three** concurrent Real sessions
+  (`maxConcurrentLiveSessions = 3`). Going beyond three (`N > 3`) is deferred.
+- Normal per-app row sliders/mute are **UI-state/preview only** unless Real Control is active for
+  that row; they do not change any app's real per-app volume.
+- **Rapid manual Real on/off toggle spam** can still cause crackle/Starv if toggled aggressively.
+  The intended flow is Real Control staying enabled during use, not rapid toggling. A UI-level
+  debounce / disabled pending-operation guard is tracked for v0.15.
+- Process Tap features require **macOS 14.2+** and fail gracefully on older versions.
+- Browser/helper PIDs can change across tab reloads and helper restarts; helper mappings are
+  in-memory only and not persisted across launches.
+- **v0.14 is an internal, unreleased stability checkpoint** — no public release/tag has been cut and
+  the marketing version is unchanged. See `CHANGELOG.md` (`[v0.14] - Unreleased`).
 
 ## How to Run
 
@@ -205,14 +256,14 @@ The current project is a native macOS Xcode project. It does not use Flutter and
 - The global Real app control toggle is required before automatic row control can start.
 - No capture starts just because an app appears in the list.
 - Only user interaction starts real app control.
-- Experimental app-row control is limited to one active app at a time.
+- Experimental app-row control supports up to three active apps at a time (`N > 3` deferred).
 - Experimental live control may affect the selected app's audio while it is active.
 - Panel close does not stop active real app control, but the menu bar icon and panel banner indicate that it is active when visible.
 - Stop, output device changes, selected app exit, timeout, or app quit should clean up the live session.
 - Temporary Core Audio resources are created and cleaned up for Process Tap experiments.
 - No audio is saved to disk.
 - No HAL driver or persistent virtual audio device is installed.
-- Normal app row controls are mock-only by default and only become real for one active row through explicit experimental opt-in.
+- Normal app row controls are preview/UI-state only by default and become real only for active Real rows (up to three) through explicit experimental opt-in.
 - MacMiniMixer does not install a driver.
 - MacMiniMixer does not create a persistent virtual audio device.
 - MacMiniMixer does not use private APIs.
@@ -245,7 +296,7 @@ Research and experiments:
 - Refine helper candidate selection
 - Refine helper confidence/scoring for auto-detected audio helpers
 - Investigate helper PID changes across tab reloads, navigation, and browser helper restarts
-- Refine the v0.12 one-browser-row mapping prototype behind explicit experimental mode
+- Refine the browser/helper one-row mapping prototype behind explicit experimental mode
 - Evaluate whether any output queue architecture should be unified later, after more manual audio regression testing
 - Evaluate independent sessions versus a centralized mixer/renderer
 - Consider limited multi-app main UI behavior only after readiness, latency, cleanup, and diagnostics look stable
@@ -278,7 +329,7 @@ Background Music and BlackHole may be studied architecturally later, but their c
 - Stable tab-level YouTube/Safari mapping
 - Making all normal app row sliders real
 - Making all normal app row mute buttons real
-- Multi-app simultaneous control
+- Production multi-app simultaneous control (an experimental 3-session cap exists; `N > 3` and production-grade multi-app are not implemented)
 - Production-grade shared renderer
 - Production-ready low-latency renderer
 - Full Windows Volume Mixer replacement behavior
