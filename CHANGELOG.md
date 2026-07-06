@@ -10,12 +10,15 @@ active at a time, and production multi-app per-application control is not implem
 
 ## [Unreleased]
 
-## [v0.14] - 2026-07-03
+## [v0.14] - Unreleased
 
-Stability release focused on **Product Real Control** teardown and starvation handling, driven by
-real-hardware feedback. Product Real Control remains experimental and capped at **three**
-simultaneous sessions; going beyond three (`N > 3`) is still deferred. Requires macOS 14.2+ for
-Process Tap support.
+**Internal stability checkpoint — not a public release.** This is an unreleased v0.14 baseline
+focused on **Product Real Control** teardown and starvation handling, driven by real-hardware
+feedback. It is not shipped: `MARKETING_VERSION` is unchanged, no tag/release is cut, and the app
+is not yet finished enough for a public release (the README may still describe the earlier
+one-session state and Product Real UX still has caveats). Product Real Control remains experimental
+and capped at **three** simultaneous sessions; going beyond three (`N > 3`) is still deferred.
+Requires macOS 14.2+ for Process Tap support.
 
 ### Changed
 - **Product Real teardown hardening.** Process-tap destruction now retries on transient failure and

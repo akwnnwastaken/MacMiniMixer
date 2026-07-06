@@ -1,8 +1,11 @@
 # MacMiniMixer Roadmap
 
-Current repository state: v0.14 with Product Real App Control (cap=3), the P177–P182
-teardown/starvation hardening, Advanced diagnostics, fake-backed tests, and incremental
-coordinator extraction in place. See `CHANGELOG.md` for the v0.14 release notes.
+Current repository state: the internal **v0.14 Product Real stability checkpoint** is complete —
+Product Real App Control (cap=3), the P177–P182 teardown/starvation hardening baseline, Advanced
+diagnostics, fake-backed tests, and incremental coordinator extraction are all in place. This is an
+unreleased internal checkpoint, **not** a public v0.14 release: `MARKETING_VERSION` is unchanged, no
+tag is cut, and the README may still describe the earlier v0.12/one-session state. See
+`CHANGELOG.md` (`[v0.14] - Unreleased`) for the checkpoint notes.
 
 This roadmap separates stable foundation, near-term low-risk work, later research, and
 explicitly deferred large-scope ideas. It is intentionally conservative: MacMiniMixer is
