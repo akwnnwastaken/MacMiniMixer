@@ -14,6 +14,11 @@ struct MixerAppItem: Identifiable, Equatable {
     var volume: Double
     var isMuted: Bool
 
+    /// Coarse *candidate* check only: whether this row has a usable process id at all. It is **not**
+    /// a guarantee that the app can actually be tapped — real Process Tap eligibility (a visible PID
+    /// that maps to a Core Audio process object, or a resolvable audio helper for browser/web rows)
+    /// is determined later by target resolution. Treat a true value as "worth attempting", not
+    /// "confirmed tappable"; the name is kept for API stability.
     var isEligibleForExperimentalLiveControl: Bool {
         guard let processIdentifier else {
             return false

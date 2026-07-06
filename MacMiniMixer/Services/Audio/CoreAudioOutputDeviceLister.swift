@@ -91,14 +91,20 @@ struct CoreAudioOutputDeviceLister: OutputDeviceListing {
         }
 
         var deviceIDs = [AudioDeviceID](repeating: AudioDeviceID(), count: deviceCount)
-        let dataStatus = deviceIDs.withUnsafeMutableBufferPointer { buffer in
-            AudioObjectGetPropertyData(
+        let dataStatus = deviceIDs.withUnsafeMutableBufferPointer { buffer -> OSStatus in
+            // `deviceCount > 0` is already guaranteed above, so `baseAddress` is non-nil in practice;
+            // guard rather than force-unwrap so an unexpectedly empty buffer fails gracefully (the
+            // caller returns an empty device list) instead of trapping.
+            guard let baseAddress = buffer.baseAddress else {
+                return kAudio_ParamError
+            }
+            return AudioObjectGetPropertyData(
                 AudioObjectID(kAudioObjectSystemObject),
                 &address,
                 0,
                 nil,
                 &dataSize,
-                buffer.baseAddress!
+                baseAddress
             )
         }
 

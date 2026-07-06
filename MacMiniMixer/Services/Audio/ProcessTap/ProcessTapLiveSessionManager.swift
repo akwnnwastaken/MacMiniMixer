@@ -398,16 +398,12 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         for sessionID: ProcessTapLiveSessionID
     ) {
         lock.lock()
-        if var session = sessions[sessionID] {
-            session.phase = result.outcome == .tapCleanupFailed ? .failed : .stopped
-            session.diagnostics = diagnostics
-            session.stopReason = result.outcome.stopReason
-            if result.outcome == .tapCleanupFailed, let detail = result.detail {
-                session.cleanupWarnings = [detail]
-            }
-            sessions[sessionID] = session
-        }
-
+        // The session is terminal here (stopped, or cleanup-failed). We remove it directly rather
+        // than writing its final phase/diagnostics/cleanupWarnings back first: the manager only ever
+        // exposes non-terminal sessions (`activeSessions` filters to starting/active/stopping), and
+        // the terminal `result`/`diagnostics` are already delivered to callers by the external
+        // onStopped callback. Writing the final state and then removing the entry on the next line
+        // under this same lock was a dead store (never observable), so it is intentionally omitted.
         sessions.removeValue(forKey: sessionID)
         controllers.removeValue(forKey: sessionID)
         if compatibilityActiveSessionID == sessionID {

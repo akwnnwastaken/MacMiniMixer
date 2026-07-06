@@ -333,7 +333,7 @@ struct MixerPanelView: View {
                         .stroke(Color.orange.opacity(viewModel.isExperimentalRealAppControlEnabled ? 0.22 : 0.08), lineWidth: 1)
                 )
         )
-        .help("When enabled, adjusting one eligible app row starts real experimental control for that app.")
+        .help("When enabled, adjusting a candidate app row attempts to start real experimental control for that app.")
     }
 
     private var advancedSection: some View {
