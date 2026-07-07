@@ -339,15 +339,14 @@ final class MixerViewModel: ObservableObject {
     }
 
     var visibleMixerApps: [MixerAppItem] {
-        if showAllApps {
-            return apps
-        }
-
-        return apps.filter { app in
-            app.isLikelyAudioRelevant ||
-                isActiveLiveControlTarget(app.id) ||
-                isResolvingExperimentalControl(for: app.id)
-        }
+        MixerVisibleAppsFilter.visibleApps(
+            apps: apps,
+            showAllApps: showAllApps,
+            activeVisibleAppIDs: Set(productRealControlState.activeVisibleAppIDs),
+            resolvingAppIDs: Set(productRealControlState.resolvingAppIDs),
+            selectedProcessTapAppID: selectedProcessTapAppID,
+            isLiveControlActive: isProcessTapLiveControlActive
+        )
     }
 
     var twoAppReadinessTargets: [TwoAppReadinessTargetOption] {
@@ -380,11 +379,6 @@ final class MixerViewModel: ObservableObject {
             cancelAppAudioTargetResolution(reason: .userStopped)
             appAudioTargetResolver.invalidateAllCachedTargets()
         }
-    }
-
-    private func isActiveLiveControlTarget(_ appID: MixerAppItem.ID) -> Bool {
-        productRealControlState.activeVisibleAppIDs.contains(appID) ||
-            (isProcessTapLiveControlActive && appID == selectedProcessTapAppID)
     }
 
     func setSystemVolume(_ volume: Double) {
