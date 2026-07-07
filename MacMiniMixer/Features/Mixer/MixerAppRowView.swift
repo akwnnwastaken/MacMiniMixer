@@ -4,6 +4,10 @@ struct MixerAppRowView: View {
     let app: MixerAppItem
     let isExperimentalControlActive: Bool
     let isExperimentalControlResolving: Bool
+    /// A Product Real start/stop transition is in flight for this row. While true the accessory
+    /// shows a non-interactive "working" badge instead of the tappable Real button, so the user
+    /// cannot spam the toggle mid-operation (the view model also ignores toggles while pending).
+    let isExperimentalControlPending: Bool
     let toggleExperimentalControl: () -> Void
     @Binding var volume: Double
     @Binding var isMuted: Bool
@@ -48,6 +52,7 @@ struct MixerAppRowView: View {
         .animation(.snappy(duration: 0.16), value: isMuted)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlActive)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlResolving)
+        .animation(.snappy(duration: 0.16), value: isExperimentalControlPending)
     }
 
     private var appIcon: some View {
@@ -148,7 +153,9 @@ struct MixerAppRowView: View {
 
     @ViewBuilder
     private var experimentalControlAccessory: some View {
-        if isExperimentalControlActive {
+        if isExperimentalControlPending {
+            pendingBadge
+        } else if isExperimentalControlActive {
             realControlBadge
         } else if isExperimentalControlResolving {
             resolvingBadge
@@ -156,6 +163,24 @@ struct MixerAppRowView: View {
             Color.clear
                 .frame(width: AppConstants.Layout.rowLiveButtonSize, height: AppConstants.Layout.rowLiveButtonSize)
         }
+    }
+
+    /// Non-interactive badge shown while a Product Real start/stop for this row is in flight.
+    private var pendingBadge: some View {
+        ProgressView()
+            .controlSize(.mini)
+            .scaleEffect(0.55)
+            .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowLiveButtonSize)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.orange.opacity(0.1))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .help("Real app control is changing for \(app.name)…")
+            .accessibilityLabel(Text("Real app control is changing for \(app.name)"))
     }
 
     private var realControlBadge: some View {

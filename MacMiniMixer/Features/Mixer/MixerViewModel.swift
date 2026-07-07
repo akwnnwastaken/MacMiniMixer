@@ -442,6 +442,7 @@ final class MixerViewModel: ObservableObject {
             // toggle is rejected and its orphan session cleaned up (covers pending starts that
             // have no confirmed session yet, which the active-only stop below would miss).
             productRealControlState.clearAllStartRequests()
+            productRealControlState.clearAllOperations()
         }
 
         if !isEnabled, isProcessTapLiveControlActive {
@@ -497,6 +498,7 @@ final class MixerViewModel: ObservableObject {
         // The output device changed under all taps: invalidate every pending Product start so
         // late completions cannot reactivate state on the previous device.
         productRealControlState.clearAllStartRequests()
+        productRealControlState.clearAllOperations()
         stopActiveAudioWorkForOutputDeviceChange(refreshResult)
         appAudioTargetResolver.invalidateAllCachedTargets()
         refreshSystemOutputVolume()
@@ -688,6 +690,7 @@ final class MixerViewModel: ObservableObject {
         // Global stop: cancel every pending Product start as well, so an in-flight start that
         // completes after this stop is rejected (and its orphan session cleaned up).
         productRealControlState.clearAllStartRequests()
+        productRealControlState.clearAllOperations()
 
         // Product and Advanced manual control are mutually exclusive today. Route product
         // sessions to the per-session API; otherwise fall back to the Advanced manual compat
@@ -778,6 +781,9 @@ final class MixerViewModel: ObservableObject {
         productRealControlState.clearAllStartRequests()
         productRealControlState.clearAllResolutions()
         productRealControlState.clearActiveSession()
+        // Synchronous hard teardown uses `stopLiveControlNow`, which does not fire the per-session
+        // onStopped callbacks that normally clear pending flags, so clear them here directly.
+        productRealControlState.clearAllOperations()
         activeLiveControlAppName = nil
     }
 
@@ -817,7 +823,20 @@ final class MixerViewModel: ObservableObject {
         productRealControlState.isResolving(appID: appID)
     }
 
+    /// Whether a Product Real start or stop transition is currently in flight for this row. The row
+    /// UI uses this to show a disabled/pending state so the user cannot spam the toggle mid-operation.
+    func isExperimentalControlPending(for appID: MixerAppItem.ID) -> Bool {
+        productRealControlState.isOperationPending(for: appID)
+    }
+
     func toggleExperimentalControl(for appID: MixerAppItem.ID) {
+        // Rapid-toggle guard: while a start/stop for this row is still in flight, ignore further
+        // toggles so a burst of clicks cannot pile up Core Audio create/destroy churn (crackle/Starv)
+        // before it reaches the settle/lifecycle gates. The flag clears when the operation completes.
+        guard !productRealControlState.isOperationPending(for: appID) else {
+            return
+        }
+
         if isExperimentalControlActive(for: appID) {
             stopExperimentalControl(for: appID)
             return
@@ -839,6 +858,10 @@ final class MixerViewModel: ObservableObject {
             updateActiveLiveControlAppNameAfterProductChange()
             return
         }
+
+        // Mark this row's stop transition in flight so rapid re-toggles are ignored until the stop
+        // callback (`handleProductLiveControlStopped`) clears it.
+        productRealControlState.beginOperation(for: appID)
 
         // Track this per-app teardown with the settle gate (see stopProductLiveSessions).
         let stopTask = Task {
@@ -965,6 +988,12 @@ final class MixerViewModel: ObservableObject {
         }
 
         if isResolvingExperimentalControl(for: app.id) {
+            return
+        }
+
+        // Rapid-toggle guard also covers the slider-driven auto-start path: do not kick off a new
+        // start while a start/stop for this row is already in flight.
+        if productRealControlState.isOperationPending(for: app.id) {
             return
         }
 
@@ -1151,6 +1180,10 @@ final class MixerViewModel: ObservableObject {
         processTapLiveDiagnostics = nil
         advancedProcessTapDiagnostics.setRunning(true)
 
+        // Mark this row's start transition in flight so rapid re-toggles are ignored until the async
+        // start below resolves (cleared at the top of the post-await block, for every outcome).
+        productRealControlState.beginOperation(for: app.id)
+
         Task {
             // Teardown-settle gate: wait for any in-flight Product Real teardown to finish and for
             // coreaudiod to settle the shared output route before creating this session's Core
@@ -1178,6 +1211,11 @@ final class MixerViewModel: ObservableObject {
             let result = startResult.result
 
             let accepted = await MainActor.run { () -> Bool in
+                // This start attempt has resolved (success, failure, or superseded): the row's start
+                // transition is over, so clear its pending flag regardless of outcome. A cached-helper
+                // retry below re-marks it when it kicks off a fresh attempt.
+                productRealControlState.endOperation(for: app.id)
+
                 // Reject a stale completion: a newer start for this app, or any cancellation,
                 // has superseded this request. Leave current state untouched, but drop this
                 // request's own lingering optimistic entry if a newer request has not already
@@ -1307,14 +1345,17 @@ final class MixerViewModel: ObservableObject {
                 productRealControlState.clearStartRequest(for: stoppedAppID)
             }
             productRealControlState.clearSession(for: stoppedAppID)
+            // The stop transition for this row is complete: clear its rapid-toggle pending flag.
+            productRealControlState.endOperation(for: stoppedAppID)
 
             if result.outcome == .liveControlAppExited,
                let stoppedApp = apps.first(where: { $0.id == stoppedAppID }) {
                 appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
             }
         } else {
-            // No session id: an optimistic-window stop. Clear all product sessions.
+            // No session id: an optimistic-window stop. Clear all product sessions and pending flags.
             productRealControlState.clearActiveSession()
+            productRealControlState.clearAllOperations()
         }
 
         updateActiveLiveControlAppNameAfterProductChange()

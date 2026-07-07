@@ -274,6 +274,7 @@ struct MixerPanelView: View {
                                 app: app,
                                 isExperimentalControlActive: viewModel.isExperimentalControlActive(for: app.id),
                                 isExperimentalControlResolving: viewModel.isResolvingExperimentalControl(for: app.id),
+                                isExperimentalControlPending: viewModel.isExperimentalControlPending(for: app.id),
                                 toggleExperimentalControl: {
                                     viewModel.toggleExperimentalControl(for: app.id)
                                 },

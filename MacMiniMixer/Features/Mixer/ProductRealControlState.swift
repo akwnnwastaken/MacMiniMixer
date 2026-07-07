@@ -111,6 +111,13 @@ struct ProductRealControlState: Equatable, Sendable {
     /// requests untouched.
     private(set) var pendingStartRequestByAppID: [MixerAppItem.ID: ProductRealControlStartRequestID] = [:]
     private var nextStartRequestRawValue: UInt64 = 0
+    /// App ids with a Product Real start or stop transition currently in flight. Used purely as a
+    /// UI-level rapid-toggle guard: while a row's operation is pending, further toggle attempts for
+    /// that row are ignored so a burst of clicks cannot pile up Core Audio create/destroy churn
+    /// (crackle/Starv) before the settle/lifecycle gates. Each entry is cleared by the operation's
+    /// own terminal handler (start completion or stop callback), and all are cleared on global
+    /// teardown. This is orchestration state only; it does not affect session identity or the cap.
+    private(set) var pendingOperationAppIDs: Set<MixerAppItem.ID> = []
 
     var activeSessions: [ProductRealControlActiveSession] {
         Array(activeSessionsByAppID.values)
@@ -200,6 +207,27 @@ struct ProductRealControlState: Equatable, Sendable {
     /// Clears every pending start request (e.g. global toggle off, output change, termination).
     mutating func clearAllStartRequests() {
         pendingStartRequestByAppID = [:]
+    }
+
+    /// Whether a Product Real start or stop transition is in flight for `appID` (rapid-toggle guard).
+    func isOperationPending(for appID: MixerAppItem.ID) -> Bool {
+        pendingOperationAppIDs.contains(appID)
+    }
+
+    /// Marks a Product Real start/stop transition as in flight for `appID`.
+    mutating func beginOperation(for appID: MixerAppItem.ID) {
+        pendingOperationAppIDs.insert(appID)
+    }
+
+    /// Clears the in-flight transition flag for `appID` (called by the operation's terminal handler).
+    mutating func endOperation(for appID: MixerAppItem.ID) {
+        pendingOperationAppIDs.remove(appID)
+    }
+
+    /// Clears every in-flight transition flag (global teardown: toggle off, output change,
+    /// termination/sleep, Stop All), so no row is left visually stuck in a pending state.
+    mutating func clearAllOperations() {
+        pendingOperationAppIDs.removeAll()
     }
 
     mutating func beginResolution(for appID: MixerAppItem.ID) {

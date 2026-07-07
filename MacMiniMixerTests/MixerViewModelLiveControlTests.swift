@@ -551,6 +551,89 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
     }
 
+    // MARK: - Rapid Product Real toggle guard
+
+    func testRapidStartAttemptsWhilePendingDoNotCreateDuplicateProductSessions() async {
+        // Hold the first start pending so repeated toggle/slider attempts land while it is in flight.
+        let liveController = FakeLiveControlController(waitForStartCompletion: true)
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+
+        // Spam more start attempts (slider drags + toggle) for the same row while pending. Each must
+        // be ignored by the guard before it reaches the controller.
+        harness.viewModel.setAppVolume(55, for: "spotify")
+        harness.viewModel.setAppVolume(60, for: "spotify")
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await drainMainActor()
+        XCTAssertEqual(liveController.startedTargets.count, 1)
+
+        liveController.completeNextStart()
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+        XCTAssertEqual(liveController.startedTargets.count, 1)
+    }
+
+    func testPendingClearsAfterStartFailureAndAllowsRetry() async {
+        let liveController = FakeLiveControlController(waitForStartCompletion: true)
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+
+        // Fail the start: the pending flag must clear so the row can be retried.
+        liveController.completeNextStart(
+            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning)
+        )
+        await waitFor { !harness.viewModel.isExperimentalControlPending(for: "spotify") }
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+
+        harness.viewModel.setAppVolume(55, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 2 }
+        liveController.completeNextStart()
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+    }
+
+    func testRapidStopTogglesWhilePendingAreIgnoredAndPendingClearsAfterStop() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        // First toggle stops the row and marks the stop transition pending (synchronously). A second
+        // rapid toggle on the same MainActor turn must be ignored before the stop callback runs, so
+        // only one stop reaches the controller.
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+        XCTAssertEqual(harness.liveController.stopReasons.count, 1)
+    }
+
+    func testGlobalRealControlOffClearsPendingOperation() async {
+        // A start held pending, then global Real App Control turned off: the pending flag must clear
+        // (global teardown) so no row is left visually stuck working.
+        let liveController = FakeLiveControlController(waitForStartCompletion: true)
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+    }
+
     func testOutputDeviceChangeStopsAllThreeProductSessions() async {
         let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
             makeLiveControlOutputDevice(id: "built-in", isDefault: true)
@@ -1334,7 +1417,13 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         await waitFor { controller.stoppedSessionIDs.count == 1 && spyGate.registeredStopCount >= 1 }
     }
 
-    func testStaleStartForOneAppDoesNotDisturbAnotherActiveApp() async {
+    func testToggleDuringPendingStartIsIgnoredWhileAnotherAppStaysActive() async {
+        // Previously this exercised a per-app toggle-cancel of a pending start. The rapid-toggle
+        // guard now intentionally ignores a toggle while that row's start is in flight, so this
+        // pins the new behavior: the ignored toggles do not disturb Music, and Spotify's start
+        // proceeds to active with no spurious stop. (Stale-start-vs-other-app isolation via app/
+        // helper exit is covered by testVisibleAppExitWhileHelperLingers... and the unknown-callback
+        // tests.)
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
@@ -1345,19 +1434,20 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         controller.completeNextStart(success: true)
         await waitFor { harness.viewModel.isExperimentalControlActive(for: "music") }
 
-        // Spotify starts, is cancelled per-app while pending, then completes late (stale).
+        // Spotify start is pending.
         harness.viewModel.setAppVolume(50, for: "spotify")
         await waitFor { controller.pendingStartCount == 1 }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+
+        // Toggle attempts on Spotify while its start is pending are ignored by the guard.
         harness.viewModel.toggleExperimentalControl(for: "spotify")
-        await drainMainActor()
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
         controller.completeNextStart(success: true)
-        // The stale Spotify completion's orphan session is torn down by id (async). Wait on that
-        // cleanup record so the assertions run after it has actually happened — exactly one stop
-        // (the Spotify orphan), and Music's confirmed session was not the one stopped.
-        await waitFor { controller.stoppedSessionIDs.count == 1 }
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
 
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
-        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertEqual(controller.stoppedSessionIDs.count, 0)
         XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
     }
 
@@ -1382,7 +1472,12 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertNil(harness.viewModel.processTapLiveDiagnostics)
     }
 
-    func testPerAppStopInvalidatesOnlyThatAppPendingStart() async {
+    func testPerAppStopOfConfirmedSessionDoesNotDisturbAnotherAppsPendingStart() async {
+        // Per-app stop isolation with a pending peer: stopping one confirmed session (Music) while a
+        // different app (Spotify) has a start still in flight must tear down only Music and leave
+        // Spotify's pending start free to complete. (The former per-app toggle-cancel of a *pending*
+        // start is no longer reachable — the rapid-toggle guard ignores a toggle while that same
+        // row's start is pending.)
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
@@ -1392,18 +1487,21 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         controller.completeNextStart(success: true)
         await waitFor { harness.viewModel.isExperimentalControlActive(for: "music") }
 
+        // Spotify's start is pending (a different row from the one being stopped).
         harness.viewModel.setAppVolume(50, for: "spotify")
         await waitFor { controller.pendingStartCount == 1 }
-        harness.viewModel.toggleExperimentalControl(for: "spotify")
-        await drainMainActor()
-        controller.completeNextStart(success: true)
-        // Per-app stop invalidated only Spotify's pending start; its late completion is rejected and
-        // its orphan session torn down by id (async). Wait on that single cleanup record so the
-        // assertions run after it, confirming Music's session was not stopped.
-        await waitFor { controller.stoppedSessionIDs.count == 1 }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
 
-        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
-        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        // Stop Music (a confirmed session) per-app while Spotify's start is still pending.
+        harness.viewModel.toggleExperimentalControl(for: "music")
+        await waitFor { !harness.viewModel.isExperimentalControlActive(for: "music") }
+
+        // Spotify's pending start was not disturbed: it completes and becomes active.
+        controller.completeNextStart(success: true)
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
     }
 
     func testConcurrentStartUpToCapPreservedWithControlledCompletion() async {
@@ -3220,5 +3318,46 @@ private final class FakeLiveControlProcessLister: ProcessListing, @unchecked Sen
 
     func listProcesses() -> [SystemProcessInfo] {
         processes
+    }
+}
+
+/// Pure unit tests for the Product Real rapid-toggle pending-operation state.
+final class ProductRealControlStatePendingOperationTests: XCTestCase {
+    func testNoPendingOperationsByDefault() {
+        let state = ProductRealControlState()
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+    }
+
+    func testBeginAndEndOperationTogglePendingForThatAppOnly() {
+        var state = ProductRealControlState()
+        state.beginOperation(for: "spotify")
+
+        XCTAssertTrue(state.isOperationPending(for: "spotify"))
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+
+        state.endOperation(for: "spotify")
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+    }
+
+    func testEndOperationForOneAppLeavesOthersPending() {
+        var state = ProductRealControlState()
+        state.beginOperation(for: "spotify")
+        state.beginOperation(for: "music")
+
+        state.endOperation(for: "spotify")
+
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+        XCTAssertTrue(state.isOperationPending(for: "music"))
+    }
+
+    func testClearAllOperationsClearsEveryPendingApp() {
+        var state = ProductRealControlState()
+        state.beginOperation(for: "spotify")
+        state.beginOperation(for: "music")
+
+        state.clearAllOperations()
+
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+        XCTAssertFalse(state.isOperationPending(for: "music"))
     }
 }
