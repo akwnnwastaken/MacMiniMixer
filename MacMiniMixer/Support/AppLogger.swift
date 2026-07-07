@@ -2,7 +2,9 @@ import Foundation
 import OSLog
 
 enum AppLogger {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.example.MacMiniMixer"
+    // Fallback subsystem used only when `Bundle.main.bundleIdentifier` is nil (e.g. some
+    // tooling/test contexts); a project-specific id rather than a `com.example.*` placeholder.
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.akwnnwastaken.MacMiniMixer"
 
     static let app = Logger(subsystem: subsystem, category: "app")
     static let audio = Logger(subsystem: subsystem, category: "audio")

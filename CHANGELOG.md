@@ -4,9 +4,10 @@ All notable changes to MacMiniMixer are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project is experimental and pre-1.0; version numbers track internal milestones
-rather than tagged releases. MacMiniMixer is not a finished Windows Volume Mixer
-replacement: app rows are mock-only by default, only one real-controlled session can be
-active at a time, and production multi-app per-application control is not implemented.
+rather than tagged public releases. MacMiniMixer is not a finished Windows Volume Mixer
+replacement: normal app-row sliders are UI-state/preview by default, Product Real Control is
+experimental and capped at three concurrent sessions (`N > 3` deferred), and production
+multi-app per-application control is not implemented.
 
 ## [Unreleased]
 

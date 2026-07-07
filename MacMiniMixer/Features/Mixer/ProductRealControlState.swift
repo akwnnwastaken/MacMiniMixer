@@ -45,12 +45,15 @@ final class ProductRealStartSettleGate: ProductRealStartSettling, @unchecked Sen
     func waitForReadyToStart() async {
         // Snapshot and consume the pending stops and the teardown flag together. A teardown that
         // registers during the awaits below re-sets the flag, so the next start settles again.
-        lock.lock()
-        let stops = pendingStops
-        pendingStops.removeAll()
-        let shouldSettle = hasUnsettledTeardown
-        hasUnsettledTeardown = false
-        lock.unlock()
+        // Scoped `withLock` (not bare lock()/unlock()) because this is an async context: NSLock's
+        // lock/unlock are unavailable from async functions under the Swift 6 language mode.
+        let (stops, shouldSettle): ([Task<Void, Never>], Bool) = lock.withLock {
+            let stops = pendingStops
+            pendingStops.removeAll()
+            let shouldSettle = hasUnsettledTeardown
+            hasUnsettledTeardown = false
+            return (stops, shouldSettle)
+        }
 
         for stop in stops {
             await stop.value
