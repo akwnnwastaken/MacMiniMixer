@@ -253,6 +253,37 @@ affecting normal use (then promote the v0.15 UI debounce/pending-state guard).
 
 ---
 
+## Why rapid Product Real toggles are guarded at the UI / view-model level
+
+**Decision**: Rapid Real on/off toggle spam is stopped **before** it reaches Core Audio, by a
+per-app pending-operation guard in the view model — not by making every click reach the Process Tap
+create/destroy path and relying only on the settle/lifecycle gates to absorb it.
+
+**Reasoning**:
+- The settle (P179) and lifecycle-serialization (P181) gates make Core Audio *do one thing at a
+  time and settle between them*, but they do **not** limit how many operations a user can *queue*.
+  A fast enough on/off/on/off burst still enqueues more create/destroy work than coreaudiod can
+  settle, which is what produced the residual crackle/`Starv` under aggressive toggling.
+- The cheapest and safest place to cut that off is at the source: `ProductRealControlState` tracks
+  which rows have a start/stop transition in flight (`pendingOperationAppIDs`), and `MixerViewModel`
+  ignores toggle and slider auto-start attempts for a row while its operation is pending. The row
+  shows a non-interactive "working" badge so the state is visible. The flag is cleared in each
+  operation's terminal handler (start completion / stop callback) and on every global teardown
+  (including the synchronous `stopLiveControlNow` path, which does not fire per-session callbacks).
+- This is **layered protection above** the existing gates, not a replacement for them: at most one
+  operation per row is ever in flight, so the gates only ever see spaced, non-spammed work.
+- The **audio callback is untouched**, cap stays **3**, and `N > 3` stays deferred — this is pure
+  UI/orchestration state.
+- A deliberate consequence: a toggle can no longer cancel an in-flight start mid-flight (the start
+  completes first, then the row can be stopped). This matches the intended flow — Real Control
+  stays enabled during use — and is preferable to letting a cancel re-open the churn window.
+
+**Would revisit if**: real-device stress testing shows the guard is insufficient (then add a short
+debounce interval on top), or if users need to abort a slow start (then allow a single cancel while
+still blocking repeats).
+
+---
+
 ## Why system wake is refresh-only (no automatic session restart)
 
 **Decision**: On `NSWorkspace.willSleepNotification` the app synchronously tears down every

@@ -350,24 +350,33 @@ this checkpoint.
 
 **Caveat (not a v0.14 blocker)**: *extremely* rapid repeated Real on/off spam eventually produced
 severe crackle and `Starv`. The intended product flow is Real Control staying **enabled during
-use**, not rapid manual toggling, so this is out of the normal-use envelope the gate covers. It is
-tracked as a **v0.15 candidate**: add UI-level debounce / a disabled pending-operation state on
-the Real toggle so an operation cannot be re-issued while its teardown/create is still in flight
-(see "Rapid Real-toggle protection" below and `docs/DECISIONS.md`).
+use**, not rapid manual toggling, so this is out of the normal-use envelope the gate covers. A
+UI/view-model **pending-operation guard** now addresses this (see "Rapid Real-toggle protection"
+below and `docs/DECISIONS.md`); real-device stress testing remains useful to confirm its effect.
 
 ---
 
-### Rapid Real-toggle protection — v0.15 candidate
+### Rapid Real-toggle protection — implemented (UI/view-model guard)
 
-**Priority**: Medium | **Risk**: Low | **Status**: Deferred (not a v0.14 blocker)
+**Priority**: Medium | **Risk**: Low | **Status**: Implemented (Prompt 194); real-device stress
+testing still useful
 
 The long-run smoke found that *extremely* rapid repeated Real on/off toggling can eventually
-overwhelm the settle/lifecycle gates and produce crackle/`Starv`. This is a stress case outside
-the intended flow (Real stays enabled during use). If it becomes necessary, add a UI-level guard —
-debounce the toggle and/or disable it while a pending Product Real lifecycle operation is in
-flight — so the user cannot queue a burst of create/destroy churn faster than coreaudiod settles.
-This is a UI/orchestration concern; it does **not** change cap=3, the audio callback, or the
-existing teardown gates, and it keeps N > 3 deferred.
+overwhelm the settle/lifecycle gates and produce crackle/`Starv` — a stress case outside the
+intended flow (Real stays enabled during use). A **per-app pending-operation guard** now handles
+this at the UI/view-model level: `ProductRealControlState` tracks which rows have a start/stop
+transition in flight (`pendingOperationAppIDs`), `MixerViewModel` ignores toggle and slider
+auto-start attempts for a row while its operation is pending (clearing the flag in each terminal
+handler and on global teardown), and the row shows a non-interactive "working" badge. It is
+layered **above** the settle (P179) and lifecycle-serialization (P181) gates so a burst of clicks
+cannot queue create/destroy churn faster than coreaudiod settles. It does **not** change cap=3,
+the audio callback, or the teardown gates, and it keeps N > 3 deferred. Rationale in
+`docs/DECISIONS.md`; manual smoke in `docs/MANUAL_TEST_CHECKLIST.md` §18.
+
+**Still useful**: real-device stress testing (aggressive rapid toggling on one and on 2–3
+concurrent rows) to confirm the guard removes the crackle/`Starv` in practice — its real-world
+effect is not yet hardware-verified. A deliberate consequence is that a toggle can no longer cancel
+an in-flight start mid-flight (the start completes first).
 
 ---
 

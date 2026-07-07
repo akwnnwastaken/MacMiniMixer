@@ -568,6 +568,49 @@ detail), audible **clicks/crackle** (yes/no), and whether audio ever required
 
 ---
 
+## 18. Product Real rapid-toggle guard smoke (Prompt 194)
+
+Verifies the per-app pending-operation guard (see `docs/DECISIONS.md` "Why rapid Product Real
+toggles are guarded…" and ROADMAP "Rapid Real-toggle protection"). Use a Release build with global
+Real App Control enabled.
+
+Single-row start spam:
+1. Start audio in one app (e.g. Music) and make it Real.
+2. While the row is starting, **rapidly click/toggle** the row (and drag its slider).
+   - **Expected**: the row shows a non-interactive "working" badge during the transition; the extra
+     clicks are ignored; only **one** session is created (no duplicate-start churn); no crackle.
+
+Single-row stop spam:
+3. With the row active, click stop and then **rapidly click/toggle** it again during teardown.
+   - **Expected**: repeated attempts are ignored until the stop reaches its terminal state; the row
+     ends cleanly stopped; no crackle.
+
+Concurrent rows:
+4. Repeat steps 1–3 with **2–3 concurrent Real sessions**, spamming toggles on individual rows and
+   across rows.
+   - **Expected**: each row guards independently; other active rows keep playing; no crackle/Starv.
+
+Aggressive normal clicking + cap:
+5. Do a burst of aggressive (but human-speed) on/off clicking across rows.
+   - **Expected**: `Starv`/`Drops`/`Fail` stay 0 or non-alarming; no audible crackle.
+6. With 3 apps already Real, try to make a **4th** app Real.
+   - **Expected**: the "Real app control supports 3 apps at a time" warning still appears; cap=3
+     holds.
+
+For each step record: whether the "working" badge appears, audible **clicks/crackle** (yes/no),
+`Starv`/`Drops`/`Fail`, and whether audio ever required `sudo killall coreaudiod`.
+
+**Expected result**: the working badge appears during transitions; repeated toggles are ignored
+until the operation completes; no duplicate-start churn; no crackle/Starv under normal aggressive
+clicking; cap=3 warning intact. A deliberate behavior: a toggle **cannot cancel an in-flight start
+mid-flight** — the start finishes first, then the row can be stopped.
+
+**If severe audio loss occurs** (an app silent until the app is quit): quit MacMiniMixer, and only
+if audio is still broken, `sudo killall coreaudiod`. This should **not** be expected in the normal
+guarded flow — record it as a regression if it happens.
+
+---
+
 ## Notes
 
 - All Process Tap tests require macOS 14.2 or later. On older macOS, all Process Tap

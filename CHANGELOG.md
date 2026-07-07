@@ -39,6 +39,11 @@ Requires macOS 14.2+ for Process Tap support.
   "No app audio detected" state instead of false starvation, and a freshly (re)started output queue
   gets a short startup warmup so its first-cadence transient is not reported as a real underrun.
   Steady-state starvation is still counted.
+- **Rapid Real-toggle guard.** A per-app pending-operation state now ignores toggle / slider
+  auto-start attempts for a row while its Product Real start or stop is in flight, and the row shows
+  a non-interactive "working" badge. This is a UI/view-model guard layered above the settle and
+  lifecycle-serialization gates so a burst of rapid on/off clicks cannot pile up Core Audio
+  create/destroy churn (crackle/Starv). The audio callback is unchanged; cap stays 3.
 
 ### Fixed
 - Swift 6 language-mode test failure: `NSLock.lock()/unlock()` called from an async context is
