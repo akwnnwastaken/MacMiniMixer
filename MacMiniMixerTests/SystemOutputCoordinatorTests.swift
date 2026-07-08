@@ -170,6 +170,93 @@ final class SystemOutputCoordinatorTests: XCTestCase {
         XCTAssertTrue(result.didOutputDeviceChange)
     }
 
+    func testFinishEditingWithoutPriorSetReturnsNoWarning() {
+        let coordinator = makeCoordinator()
+
+        let message = coordinator.finishSystemVolumeEditing()
+
+        XCTAssertNil(message)
+    }
+
+    func testFinishEditingAfterSuccessfulSetReturnsNoWarning() {
+        let volumeController = FakeSystemVolumeController()
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        coordinator.setSystemVolume(60)
+        let message = coordinator.finishSystemVolumeEditing()
+
+        XCTAssertNil(message)
+    }
+
+    func testRefreshWithUnchangedDevicesReportsNoOutputDeviceChange() {
+        let lister = FakeOutputDeviceLister(devices: [
+            makeSystemOutputDevice(id: "built-in", isDefault: true),
+            makeSystemOutputDevice(id: "airpods")
+        ])
+        let coordinator = makeCoordinator(outputDeviceLister: lister)
+
+        let result = coordinator.refreshOutputDevices()
+
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "built-in")
+        XCTAssertEqual(result.previousDefaultDeviceID, "built-in")
+        XCTAssertEqual(result.currentDefaultDeviceID, "built-in")
+        XCTAssertFalse(result.didSelectionChange)
+        XCTAssertFalse(result.didOutputDeviceChange)
+    }
+
+    func testMuteFailureReportsCouldNotMuteWarning() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 70)
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeController: volumeController
+        )
+
+        let message = coordinator.toggleSystemOutputMuted()
+
+        XCTAssertEqual(message, "Could not mute system output")
+    }
+
+    func testRestoreFailureReportsCouldNotRestoreWarning() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 0)
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeController: volumeController
+        )
+
+        XCTAssertTrue(coordinator.isSystemOutputMuted)
+
+        let message = coordinator.toggleSystemOutputMuted()
+
+        XCTAssertEqual(message, "Could not restore system output")
+    }
+
+    func testUnmutingFromZeroWithoutRememberedVolumeRestoresDefault() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 0)
+        let volumeController = FakeSystemVolumeController()
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeController: volumeController
+        )
+
+        XCTAssertTrue(coordinator.isSystemOutputMuted)
+
+        let message = coordinator.toggleSystemOutputMuted()
+
+        XCTAssertNil(message)
+        XCTAssertEqual(coordinator.systemVolume, AppConstants.defaultSystemOutputRestoreVolume)
+        XCTAssertFalse(coordinator.isSystemOutputMuted)
+        XCTAssertEqual(
+            volumeController.requestedScalars,
+            [AppConstants.defaultSystemOutputRestoreVolume / AppConstants.volumeRange.upperBound]
+        )
+        XCTAssertEqual(
+            audioController.setSystemVolumeRequests,
+            [AppConstants.defaultSystemOutputRestoreVolume]
+        )
+    }
+
     private func makeCoordinator(
         audioController: FakeSystemOutputAudioController = FakeSystemOutputAudioController(systemVolume: 50),
         outputDeviceLister: FakeOutputDeviceLister = FakeOutputDeviceLister(devices: [
