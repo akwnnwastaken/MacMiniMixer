@@ -8,7 +8,14 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
     @Published private(set) var advancedManualLiveControlActive = false
     @Published private(set) var activeLiveControlAppName: String?
-    @Published private var productRealControlState = ProductRealControlState()
+    /// Product Real state now lives in `productRealControlCoordinator`; this forwards reads and
+    /// writes to it so the existing orchestration (still in this view model) is unchanged. The
+    /// coordinator fires `objectWillChange` on every write via the `setOnWillChange` wiring in
+    /// `init`, replacing the previous `@Published` behavior.
+    private var productRealControlState: ProductRealControlState {
+        get { productRealControlCoordinator.productRealControlState }
+        set { productRealControlCoordinator.productRealControlState = newValue }
+    }
 
     /// Live control is active when the Advanced manual session is running or at least one
     /// product session has confirmed-started. Derived so product and Advanced manual no
@@ -33,9 +40,14 @@ final class MixerViewModel: ObservableObject {
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private var appAudioResolutionTask: Task<Void, Never>?
     private let statusMessageController = MixerStatusMessageController()
-    /// Product Real dependency container. Inert this phase (see `ProductRealControlCoordinator`):
-    /// orchestration still lives in this view model and is not routed through it yet. Assigned at
-    /// the end of `init` once `self` (the seam) is fully initialized.
+    /// Product Real dependency container; **owns `ProductRealControlState`**. Orchestration still
+    /// lives in this view model and reaches the state through the `productRealControlState`
+    /// forwarding property. Assigned at the end of `init` once `self` (the seam) is fully
+    /// initialized. The implicitly-unwrapped `!` is deliberate and now load-bearing: eager
+    /// end-of-`init` assignment guarantees `setOnWillChange` is wired before any state mutation can
+    /// occur (a `lazy` alternative could create the coordinator on first state access *before* the
+    /// change handler is installed, dropping a UI update). Nothing reads the state during `init`, so
+    /// the IUO is never accessed while nil.
     private var productRealControlCoordinator: ProductRealControlCoordinator!
     private var terminationObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
@@ -168,7 +180,8 @@ final class MixerViewModel: ObservableObject {
         }
 
         // Build the Product Real dependency container now that `self` (the seam) is fully
-        // initialized. Inert this phase — orchestration still runs in this view model.
+        // initialized. It owns `ProductRealControlState`; orchestration still runs in this view
+        // model and reaches the state through the `productRealControlState` forwarding property.
         productRealControlCoordinator = ProductRealControlCoordinator(
             liveSessionManager: processTapLiveController,
             appAudioTargetResolver: appAudioTargetResolver,
@@ -177,6 +190,12 @@ final class MixerViewModel: ObservableObject {
             sideEffects: self,
             context: self
         )
+        // Forward the coordinator's state-change notifications to `objectWillChange`, replacing the
+        // previous `@Published` behavior of the state. Wired eagerly here (see the IUO note on the
+        // coordinator property) so the handler is installed before any state mutation can occur.
+        productRealControlCoordinator.setOnWillChange { [weak self] in
+            self?.objectWillChange.send()
+        }
     }
 
     deinit {

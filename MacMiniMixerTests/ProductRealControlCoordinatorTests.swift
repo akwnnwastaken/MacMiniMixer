@@ -51,6 +51,57 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
     }
 
+    // MARK: - State ownership / forwarding
+
+    func testStateMutationThroughCoordinatorFiresOnWillChangeOncePerWrite() {
+        let harness = makeHarness()
+        var willChangeCount = 0
+        harness.coordinator.setOnWillChange { willChangeCount += 1 }
+
+        harness.coordinator.productRealControlState.beginSession(
+            visibleAppID: "a",
+            displayName: "A",
+            controlledProcessIdentifier: 1,
+            source: .directVisiblePID
+        )
+        harness.coordinator.productRealControlState.beginOperation(for: "a")
+
+        XCTAssertEqual(willChangeCount, 2)
+        XCTAssertEqual(harness.coordinator.productRealControlState.activeVisibleAppIDs, ["a"])
+        XCTAssertTrue(harness.coordinator.productRealControlState.isOperationPending(for: "a"))
+    }
+
+    func testStateReadThroughCoordinatorDoesNotFireOnWillChange() {
+        let harness = makeHarness()
+        harness.coordinator.productRealControlState.beginSession(
+            visibleAppID: "a",
+            displayName: "A",
+            controlledProcessIdentifier: 1,
+            source: .directVisiblePID
+        )
+        var willChangeCount = 0
+        harness.coordinator.setOnWillChange { willChangeCount += 1 }
+
+        _ = harness.coordinator.productRealControlState.activeSessions
+        _ = harness.coordinator.productRealControlState.isResolving
+
+        XCTAssertEqual(willChangeCount, 0)
+    }
+
+    func testCoordinatorForwardsStateHelpersConsistently() {
+        let harness = makeHarness()
+
+        // Cap helper still reachable through the coordinator-owned state.
+        XCTAssertFalse(harness.coordinator.productRealControlState.wouldExceedConcurrentSessionCap(for: "a", cap: 3))
+
+        // Callback acceptance helper still reachable and consistent after a mutation.
+        let request = harness.coordinator.productRealControlState.beginStartRequest(for: "a")
+        XCTAssertTrue(harness.coordinator.productRealControlState.shouldAcceptCallback(for: "a", requestID: request))
+
+        harness.coordinator.productRealControlState.beginResolution(for: "a")
+        XCTAssertTrue(harness.coordinator.productRealControlState.isResolving(appID: "a"))
+    }
+
     // MARK: - Harness
 
     private struct Harness {
