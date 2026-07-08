@@ -17,6 +17,7 @@
 		9B7D1B012C8F4A9A8B2D0101 /* RealControlBannerPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B022C8F4A9A8B2D0101 /* RealControlBannerPresenter.swift */; };
 		9B7D1B052C8F4A9A8B2D0101 /* MixerVisibleAppsFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B062C8F4A9A8B2D0101 /* MixerVisibleAppsFilter.swift */; };
 		9B7D1B092C8F4A9A8B2D0101 /* MixerStatusMessageController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B0A2C8F4A9A8B2D0101 /* MixerStatusMessageController.swift */; };
+		9B7D1B0D2C8F4A9A8B2D0101 /* ProductRealControlSideEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B0E2C8F4A9A8B2D0101 /* ProductRealControlSideEffects.swift */; };
 		9B7D1AE22C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */; };
 		9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */; };
 		9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */; };
@@ -116,6 +117,7 @@
 		9B7D1B022C8F4A9A8B2D0101 /* RealControlBannerPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealControlBannerPresenter.swift; sourceTree = "<group>"; };
 		9B7D1B062C8F4A9A8B2D0101 /* MixerVisibleAppsFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerVisibleAppsFilter.swift; sourceTree = "<group>"; };
 		9B7D1B0A2C8F4A9A8B2D0101 /* MixerStatusMessageController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerStatusMessageController.swift; sourceTree = "<group>"; };
+		9B7D1B0E2C8F4A9A8B2D0101 /* ProductRealControlSideEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRealControlSideEffects.swift; sourceTree = "<group>"; };
 		9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedProcessTapDiagnosticsCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinator.swift; sourceTree = "<group>"; };
@@ -305,6 +307,7 @@
 				9B7D1B022C8F4A9A8B2D0101 /* RealControlBannerPresenter.swift */,
 				9B7D1B062C8F4A9A8B2D0101 /* MixerVisibleAppsFilter.swift */,
 				9B7D1B0A2C8F4A9A8B2D0101 /* MixerStatusMessageController.swift */,
+				9B7D1B0E2C8F4A9A8B2D0101 /* ProductRealControlSideEffects.swift */,
 				9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */,
 				9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */,
 				9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */,
@@ -528,6 +531,7 @@
 				9B7D1B012C8F4A9A8B2D0101 /* RealControlBannerPresenter.swift in Sources */,
 				9B7D1B052C8F4A9A8B2D0101 /* MixerVisibleAppsFilter.swift in Sources */,
 				9B7D1B092C8F4A9A8B2D0101 /* MixerStatusMessageController.swift in Sources */,
+				9B7D1B0D2C8F4A9A8B2D0101 /* ProductRealControlSideEffects.swift in Sources */,
 				9B7D1AE22C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift in Sources */,
 				9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */,
 				9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */,

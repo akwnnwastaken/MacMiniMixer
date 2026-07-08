@@ -6,7 +6,7 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
     @Published private(set) var statusMessage: MixerStatusMessage?
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
-    @Published private var advancedManualLiveControlActive = false
+    @Published private(set) var advancedManualLiveControlActive = false
     @Published private(set) var activeLiveControlAppName: String?
     @Published private var productRealControlState = ProductRealControlState()
 
@@ -792,10 +792,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func updateActiveLiveControlAppNameAfterProductChange() {
-        if advancedManualLiveControlActive {
+        if productRealContext.advancedManualLiveControlActive {
             return
         }
-        activeLiveControlAppName = productRealControlState.activeSessions.first?.displayName
+        productRealSideEffects.setActiveLiveControlAppName(productRealControlState.activeSessions.first?.displayName)
     }
 
     func refreshApplications() {
@@ -894,17 +894,17 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func startAutomaticRealControlIfNeeded(for app: MixerAppItem) {
-        guard isExperimentalRealAppControlEnabled else {
+        guard productRealContext.isExperimentalRealAppControlEnabled else {
             return
         }
 
-        guard !isTwoAppReadinessRunning else {
-            showStatus("Stop two-app test first", style: .warning)
+        guard !productRealContext.isTwoAppReadinessRunning else {
+            productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
             return
         }
 
         guard app.isEligibleForExperimentalLiveControl else {
-            showStatus("This app is not available for real app control", style: .warning)
+            productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
             return
         }
 
@@ -918,13 +918,13 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        if isAppAudioTargetResolving {
-            showStatus("Finish resolving app audio first", style: .warning)
+        if productRealContext.isAppAudioTargetResolving {
+            productRealSideEffects.showProductRealStatus("Finish resolving app audio first", style: .warning, action: nil)
             return
         }
 
-        if helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning {
-            showStatus("Stop helper probe first", style: .warning)
+        if productRealContext.isHelperBusy {
+            productRealSideEffects.showProductRealStatus("Stop helper probe first", style: .warning, action: nil)
             return
         }
 
@@ -933,7 +933,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         if let blockReason = productSessionStartBlockReason(for: app.id) {
-            showStatus(blockReason, style: .warning)
+            productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
             return
         }
 
@@ -945,11 +945,11 @@ final class MixerViewModel: ObservableObject {
     /// to `maxConcurrentLiveSessions`; Advanced manual control and diagnostics remain mutually
     /// exclusive with product control. Callers handle "already active for this app" separately.
     private func productSessionStartBlockReason(for appID: MixerAppItem.ID) -> String? {
-        if isProcessTapTesting {
+        if productRealContext.isProcessTapTesting {
             return "Stop active live control first"
         }
 
-        if advancedManualLiveControlActive {
+        if productRealContext.advancedManualLiveControlActive {
             return "Stop the active live control first"
         }
 
@@ -963,35 +963,35 @@ final class MixerViewModel: ObservableObject {
     }
 
     private func startExperimentalControl(for appID: MixerAppItem.ID) {
-        guard !isTwoAppReadinessRunning else {
-            showStatus("Stop two-app test first", style: .warning)
+        guard !productRealContext.isTwoAppReadinessRunning else {
+            productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
             return
         }
 
-        guard !isProcessTapTesting,
-              !isAppAudioTargetResolving else {
-            showStatus("Process Tap is already busy", style: .warning)
+        guard !productRealContext.isProcessTapTesting,
+              !productRealContext.isAppAudioTargetResolving else {
+            productRealSideEffects.showProductRealStatus("Process Tap is already busy", style: .warning, action: nil)
             return
         }
 
         if let blockReason = productSessionStartBlockReason(for: appID) {
-            showStatus(blockReason, style: .warning)
+            productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
             return
         }
 
         guard let app = apps.first(where: { $0.id == appID }) else {
-            showStatus("This app is not available for live control", style: .warning)
+            productRealSideEffects.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
             return
         }
 
         guard app.isEligibleForExperimentalLiveControl else {
-            showStatus("No valid process found", style: .warning)
+            productRealSideEffects.showProductRealStatus("No valid process found", style: .warning, action: nil)
             return
         }
 
         guard let processIdentifier = app.processIdentifier,
               NSRunningApplication(processIdentifier: pid_t(processIdentifier)) != nil else {
-            showStatus("This app is not available for live control", style: .warning)
+            productRealSideEffects.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
             return
         }
 
@@ -1024,18 +1024,19 @@ final class MixerViewModel: ObservableObject {
 
         if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
             visibleEligibility.reason == ProcessTapPermissionMessage.missingUsageDescriptionReason {
-            showStatus(
+            productRealSideEffects.showProductRealStatus(
                 ProcessTapPermissionMessage.message(
                     forEligibilityReason: visibleEligibility.reason,
                     fallback: visibleEligibility.reason ?? "Process Tap is unavailable"
                 ),
-                style: .warning
+                style: .warning,
+                action: nil
             )
             return
         }
 
         guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget) else {
-            showStatus("This app is not available for real app control", style: .warning)
+            productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
             return
         }
 
@@ -1324,17 +1325,17 @@ final class MixerViewModel: ObservableObject {
         switch result {
         case .resolved(let resolvedTarget):
             guard let app = apps.first(where: { $0.id == resolvedTarget.visibleAppID }) else {
-                showStatus("This app is not available for real app control", style: .warning)
+                productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
                 return
             }
 
-            guard !isTwoAppReadinessRunning else {
-                showStatus("Stop two-app test first", style: .warning)
+            guard !productRealContext.isTwoAppReadinessRunning else {
+                productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
                 return
             }
 
             if let blockReason = productSessionStartBlockReason(for: app.id) {
-                showStatus(blockReason, style: .warning)
+                productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
                 return
             }
 
@@ -1345,7 +1346,7 @@ final class MixerViewModel: ObservableObject {
             )
 
         case .unavailable(let reason):
-            showStatus(reason, style: .warning)
+            productRealSideEffects.showProductRealStatus(reason, style: .warning, action: nil)
 
         case .cancelled:
             break
@@ -1440,7 +1441,7 @@ final class MixerViewModel: ObservableObject {
         processTapLiveController.updateGain(sessionID: sessionID, gain: ProductRealControlState.gainOption(for: app))
     }
 
-    private var isAppAudioTargetResolving: Bool {
+    var isAppAudioTargetResolving: Bool {
         productRealControlState.isResolving
     }
 
@@ -1457,6 +1458,51 @@ final class MixerViewModel: ObservableObject {
         )
     }
 
+    /// The Product Real write/read seam, typed as the narrow protocols (see
+    /// `ProductRealControlSideEffects`). Product Real code goes through these so a future
+    /// `ProductRealControlCoordinator` can receive them as injected collaborators instead of the
+    /// whole view model. Both are `self` today; no behavior change.
+    private var productRealSideEffects: ProductRealControlSideEffects { self }
+    private var productRealContext: ProductRealControlContext { self }
+
+}
+
+extension MixerViewModel: ProductRealControlSideEffects {
+    func showProductRealStatus(
+        _ text: String,
+        style: MixerStatusMessage.Style,
+        action: MixerStatusMessage.Action?
+    ) {
+        showStatus(text, style: style, action: action)
+    }
+
+    func setActiveLiveControlAppName(_ name: String?) {
+        activeLiveControlAppName = name
+    }
+
+    func setProcessTapLiveDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics?) {
+        processTapLiveDiagnostics = diagnostics
+    }
+
+    func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult) {
+        advancedProcessTapDiagnostics.setResult(result)
+    }
+
+    func setLiveControlDiagnosticProgress(_ progress: ProcessTapDiagnosticProgress?) {
+        advancedProcessTapDiagnostics.setProgress(progress)
+    }
+
+    func setLiveControlDiagnosticRunning(_ isRunning: Bool) {
+        advancedProcessTapDiagnostics.setRunning(isRunning)
+    }
+}
+
+extension MixerViewModel: ProductRealControlContext {
+    /// `helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning`, surfaced as one
+    /// flag for the Product Real start-block checks (unchanged condition, just named).
+    var isHelperBusy: Bool {
+        helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning
+    }
 }
 
 private extension MixerAppItem {
