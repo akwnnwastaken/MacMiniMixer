@@ -33,6 +33,10 @@ final class MixerViewModel: ObservableObject {
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private var appAudioResolutionTask: Task<Void, Never>?
     private let statusMessageController = MixerStatusMessageController()
+    /// Product Real dependency container. Inert this phase (see `ProductRealControlCoordinator`):
+    /// orchestration still lives in this view model and is not routed through it yet. Assigned at
+    /// the end of `init` once `self` (the seam) is fully initialized.
+    private var productRealControlCoordinator: ProductRealControlCoordinator!
     private var terminationObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
@@ -162,6 +166,17 @@ final class MixerViewModel: ObservableObject {
                 self?.handleSystemDidWake()
             }
         }
+
+        // Build the Product Real dependency container now that `self` (the seam) is fully
+        // initialized. Inert this phase — orchestration still runs in this view model.
+        productRealControlCoordinator = ProductRealControlCoordinator(
+            liveSessionManager: processTapLiveController,
+            appAudioTargetResolver: appAudioTargetResolver,
+            startSettleGate: productRealStartSettleGate,
+            processTapEligibility: processTapEligibility,
+            sideEffects: self,
+            context: self
+        )
     }
 
     deinit {
