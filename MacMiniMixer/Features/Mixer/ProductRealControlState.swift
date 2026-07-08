@@ -199,6 +199,22 @@ struct ProductRealControlState: Equatable, Sendable {
         pendingStartRequestByAppID[appID] == requestID
     }
 
+    /// Whether an async Product Real callback carrying `requestID` for `appID` should be accepted.
+    /// Accept when it is still the current pending start request; otherwise accept only for a
+    /// confirmed (started) session this request owns. A cancelled optimistic entry still carries the
+    /// request id but has no live session, so its stale callbacks are rejected.
+    func shouldAcceptCallback(for appID: MixerAppItem.ID, requestID: ProductRealControlStartRequestID) -> Bool {
+        if isCurrentStartRequest(requestID, for: appID) {
+            return true
+        }
+
+        guard let session = activeSessionsByAppID[appID] else {
+            return false
+        }
+
+        return session.startRequestID == requestID && session.liveSessionID != nil
+    }
+
     /// Clears the pending start request for a single app only.
     mutating func clearStartRequest(for appID: MixerAppItem.ID) {
         pendingStartRequestByAppID.removeValue(forKey: appID)
@@ -252,6 +268,14 @@ struct ProductRealControlState: Equatable, Sendable {
 
     func shouldAcceptResolutionResult(for appID: MixerAppItem.ID) -> Bool {
         isResolving(appID: appID)
+    }
+
+    /// Whether starting a new product session for `appID` would exceed the concurrent-session `cap`.
+    /// An app that already owns a session does not count toward the limit (a restart / re-assert of
+    /// the same app is always allowed); a brand-new app is blocked once the cap is reached.
+    func wouldExceedConcurrentSessionCap(for appID: MixerAppItem.ID, cap: Int) -> Bool {
+        let alreadyCountsTowardLimit = activeSessionsByAppID[appID] != nil
+        return !alreadyCountsTowardLimit && activeSessions.count >= cap
     }
 
     static func gainOption(for app: MixerAppItem) -> ProcessTapReplayGainOption {

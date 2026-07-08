@@ -308,6 +308,134 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .cachedHelper), .cachedHelper)
     }
 
+    // MARK: - shouldAcceptCallback
+
+    func testCallbackAcceptedForCurrentPendingStartRequest() {
+        var state = ProductRealControlState()
+        let request = state.beginStartRequest(for: "spotify")
+
+        XCTAssertTrue(state.shouldAcceptCallback(for: "spotify", requestID: request))
+    }
+
+    func testStaleCallbackRejectedWhenRequestSupersededAndNoConfirmedSession() {
+        var state = ProductRealControlState()
+        let first = state.beginStartRequest(for: "spotify")
+        let second = state.beginStartRequest(for: "spotify")
+
+        XCTAssertFalse(state.shouldAcceptCallback(for: "spotify", requestID: first))
+        XCTAssertTrue(state.shouldAcceptCallback(for: "spotify", requestID: second))
+    }
+
+    func testCallbackAcceptedForConfirmedSessionThatOwnsRequestEvenAfterPendingCleared() {
+        var state = ProductRealControlState()
+        let request = state.beginStartRequest(for: "spotify")
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID,
+            liveSessionID: ProcessTapLiveSessionID(),
+            startRequestID: request
+        )
+        state.clearStartRequest(for: "spotify")
+
+        XCTAssertFalse(state.isCurrentStartRequest(request, for: "spotify"))
+        XCTAssertTrue(state.shouldAcceptCallback(for: "spotify", requestID: request))
+    }
+
+    func testCallbackRejectedForOptimisticSessionWithoutLiveSessionIDOnceSuperseded() {
+        var state = ProductRealControlState()
+        let request = state.beginStartRequest(for: "spotify")
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID,
+            liveSessionID: nil,
+            startRequestID: request
+        )
+        _ = state.beginStartRequest(for: "spotify")
+
+        // Session still carries this request id but has no live session id, so a late callback
+        // for the superseded request must be rejected.
+        XCTAssertFalse(state.shouldAcceptCallback(for: "spotify", requestID: request))
+    }
+
+    func testCallbackRejectedForUnknownApp() {
+        let state = ProductRealControlState()
+        let bogus = ProductRealControlStartRequestID(rawValue: 999)
+
+        XCTAssertFalse(state.shouldAcceptCallback(for: "ghost", requestID: bogus))
+    }
+
+    func testCallbackRejectedWhenConfirmedSessionOwnsADifferentRequest() {
+        var state = ProductRealControlState()
+        let request = state.beginStartRequest(for: "spotify")
+        state.beginSession(
+            visibleAppID: "spotify",
+            displayName: "Spotify",
+            controlledProcessIdentifier: 101,
+            source: .directVisiblePID,
+            liveSessionID: ProcessTapLiveSessionID(),
+            startRequestID: request
+        )
+        state.clearStartRequest(for: "spotify")
+        let bogus = ProductRealControlStartRequestID(rawValue: 999)
+
+        XCTAssertFalse(state.shouldAcceptCallback(for: "spotify", requestID: bogus))
+    }
+
+    // MARK: - wouldExceedConcurrentSessionCap
+
+    func testStartAllowedWhenUnderCap() {
+        let state = ProductRealControlState()
+
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "spotify", cap: 3))
+    }
+
+    func testNewAppBlockedOnceCapReached() {
+        var state = ProductRealControlState()
+        for appID in ["a", "b", "c"] {
+            state.beginSession(
+                visibleAppID: appID,
+                displayName: appID,
+                controlledProcessIdentifier: 100,
+                source: .directVisiblePID
+            )
+        }
+
+        XCTAssertEqual(state.activeSessions.count, 3)
+        XCTAssertTrue(state.wouldExceedConcurrentSessionCap(for: "d", cap: 3))
+    }
+
+    func testExistingAppNotBlockedAtCapBecauseItDoesNotCountTowardLimit() {
+        var state = ProductRealControlState()
+        for appID in ["a", "b", "c"] {
+            state.beginSession(
+                visibleAppID: appID,
+                displayName: appID,
+                controlledProcessIdentifier: 100,
+                source: .directVisiblePID
+            )
+        }
+
+        // An app that already owns a session may re-assert even at the cap.
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "b", cap: 3))
+    }
+
+    func testNewAppBlockedUnderCapOfOneWhenAnotherSessionActive() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "a",
+            displayName: "a",
+            controlledProcessIdentifier: 100,
+            source: .directVisiblePID
+        )
+
+        XCTAssertTrue(state.wouldExceedConcurrentSessionCap(for: "b", cap: 1))
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "a", cap: 1))
+    }
+
     func testGainOptionUsesCurrentMuteAndVolumeMapping() {
         let audibleApp = MixerAppItem(
             id: "spotify",

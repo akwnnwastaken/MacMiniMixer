@@ -953,9 +953,10 @@ final class MixerViewModel: ObservableObject {
             return "Stop the active live control first"
         }
 
-        let alreadyCountsTowardLimit = productRealControlState.activeSessionsByAppID[appID] != nil
-        if !alreadyCountsTowardLimit,
-           productRealControlState.activeSessions.count >= AppConstants.maxConcurrentLiveSessions {
+        if productRealControlState.wouldExceedConcurrentSessionCap(
+            for: appID,
+            cap: AppConstants.maxConcurrentLiveSessions
+        ) {
             return "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
         }
 
@@ -1119,7 +1120,7 @@ final class MixerViewModel: ObservableObject {
                 timeoutPolicy: .indefinite
             ) { _, diagnostics in
                 Task { @MainActor in
-                    guard self.shouldAcceptProductLiveCallback(appID: app.id, requestID: startRequestID) else {
+                    guard self.productRealControlState.shouldAcceptCallback(for: app.id, requestID: startRequestID) else {
                         return
                     }
                     self.processTapLiveDiagnostics = diagnostics
@@ -1212,24 +1213,6 @@ final class MixerViewModel: ObservableObject {
                 await orphanCleanupTask.value
             }
         }
-    }
-
-    private func shouldAcceptProductLiveCallback(
-        appID: MixerAppItem.ID,
-        requestID: ProductRealControlStartRequestID
-    ) -> Bool {
-        if productRealControlState.isCurrentStartRequest(requestID, for: appID) {
-            return true
-        }
-
-        // Otherwise only accept callbacks for a confirmed (started) session that this request
-        // owns. A cancelled optimistic entry still carries the request id but has no live
-        // session, so its stale callbacks must be rejected.
-        guard let session = productRealControlState.activeSessionsByAppID[appID] else {
-            return false
-        }
-
-        return session.startRequestID == requestID && session.liveSessionID != nil
     }
 
     private func cleanupStaleProductLiveStart(_ startResult: ProcessTapLiveSessionStartResult) async {
