@@ -32,7 +32,7 @@ final class MixerViewModel: ObservableObject {
     private let productRealStartSettleGate: ProductRealStartSettling
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private var appAudioResolutionTask: Task<Void, Never>?
-    private var statusClearTask: Task<Void, Never>?
+    private let statusMessageController = MixerStatusMessageController()
     private var terminationObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
@@ -1450,25 +1450,11 @@ final class MixerViewModel: ObservableObject {
         action: MixerStatusMessage.Action? = nil
     ) {
         let message = MixerStatusMessage(text: text, style: style, action: action)
-        statusMessage = message
-        clearStatusAfterDelay(message.id)
-    }
-
-    private func clearStatusAfterDelay(_ messageID: MixerStatusMessage.ID) {
-        statusClearTask?.cancel()
-
-        statusClearTask = Task { [weak self] in
-            let delayNanoseconds = UInt64(AppConstants.statusMessageAutoClearDelay * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: delayNanoseconds)
-
-            await MainActor.run {
-                guard self?.statusMessage?.id == messageID else {
-                    return
-                }
-
-                self?.statusMessage = nil
-            }
-        }
+        statusMessageController.show(
+            message,
+            setMessage: { [weak self] in self?.statusMessage = $0 },
+            currentMessageID: { [weak self] in self?.statusMessage?.id }
+        )
     }
 
 }
