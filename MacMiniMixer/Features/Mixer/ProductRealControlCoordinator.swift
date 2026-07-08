@@ -2,11 +2,11 @@ import Foundation
 
 /// Dependency container for Product Real Control orchestration.
 ///
-/// **Phase C shell (inert):** this type currently only holds the collaborators the Product Real
-/// start/stop path uses. The orchestration itself — the async start body, per-app stop, stale-start
-/// cleanup, resolution handling, and lifecycle/output-change teardown — **still lives in
-/// `MixerViewModel`** during this phase and is *not* invoked through this coordinator yet. Later
-/// phases move those methods here one at a time, calling out through the injected
+/// **Phase C (in progress):** this type holds the collaborators the Product Real start/stop path
+/// uses, plus the first migrated leaf — stale-start cleanup. The rest of the orchestration — the
+/// async start body, per-app stop, resolution handling, and lifecycle/output-change teardown —
+/// **still lives in `MixerViewModel`** during this phase and is not invoked through this coordinator
+/// yet. Later phases move those methods here one at a time, calling out through the injected
 /// `ProductRealControlSideEffects` / `ProductRealControlContext` seam instead of the view model
 /// directly.
 ///
@@ -37,5 +37,23 @@ final class ProductRealControlCoordinator {
         self.processTapEligibility = processTapEligibility
         self.sideEffects = sideEffects
         self.context = context
+    }
+
+    /// Tears down a stale/orphaned Product Real start's just-created session by its own session id.
+    /// Called by the async start body (still in `MixerViewModel`) after it rejects a superseded
+    /// start. Stateless: reads only the start result and the held live-session manager, and uses the
+    /// same `.userStopped` stop reason as before. No-op when the start did not actually start a live
+    /// session, or when it started without a session-specific cleanup handle.
+    func cleanupStaleProductLiveStart(_ startResult: ProcessTapLiveSessionStartResult) async {
+        guard startResult.result.outcome == .liveControlStarted else {
+            return
+        }
+
+        guard let sessionID = startResult.sessionID else {
+            AppLogger.processTap.warning("Stale Product Real Control start succeeded without a session-specific cleanup handle")
+            return
+        }
+
+        _ = await liveSessionManager.stopSession(id: sessionID, reason: .userStopped)
     }
 }

@@ -1223,24 +1223,11 @@ final class MixerViewModel: ObservableObject {
                 // session id. Current state and other apps' sessions are left untouched. Register
                 // the orphan teardown with the settle gate so a concurrent new start waits for it
                 // (and the settle window) before creating its own Core Audio objects.
-                let orphanCleanupTask = Task { await self.cleanupStaleProductLiveStart(startResult) }
+                let orphanCleanupTask = Task { await self.productRealControlCoordinator.cleanupStaleProductLiveStart(startResult) }
                 self.productRealStartSettleGate.registerStop(orphanCleanupTask)
                 await orphanCleanupTask.value
             }
         }
-    }
-
-    private func cleanupStaleProductLiveStart(_ startResult: ProcessTapLiveSessionStartResult) async {
-        guard startResult.result.outcome == .liveControlStarted else {
-            return
-        }
-
-        guard let sessionID = startResult.sessionID else {
-            AppLogger.processTap.warning("Stale Product Real Control start succeeded without a session-specific cleanup handle")
-            return
-        }
-
-        _ = await processTapLiveController.stopSession(id: sessionID, reason: .userStopped)
     }
 
     private func handleProductLiveControlStopped(
