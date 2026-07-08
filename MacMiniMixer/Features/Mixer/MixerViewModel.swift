@@ -1061,7 +1061,7 @@ final class MixerViewModel: ObservableObject {
         resolutionSource: ResolvedAppAudioTarget.Source? = nil
     ) {
         guard target.processIdentifier.map({ $0 > 0 }) == true else {
-            showStatus("This app is not available for live control", style: .warning)
+            productRealSideEffects.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
             return
         }
 
@@ -1083,8 +1083,8 @@ final class MixerViewModel: ObservableObject {
             source: ProductRealControlStartSource(resolutionSource: resolutionSource),
             startRequestID: startRequestID
         )
-        activeLiveControlAppName = app.name
-        advancedProcessTapDiagnostics.setResult(
+        productRealSideEffects.setActiveLiveControlAppName(app.name)
+        productRealSideEffects.setLiveControlDiagnosticResult(
             ProcessTapTestResult(
                 outcome: .liveControlStarting,
                 message: "Starting experimental live control for \(app.name)...",
@@ -1092,7 +1092,7 @@ final class MixerViewModel: ObservableObject {
                 severity: .info
             )
         )
-        advancedProcessTapDiagnostics.setProgress(
+        productRealSideEffects.setLiveControlDiagnosticProgress(
             ProcessTapDiagnosticProgress(
                 callbackCount: 0,
                 peakLevel: 0,
@@ -1100,8 +1100,8 @@ final class MixerViewModel: ObservableObject {
                 audioDetected: false
             )
         )
-        processTapLiveDiagnostics = nil
-        advancedProcessTapDiagnostics.setRunning(true)
+        productRealSideEffects.setProcessTapLiveDiagnostics(nil)
+        productRealSideEffects.setLiveControlDiagnosticRunning(true)
 
         // Mark this row's start transition in flight so rapid re-toggles are ignored until the async
         // start below resolves (cleared at the top of the post-await block, for every outcome).
@@ -1123,8 +1123,8 @@ final class MixerViewModel: ObservableObject {
                     guard self.productRealControlState.shouldAcceptCallback(for: app.id, requestID: startRequestID) else {
                         return
                     }
-                    self.processTapLiveDiagnostics = diagnostics
-                    self.advancedProcessTapDiagnostics.setProgress(diagnostics.progress)
+                    self.productRealSideEffects.setProcessTapLiveDiagnostics(diagnostics)
+                    self.productRealSideEffects.setLiveControlDiagnosticProgress(diagnostics.progress)
                 }
             } onStopped: { sessionID, result, diagnostics in
                 Task { @MainActor in
@@ -1151,14 +1151,14 @@ final class MixerViewModel: ObservableObject {
                     }
                     // This start owned the "running" diagnostics flag (starts are serialised by
                     // the isProcessTapTesting guard), so clear it now that it is rejected.
-                    advancedProcessTapDiagnostics.setRunning(false)
-                    advancedProcessTapDiagnostics.setProgress(nil)
+                    productRealSideEffects.setLiveControlDiagnosticRunning(false)
+                    productRealSideEffects.setLiveControlDiagnosticProgress(nil)
                     return false
                 }
 
                 productRealControlState.clearStartRequest(for: app.id)
-                advancedProcessTapDiagnostics.setResult(result)
-                advancedProcessTapDiagnostics.setRunning(false)
+                productRealSideEffects.setLiveControlDiagnosticResult(result)
+                productRealSideEffects.setLiveControlDiagnosticRunning(false)
 
                 if result.outcome == .liveControlStarted {
                     // Re-assert the session after the await with the real engine session id
@@ -1171,7 +1171,7 @@ final class MixerViewModel: ObservableObject {
                         liveSessionID: startResult.sessionID,
                         startRequestID: startRequestID
                     )
-                    activeLiveControlAppName = app.name
+                    productRealSideEffects.setActiveLiveControlAppName(app.name)
                 } else {
                     if resolutionSource == .cachedHelper {
                         appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
@@ -1179,8 +1179,8 @@ final class MixerViewModel: ObservableObject {
 
                     productRealControlState.clearSession(for: app.id)
                     updateActiveLiveControlAppNameAfterProductChange()
-                    processTapLiveDiagnostics = nil
-                    advancedProcessTapDiagnostics.setProgress(nil)
+                    productRealSideEffects.setProcessTapLiveDiagnostics(nil)
+                    productRealSideEffects.setLiveControlDiagnosticProgress(nil)
 
                     if resolutionSource == .cachedHelper,
                        isExperimentalRealAppControlEnabled,
@@ -1192,7 +1192,7 @@ final class MixerViewModel: ObservableObject {
                         if resolutionSource == .discoveredHelper {
                             appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
                         }
-                        showStatus(
+                        productRealSideEffects.showProductRealStatus(
                             "Could not start live control for this app",
                             style: .warning,
                             action: result.suggestsSystemAudioRecordingSettings ? .openSystemAudioRecordingSettings : nil
