@@ -102,34 +102,141 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.coordinator.productRealControlState.isResolving(appID: "a"))
     }
 
+    // MARK: - Resolution slice
+
+    func testStartResolvedStartsDirectlyWhenVisibleProcessEligible() {
+        let harness = makeHarness(visibleProcessEligible: true)
+        let app = makeApp()
+
+        harness.coordinator.startResolvedExperimentalControl(for: app)
+
+        XCTAssertEqual(harness.sideEffects.startResolvedCalls.count, 1)
+        XCTAssertEqual(harness.sideEffects.startResolvedCalls.first?.app.id, app.id)
+        XCTAssertNil(harness.sideEffects.startResolvedCalls.first?.source)
+        // No resolution was needed, so no resolving state was entered.
+        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
+    }
+
+    func testHandleResolvedResultStartsWithResolvedTargetWhenResolving() {
+        let harness = makeHarness()
+        let app = makeApp()
+        harness.context.apps = [app]
+        harness.coordinator.productRealControlState.beginResolution(for: app.id)
+
+        let resolved = ResolvedAppAudioTarget(
+            visibleAppID: app.id,
+            visibleAppName: app.name,
+            target: makeTarget(for: app),
+            kind: .helper,
+            source: .discoveredHelper
+        )
+        harness.coordinator.handleAppAudioTargetResolution(.resolved(resolved), for: app.id)
+
+        XCTAssertEqual(harness.sideEffects.startResolvedCalls.count, 1)
+        XCTAssertEqual(harness.sideEffects.startResolvedCalls.first?.source, .discoveredHelper)
+        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
+    }
+
+    func testHandleUnavailableResultReportsReasonAndClearsResolving() {
+        let harness = makeHarness()
+        harness.coordinator.productRealControlState.beginResolution(for: "safari")
+
+        harness.coordinator.handleAppAudioTargetResolution(.unavailable("No audio helper found"), for: "safari")
+
+        XCTAssertEqual(harness.sideEffects.statusMessages, ["No audio helper found"])
+        XCTAssertTrue(harness.sideEffects.startResolvedCalls.isEmpty)
+        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
+    }
+
+    func testHandleCancelledResultClearsResolvingWithoutStatus() {
+        let harness = makeHarness()
+        harness.coordinator.productRealControlState.beginResolution(for: "safari")
+
+        harness.coordinator.handleAppAudioTargetResolution(.cancelled, for: "safari")
+
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+        XCTAssertTrue(harness.sideEffects.startResolvedCalls.isEmpty)
+        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
+    }
+
+    func testHandleResultIgnoredWhenNotResolving() {
+        let harness = makeHarness()
+        let app = makeApp()
+        harness.context.apps = [app]
+        let resolved = ResolvedAppAudioTarget(
+            visibleAppID: app.id,
+            visibleAppName: app.name,
+            target: makeTarget(for: app),
+            kind: .helper,
+            source: .discoveredHelper
+        )
+
+        // Not resolving for this app → the result is stale and must be ignored.
+        harness.coordinator.handleAppAudioTargetResolution(.resolved(resolved), for: app.id)
+
+        XCTAssertTrue(harness.sideEffects.startResolvedCalls.isEmpty)
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+    }
+
+    func testCancelAppAudioTargetResolutionClearsResolvingAndCancelsResolver() {
+        let harness = makeHarness()
+        harness.coordinator.productRealControlState.beginResolution(for: "safari")
+
+        harness.coordinator.cancelAppAudioTargetResolution(reason: .userStopped)
+
+        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
+        XCTAssertEqual(harness.resolver.cancelReasons, [.userStopped])
+    }
+
+    func testCancelAppAudioTargetResolutionIsNoOpWhenNotResolving() {
+        let harness = makeHarness()
+
+        harness.coordinator.cancelAppAudioTargetResolution(reason: .userStopped)
+
+        XCTAssertTrue(harness.resolver.cancelReasons.isEmpty)
+    }
+
     // MARK: - Harness
 
     private struct Harness {
         let coordinator: ProductRealControlCoordinator
         let liveSessionManager: FakeProductRealLiveSessionManager
+        let resolver: RecordingAppAudioTargetResolver
         // Held so the coordinator's `weak` seam references stay alive for the test's lifetime.
         let sideEffects: StubProductRealControlSideEffects
         let context: StubProductRealControlContext
     }
 
-    private func makeHarness() -> Harness {
+    private func makeHarness(visibleProcessEligible: Bool = false) -> Harness {
         let liveSessionManager = FakeProductRealLiveSessionManager()
+        let resolver = RecordingAppAudioTargetResolver()
         let sideEffects = StubProductRealControlSideEffects()
         let context = StubProductRealControlContext()
         let coordinator = ProductRealControlCoordinator(
             liveSessionManager: liveSessionManager,
-            appAudioTargetResolver: InertAppAudioTargetResolver(),
+            appAudioTargetResolver: resolver,
             startSettleGate: ProductRealStartSettleGate(),
-            processTapEligibility: { _ in ProcessTapProcessEligibility(isEligible: false, reason: nil) },
+            processTapEligibility: { _ in
+                visibleProcessEligible ? .eligible : ProcessTapProcessEligibility(isEligible: false, reason: nil)
+            },
             sideEffects: sideEffects,
             context: context
         )
         return Harness(
             coordinator: coordinator,
             liveSessionManager: liveSessionManager,
+            resolver: resolver,
             sideEffects: sideEffects,
             context: context
         )
+    }
+
+    private func makeApp(id: String = "safari", name: String = "Safari", pid: Int32? = 100) -> MixerAppItem {
+        MixerAppItem(id: id, name: name, icon: .systemSymbol("app"), processIdentifier: pid, volume: 50)
+    }
+
+    private func makeTarget(for app: MixerAppItem) -> ProcessTapTarget {
+        ProcessTapTarget(appID: app.id, appName: app.name, processIdentifier: app.processIdentifier)
     }
 
     private func makeResult(_ outcome: ProcessTapTestResult.Outcome) -> ProcessTapTestResult {
@@ -206,7 +313,42 @@ private final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling
     }
 }
 
-private final class InertAppAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
+private final class StubProductRealControlSideEffects: ProductRealControlSideEffects {
+    private(set) var statusMessages: [String] = []
+    private(set) var startResolvedCalls: [(app: MixerAppItem, target: ProcessTapTarget, source: ResolvedAppAudioTarget.Source?)] = []
+
+    func showProductRealStatus(_ text: String, style: MixerStatusMessage.Style, action: MixerStatusMessage.Action?) {
+        statusMessages.append(text)
+    }
+    func setActiveLiveControlAppName(_ name: String?) {}
+    func setProcessTapLiveDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics?) {}
+    func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult) {}
+    func setLiveControlDiagnosticProgress(_ progress: ProcessTapDiagnosticProgress?) {}
+    func setLiveControlDiagnosticRunning(_ isRunning: Bool) {}
+    func startResolvedProductReal(app: MixerAppItem, target: ProcessTapTarget, resolutionSource: ResolvedAppAudioTarget.Source?) {
+        startResolvedCalls.append((app, target, resolutionSource))
+    }
+}
+
+private final class StubProductRealControlContext: ProductRealControlContext {
+    var apps: [MixerAppItem] = []
+    var isExperimentalRealAppControlEnabled: Bool { false }
+    var advancedManualLiveControlActive: Bool { false }
+    var selectedProcessTapAppID: MixerAppItem.ID? { nil }
+    var isTwoAppReadinessRunning: Bool { false }
+    var isProcessTapTesting: Bool { false }
+    var isHelperBusy: Bool { false }
+    var isAppAudioTargetResolving: Bool { false }
+}
+
+private final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedCancelReasons: [ProcessTapCandidateProbeStopReason] = []
+
+    var cancelReasons: [ProcessTapCandidateProbeStopReason] {
+        lock.withLock { recordedCancelReasons }
+    }
+
     func resolveTarget(
         for request: AppAudioTargetRequest,
         allowsCachedLookup: Bool,
@@ -215,27 +357,10 @@ private final class InertAppAudioTargetResolver: AppAudioTargetResolving, @unche
         .cancelled
     }
 
-    func cancelCurrentResolution(reason: ProcessTapCandidateProbeStopReason) {}
+    func cancelCurrentResolution(reason: ProcessTapCandidateProbeStopReason) {
+        lock.withLock { recordedCancelReasons.append(reason) }
+    }
+
     func invalidateCachedTarget(for request: AppAudioTargetRequest) {}
     func invalidateAllCachedTargets() {}
-}
-
-private final class StubProductRealControlSideEffects: ProductRealControlSideEffects {
-    func showProductRealStatus(_ text: String, style: MixerStatusMessage.Style, action: MixerStatusMessage.Action?) {}
-    func setActiveLiveControlAppName(_ name: String?) {}
-    func setProcessTapLiveDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics?) {}
-    func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult) {}
-    func setLiveControlDiagnosticProgress(_ progress: ProcessTapDiagnosticProgress?) {}
-    func setLiveControlDiagnosticRunning(_ isRunning: Bool) {}
-}
-
-private final class StubProductRealControlContext: ProductRealControlContext {
-    var apps: [MixerAppItem] { [] }
-    var isExperimentalRealAppControlEnabled: Bool { false }
-    var advancedManualLiveControlActive: Bool { false }
-    var selectedProcessTapAppID: MixerAppItem.ID? { nil }
-    var isTwoAppReadinessRunning: Bool { false }
-    var isProcessTapTesting: Bool { false }
-    var isHelperBusy: Bool { false }
-    var isAppAudioTargetResolving: Bool { false }
 }

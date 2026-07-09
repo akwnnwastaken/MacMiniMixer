@@ -26,6 +26,14 @@ protocol ProductRealControlSideEffects: AnyObject {
     func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult)
     func setLiveControlDiagnosticProgress(_ progress: ProcessTapDiagnosticProgress?)
     func setLiveControlDiagnosticRunning(_ isRunning: Bool)
+    /// Runs the Product Real async start body for a target the coordinator has resolved (or found
+    /// directly eligible). The async start orchestration stays in `MixerViewModel`; the resolution
+    /// slice in the coordinator calls back through this to kick it off.
+    func startResolvedProductReal(
+        app: MixerAppItem,
+        target: ProcessTapTarget,
+        resolutionSource: ResolvedAppAudioTarget.Source?
+    )
 }
 
 /// Read-side seam: the cross-subsystem state the Product Real start path consults when deciding

@@ -38,7 +38,6 @@ final class MixerViewModel: ObservableObject {
     private let appAudioTargetResolver: AppAudioTargetResolving
     private let productRealStartSettleGate: ProductRealStartSettling
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
-    private var appAudioResolutionTask: Task<Void, Never>?
     private let statusMessageController = MixerStatusMessageController()
     /// Product Real dependency container; **owns `ProductRealControlState`**. Orchestration still
     /// lives in this view model and reaches the state through the `productRealControlState`
@@ -211,7 +210,8 @@ final class MixerViewModel: ObservableObject {
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
         _ = twoAppReadiness.stopNowForTermination(reason: .appTerminating)
-        appAudioResolutionTask?.cancel()
+        // The resolution task now lives in `productRealControlCoordinator`, whose own `deinit`
+        // cancels it as it is released alongside this view model.
         appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
         appAudioTargetResolver.invalidateAllCachedTargets()
         helperProcessAudioProbe.stopCurrentProbe(reason: .userStopped)
@@ -410,7 +410,7 @@ final class MixerViewModel: ObservableObject {
         }
 
         if !isEnabled {
-            cancelAppAudioTargetResolution(reason: .userStopped)
+            productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
             appAudioTargetResolver.invalidateAllCachedTargets()
         }
     }
@@ -484,7 +484,7 @@ final class MixerViewModel: ObservableObject {
 
         if isAppAudioTargetResolving {
             logChange("cancelling app audio resolution")
-            cancelAppAudioTargetResolution(reason: .outputDeviceChanged)
+            productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .outputDeviceChanged)
         }
 
         if advancedProcessTapDiagnostics.isReplayProbeRunning {
@@ -727,7 +727,7 @@ final class MixerViewModel: ObservableObject {
         _ = processTapLiveController.stopLiveControlNow(reason: liveStopReason)
         _ = twoAppReadiness.stopNow(reason: liveStopReason)
         advancedHelperDiscovery.stopAutoDetect(reason: .userStopped)
-        appAudioResolutionTask?.cancel()
+        productRealControlCoordinator.cancelResolutionTask()
         appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
         appAudioTargetResolver.invalidateAllCachedTargets()
         advancedHelperDiscovery.stopProbe(reason: .userStopped)
@@ -761,13 +761,13 @@ final class MixerViewModel: ObservableObject {
     func stopTwoAppReadinessForPanelClose() {
         guard isTwoAppReadinessRunning else {
             stopHelperProcessAutoDetect(reason: .userStopped)
-            cancelAppAudioTargetResolution(reason: .userStopped)
+            productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
             return
         }
 
         stopTwoAppReadiness(reason: .userStopped)
         stopHelperProcessAutoDetect(reason: .userStopped)
-        cancelAppAudioTargetResolution(reason: .userStopped)
+        productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
     }
 
     func isExperimentalControlActive(for appID: MixerAppItem.ID) -> Bool {
@@ -873,7 +873,7 @@ final class MixerViewModel: ObservableObject {
 
         if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
            !apps.contains(where: { $0.id == resolvingAppID }) {
-            cancelAppAudioTargetResolution(reason: .targetExited)
+            productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .targetExited)
         }
     }
 
@@ -966,35 +966,12 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        if let blockReason = productSessionStartBlockReason(for: app.id) {
+        if let blockReason = productRealControlCoordinator.productSessionStartBlockReason(for: app.id) {
             productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
             return
         }
 
-        startResolvedExperimentalControl(for: app)
-    }
-
-    /// Whether a new product real-control session may start for `appID`. Returns a warning
-    /// message when blocked, or nil when allowed. Multiple product sessions are permitted up
-    /// to `maxConcurrentLiveSessions`; Advanced manual control and diagnostics remain mutually
-    /// exclusive with product control. Callers handle "already active for this app" separately.
-    private func productSessionStartBlockReason(for appID: MixerAppItem.ID) -> String? {
-        if productRealContext.isProcessTapTesting {
-            return "Stop active live control first"
-        }
-
-        if productRealContext.advancedManualLiveControlActive {
-            return "Stop the active live control first"
-        }
-
-        if productRealControlState.wouldExceedConcurrentSessionCap(
-            for: appID,
-            cap: AppConstants.maxConcurrentLiveSessions
-        ) {
-            return "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
-        }
-
-        return nil
+        productRealControlCoordinator.startResolvedExperimentalControl(for: app)
     }
 
     private func startExperimentalControl(for appID: MixerAppItem.ID) {
@@ -1009,7 +986,7 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        if let blockReason = productSessionStartBlockReason(for: appID) {
+        if let blockReason = productRealControlCoordinator.productSessionStartBlockReason(for: appID) {
             productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
             return
         }
@@ -1036,57 +1013,6 @@ final class MixerViewModel: ObservableObject {
             processIdentifier: app.processIdentifier
         )
         startExperimentalControl(for: app, target: target)
-    }
-
-    private func startResolvedExperimentalControl(
-        for app: MixerAppItem,
-        allowsCachedLookup: Bool = true
-    ) {
-        let request = app.appAudioTargetRequest
-        let visibleEligibility = processTapEligibility(app.processIdentifier)
-
-        if visibleEligibility.isEligible {
-            startExperimentalControl(
-                for: app,
-                target: ProcessTapTarget(
-                    appID: app.id,
-                    appName: app.name,
-                    processIdentifier: app.processIdentifier
-                )
-            )
-            return
-        }
-
-        if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
-            visibleEligibility.reason == ProcessTapPermissionMessage.missingUsageDescriptionReason {
-            productRealSideEffects.showProductRealStatus(
-                ProcessTapPermissionMessage.message(
-                    forEligibilityReason: visibleEligibility.reason,
-                    fallback: visibleEligibility.reason ?? "Process Tap is unavailable"
-                ),
-                style: .warning,
-                action: nil
-            )
-            return
-        }
-
-        guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget) else {
-            productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
-            return
-        }
-
-        productRealControlState.beginResolution(for: app.id)
-        appAudioResolutionTask?.cancel()
-        appAudioResolutionTask = Task { [weak self] in
-            let result = await self?.appAudioTargetResolver.resolveTarget(
-                for: request,
-                allowsCachedLookup: allowsCachedLookup
-            ) { _ in }
-
-            await MainActor.run {
-                self?.handleAppAudioTargetResolution(result, for: app.id)
-            }
-        }
     }
 
     private func startExperimentalControl(
@@ -1221,7 +1147,7 @@ final class MixerViewModel: ObservableObject {
                        !isTwoAppReadinessRunning,
                        !isProcessTapLiveControlActive,
                        !isAppAudioTargetResolving {
-                        startResolvedExperimentalControl(for: app, allowsCachedLookup: false)
+                        productRealControlCoordinator.startResolvedExperimentalControl(for: app, allowsCachedLookup: false)
                     } else {
                         if resolutionSource == .discoveredHelper {
                             appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
@@ -1311,52 +1237,6 @@ final class MixerViewModel: ObservableObject {
         showLiveControlWarningIfNeeded(for: result)
     }
 
-    private func handleAppAudioTargetResolution(
-        _ result: AppAudioTargetResolutionResult?,
-        for appID: MixerAppItem.ID
-    ) {
-        guard productRealControlState.shouldAcceptResolutionResult(for: appID) else {
-            return
-        }
-
-        productRealControlState.clearResolution(for: appID)
-        appAudioResolutionTask = nil
-
-        guard let result else {
-            return
-        }
-
-        switch result {
-        case .resolved(let resolvedTarget):
-            guard let app = apps.first(where: { $0.id == resolvedTarget.visibleAppID }) else {
-                productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
-                return
-            }
-
-            guard !productRealContext.isTwoAppReadinessRunning else {
-                productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
-                return
-            }
-
-            if let blockReason = productSessionStartBlockReason(for: app.id) {
-                productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
-                return
-            }
-
-            startExperimentalControl(
-                for: app,
-                target: resolvedTarget.target,
-                resolutionSource: resolvedTarget.source
-            )
-
-        case .unavailable(let reason):
-            productRealSideEffects.showProductRealStatus(reason, style: .warning, action: nil)
-
-        case .cancelled:
-            break
-        }
-    }
-
     private func showLiveControlWarningIfNeeded(for result: ProcessTapTestResult) {
         if let message = result.liveControlWarningMessage {
             showStatus(
@@ -1385,17 +1265,6 @@ final class MixerViewModel: ObservableObject {
 
     private func stopHelperProcessAutoDetect(reason: ProcessTapCandidateProbeStopReason) {
         advancedHelperDiscovery.stopAutoDetect(reason: reason)
-    }
-
-    private func cancelAppAudioTargetResolution(reason: ProcessTapCandidateProbeStopReason) {
-        guard isAppAudioTargetResolving else {
-            return
-        }
-
-        appAudioResolutionTask?.cancel()
-        appAudioResolutionTask = nil
-        productRealControlState.clearAllResolutions()
-        appAudioTargetResolver.cancelCurrentResolution(reason: reason)
     }
 
     private func refreshTwoAppReadinessSelectionsAfterAppRefresh() {
@@ -1499,6 +1368,14 @@ extension MixerViewModel: ProductRealControlSideEffects {
     func setLiveControlDiagnosticRunning(_ isRunning: Bool) {
         advancedProcessTapDiagnostics.setRunning(isRunning)
     }
+
+    func startResolvedProductReal(
+        app: MixerAppItem,
+        target: ProcessTapTarget,
+        resolutionSource: ResolvedAppAudioTarget.Source?
+    ) {
+        startExperimentalControl(for: app, target: target, resolutionSource: resolutionSource)
+    }
 }
 
 extension MixerViewModel: ProductRealControlContext {
@@ -1509,7 +1386,7 @@ extension MixerViewModel: ProductRealControlContext {
     }
 }
 
-private extension MixerAppItem {
+extension MixerAppItem {
     var appAudioTargetRequest: AppAudioTargetRequest {
         AppAudioTargetRequest(
             appID: id,
