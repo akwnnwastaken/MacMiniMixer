@@ -11,6 +11,21 @@ multi-app per-application control is not implemented.
 
 ## [Unreleased]
 
+### Changed
+- **Product Real Control start path extracted into `ProductRealControlCoordinator`** (internal
+  refactor, no behavior change). The coordinator now owns `ProductRealControlState`, the app-audio
+  resolution task and resolution handling, stale-start cleanup, and the async Product Real start
+  path (both the `startExperimentalControl` preflight and the resolved/async start body). It talks
+  to `MixerViewModel` only through the narrow `ProductRealControlSideEffects` /
+  `ProductRealControlContext` seam. `MixerViewModel` still owns the row `toggleExperimentalControl`
+  entry point, `stopExperimentalControl` / `stopProductLiveSessions` (Stop All),
+  `handleProductLiveControlStopped`, and all lifecycle / sleep / wake / termination /
+  output-device-change teardown; the engine `onStopped` callback is routed back to it through the
+  seam. Migrated in small, independently-tested steps (seam → state ownership → resolution slice →
+  stale cleanup → async start body) rather than one large refactor. Full suite green
+  (371 passed / 0 failed / 0 skipped). Product Real Control remains capped at **three** concurrent
+  sessions; `N > 3` stays deferred. `MARKETING_VERSION` unchanged; no tag/release.
+
 ## [v0.14] - Unreleased
 
 **Internal stability checkpoint — not a public release.** This is an unreleased v0.14 baseline

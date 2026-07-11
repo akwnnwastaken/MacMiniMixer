@@ -45,6 +45,10 @@ not yet a finished Windows Volume Mixer replacement.
   - `AdvancedProcessTapDiagnosticsCoordinator`
   - `AdvancedLiveControlCoordinator`
   - `TwoAppReadinessCoordinator`
+  - `ProductRealControlCoordinator` (owns the Product Real **start** path — see below; stop/lifecycle
+    still in `MixerViewModel`)
+- Extracted `MixerViewModel` helpers: `RealControlBannerPresenter`, `MixerVisibleAppsFilter`,
+  `MixerStatusMessageController`.
 - `CHANGELOG.md` with milestone history.
 - Persistent read-only output-volume indicator for devices without a writable volume API.
 - Accessibility labels/values/hints for app rows, system output controls, and output-device
@@ -60,11 +64,17 @@ not yet a finished Windows Volume Mixer replacement.
 ## Current Architecture and Hardening Status
 
 - `MixerViewModel` remains the central traffic controller for app list/mock row state,
-  Product Real Control orchestration, lifecycle cleanup, cross-feature coordination, and
-  status messages.
-- Product Real Control orchestration intentionally remains in `MixerViewModel` for now.
-  The state/model helper extraction is complete, but a full coordinator extraction has
-  not been justified yet.
+  cross-feature coordination, lifecycle cleanup, and status messages.
+- Product Real Control is now **split across a coordinator and the view model**:
+  - `ProductRealControlCoordinator` owns `ProductRealControlState`, the app-audio resolution
+    task/handling, stale-start cleanup, and the async Product Real **start** path (preflight +
+    resolved/async start body). It talks to the view model only through the
+    `ProductRealControlSideEffects` / `ProductRealControlContext` seam.
+  - `MixerViewModel` still owns the row `toggleExperimentalControl` entry point,
+    `stopExperimentalControl` / `stopProductLiveSessions` (Stop All),
+    `handleProductLiveControlStopped`, and lifecycle / sleep / wake / termination /
+    output-device-change teardown. Moving the **stop/lifecycle** path is future work.
+  - Rationale for the staged extraction is in `docs/DECISIONS.md`.
 - Product sessions use an indefinite timeout policy while healthy. Manual Advanced Live
   and diagnostic/readiness paths remain limited/short-lived.
 - Helper mappings are validation-first, in-memory only, and not persisted across
@@ -89,17 +99,23 @@ not yet a finished Windows Volume Mixer replacement.
 
 ## Next Recommended Low-Risk Work
 
-### Reassess Product Real Control after state/model extraction — done
+### Extract Product Real Control coordinator — start path done; stop/lifecycle future
 
-**Priority**: High | **Risk**: Low | **Status**: Reassessed; coordinator deferred
+**Priority**: High | **Risk**: Medium | **Status**: Start path extracted (staged); stop/lifecycle remaining
 
-Read-only reassessment complete. **Decision: do not extract a `ProductRealControlCoordinator`
-yet** — the cluster is the central arbiter (~142 references), mutates four `@Published`
-properties the panel and other VM logic share, and drives the Advanced diagnostics display.
-Extraction would likely increase coupling/complexity. Full rationale and the conditions that
-would change the decision are recorded in `docs/DECISIONS.md`. Low-risk simplifications that
-fell out of the review were applied (pure `liveControlWarningMessage`, named app-refresh
-teardown helpers, documented intentional double `beginSession`).
+The initial reassessment deferred the coordinator (the cluster was the central arbiter with ~142
+references and four shared `@Published` properties). That was later superseded: the **start** path
+was extracted into `ProductRealControlCoordinator` in small, independently-tested steps
+(seam → pure decision helpers → state ownership → stale cleanup → resolution slice → async start
+body). The coordinator owns `ProductRealControlState`, resolution, stale-start cleanup, and the
+async start path, talking to the view model through the `ProductRealControlSideEffects` /
+`ProductRealControlContext` seam. Each step stayed behind the unchanged `MixerViewModelLiveControlTests`
+plus new coordinator tests; the full suite is green (371 passed / 0 failed / 0 skipped).
+
+**Remaining (future work)**: move the Product Real **stop / toggle / lifecycle** path out of
+`MixerViewModel` — `toggleExperimentalControl`, `stopExperimentalControl`,
+`stopProductLiveSessions` (Stop All), `handleProductLiveControlStopped`, and the sleep / wake /
+termination / output-device-change teardown. Full staged rationale in `docs/DECISIONS.md`.
 
 ---
 

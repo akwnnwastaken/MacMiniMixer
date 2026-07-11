@@ -409,12 +409,47 @@ interface.
 
 ---
 
-## Why a `ProductRealControlCoordinator` is deferred (post-extraction reassessment)
+## `ProductRealControlCoordinator`: deferred, then extracted in stages
 
-**Decision**: After extracting the pure `ProductRealControlState` state/model helpers, a
-read-only reassessment was done to decide whether the remaining Product Real Control
-orchestration should move into its own coordinator (mirroring the other five). The decision
-is **not yet** — keep the orchestration in `MixerViewModel` for now.
+**Status**: The original decision here was **defer** (keep orchestration in `MixerViewModel`).
+That was later **superseded**: the **start path** was extracted into
+`ProductRealControlCoordinator` in small, independently-tested steps. The reasoning below is
+retained because it explains *why the move had to be staged behind a seam* rather than done as one
+refactor, and what is still intentionally left in the view model.
+
+**What moved (staged, one reviewable commit each)**:
+1. **Seam first** — introduced the narrow `ProductRealControlSideEffects` (write/callback side) and
+   `ProductRealControlContext` (read side) protocols; `MixerViewModel` conforms and routes its
+   Product Real status/name/diagnostics writes and guard reads through them. No logic moved.
+2. **Pure decision helpers** — `shouldAcceptCallback` (stale-callback acceptance) and
+   `wouldExceedConcurrentSessionCap` (the cap decision) moved onto `ProductRealControlState`.
+3. **State ownership** — the coordinator now owns `ProductRealControlState`; the view model reaches
+   it through a get/set forwarding property, and the coordinator forwards change notifications to
+   `objectWillChange` via `setOnWillChange` (replacing the old `@Published`).
+4. **Stale-start cleanup leaf** — `cleanupStaleProductLiveStart` moved to the coordinator.
+5. **Resolution slice** — the app-audio resolution task, `startResolvedExperimentalControl`,
+   `handleAppAudioTargetResolution`, `cancelAppAudioTargetResolution`, and the
+   `productSessionStartBlockReason` preflight moved to the coordinator.
+6. **Async start body** — both `startExperimentalControl` overloads moved to the coordinator; the
+   engine `onStopped` callback is routed back to the view model's `handleProductLiveControlStopped`
+   through the seam.
+
+**Still in `MixerViewModel` (intentionally, for now)**: the row `toggleExperimentalControl` entry
+point, `stopExperimentalControl` / `stopProductLiveSessions` (Stop All),
+`handleProductLiveControlStopped`, `handleAdvancedManualLiveControlStopped`, and all lifecycle /
+sleep / wake / termination / output-device-change teardown. Moving the **stop/lifecycle** path is
+future work.
+
+**Why staged instead of one large refactor**: the original reassessment (below) measured ~142
+references and four shared `@Published` properties, and concluded a single-shot extraction would
+raise coupling. The seam-first, one-slice-per-commit approach neutralized exactly those risks —
+each step stayed behind the ~30 `MixerViewModelLiveControlTests` (unchanged, always green) plus
+new coordinator-level tests, so a regression would surface at the smallest possible step. The
+change-notification concern was solved by `onWillChange`; the Advanced-diagnostics display coupling
+was solved by routing those writes through the seam rather than a hard coordinator-to-coordinator
+dependency.
+
+### Original deferral rationale (retained for context)
 
 **What was measured**: ~142 references in `MixerViewModel` touch the Product Real Control
 cluster (`productRealControlState`, `isProcessTapLiveControlActive`,

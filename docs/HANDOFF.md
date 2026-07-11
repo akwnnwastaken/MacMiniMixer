@@ -51,6 +51,16 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 
 ## 4. Current Product Real state
 
+- **Code layout (staged coordinator extraction):** the Product Real **start** path now lives in
+  `ProductRealControlCoordinator`, which owns `ProductRealControlState`, the app-audio resolution
+  task/handling, stale-start cleanup, and the async start path (preflight + resolved/async start
+  body). It talks to `MixerViewModel` only through the `ProductRealControlSideEffects` /
+  `ProductRealControlContext` seam (the engine `onStopped` callback is routed back to the view
+  model through the seam). **Still in `MixerViewModel`:** `toggleExperimentalControl`,
+  `stopExperimentalControl`, `stopProductLiveSessions` (Stop All), `handleProductLiveControlStopped`,
+  and lifecycle / sleep / wake / termination / output-device-change teardown — the **stop/lifecycle**
+  path is **not yet moved** (future work; see `docs/DECISIONS.md` and `docs/ROADMAP.md`). Behavior is
+  unchanged; the cap and all guardrails below still hold.
 - Uses Core Audio **Process Tap + `.mutedWhenTapped` + AudioQueue replay/gain**. Each session owns
   its own tap / private aggregate device / IOProc / replay AudioQueue.
 - **Up to 3 concurrent** Product Real sessions; the active banner summarizes 3+ apps as "first two
@@ -74,19 +84,23 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 
 ## 5. Recent key commits
 
+Most recent (the staged `ProductRealControlCoordinator` **start-path** extraction):
+
 ```
+92a82c3 Move Product Real start path into coordinator          (async start body)
+73a4132 Move Product Real resolution slice into coordinator
+b0a4ff2 Move Product Real state ownership into coordinator
+39983ad Move stale-start cleanup into Product Real coordinator
+e7b38df Add Product Real coordinator shell
+09397ba Route Product Real async-start side effects through seam
+53fa050 Move Product Real decision helpers into state
+f24d14e Introduce Product Real side-effect and context seam
+1323b32 Extract MixerStatusMessageController from MixerViewModel
+81f69b8 Add SystemOutputCoordinator branch coverage
+bf2bf40 Extract MixerVisibleAppsFilter from MixerViewModel
+34c3408 Extract RealControlBannerPresenter from MixerViewModel
 3cefcf7 Add UI-level guard for rapid Product Real toggles      (Prompt 194)
-cb7f98e Fix audit-confirmed Swift 6 and documentation issues   (Prompt 193)
-fd1c973 Perform low-risk v0.15 cleanup                          (Prompt 192)
-4fbca1a Refresh README to v0.14 internal Product Real checkpoint(Prompt 191)
-aca855b Reframe v0.14 notes as unreleased internal checkpoint   (Prompt 190)
-f6fcad8 Add v0.14 release notes                                 (Prompt 189)
-febb628 Document v0.14 Product Real long-run smoke result       (Prompt 188)
-00da311 Document Product Real teardown/starvation hardening checkpoint
-0f5652a Make MixerViewModel live-control test waits deadline-bounded (Prompt 185)
-c0f8ad4 Fix Swift 6 async locking in lifecycle serialization tests   (Prompt 184)
 88bbed5 Harden Product Real teardown and starvation handling   (P177–P182 bundle)
-83b8dd9 Add long-run three-session characterization checklist
 ```
 
 **Hardening bundle `88bbed5` = P177–P182:**
@@ -109,8 +123,9 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 ## 6. Test & CI state (as of last update)
 
-- **Local:** last full run = **315 passed / 0 failed / 0 skipped** (after Prompt 194).
-- **CI:** **green** for `3cefcf7` (GitHub Actions Build workflow, success).
+- **Local:** last full run = **371 passed / 0 failed / 0 skipped** (after the Product Real start-path
+  coordinator extraction, HEAD `92a82c3`).
+- **CI:** **green** at the last pushed state (GitHub Actions Build workflow, success).
 - An earlier README-only commit had a one-off CI failure that **passed on rerun** (a flake).
 - `xcodebuild test` exits `0` on pass, `65` on any test failure. Get exact counts from the newest
   result bundle:
@@ -161,6 +176,15 @@ xcodebuild build -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configura
 
 ## 10. Recommended next step
 
-With Prompt 194 committed and CI green, the safest next moves are docs/verification, not code:
-keep this handoff and the ROADMAP/CHANGELOG/checklist current, and run the real-device rapid-toggle
-smoke in `docs/MANUAL_TEST_CHECKLIST.md` §18. Do **not** release/tag or bump `MARKETING_VERSION`.
+The Product Real **start** path has been extracted into `ProductRealControlCoordinator` (HEAD
+`92a82c3`), full suite green (371). Two safe next directions:
+
+1. **Continue the extraction** — move the Product Real **stop / toggle / lifecycle** path out of
+   `MixerViewModel` (`toggleExperimentalControl`, `stopExperimentalControl`, `stopProductLiveSessions`,
+   `handleProductLiveControlStopped`, and sleep/wake/termination/output-change teardown), staged and
+   test-guarded the same way as the start path. Analyze the seam first (as with the start path).
+2. **Docs/verification** — keep this handoff, ROADMAP, DECISIONS, and CHANGELOG current, and run the
+   real-device rapid-toggle smoke in `docs/MANUAL_TEST_CHECKLIST.md` §18.
+
+Either way: do **not** release/tag or bump `MARKETING_VERSION`; keep the cap at 3 and `N > 3`
+deferred.
