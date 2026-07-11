@@ -797,7 +797,7 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        startExperimentalControl(for: appID)
+        productRealControlCoordinator.startExperimentalControl(for: appID)
     }
 
     private func stopExperimentalControl(
@@ -810,7 +810,7 @@ final class MixerViewModel: ObservableObject {
         guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
             // Optimistic window or not active: clear just this app locally.
             productRealControlState.clearSession(for: appID)
-            updateActiveLiveControlAppNameAfterProductChange()
+            productRealControlCoordinator.updateActiveLiveControlAppNameAfterProductChange()
             return
         }
 
@@ -823,13 +823,6 @@ final class MixerViewModel: ObservableObject {
             _ = await processTapLiveController.stopSession(id: sessionID, reason: reason)
         }
         productRealStartSettleGate.registerStop(stopTask)
-    }
-
-    private func updateActiveLiveControlAppNameAfterProductChange() {
-        if productRealContext.advancedManualLiveControlActive {
-            return
-        }
-        productRealSideEffects.setActiveLiveControlAppName(productRealControlState.activeSessions.first?.displayName)
     }
 
     func refreshApplications() {
@@ -974,208 +967,11 @@ final class MixerViewModel: ObservableObject {
         productRealControlCoordinator.startResolvedExperimentalControl(for: app)
     }
 
-    private func startExperimentalControl(for appID: MixerAppItem.ID) {
-        guard !productRealContext.isTwoAppReadinessRunning else {
-            productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
-            return
-        }
 
-        guard !productRealContext.isProcessTapTesting,
-              !productRealContext.isAppAudioTargetResolving else {
-            productRealSideEffects.showProductRealStatus("Process Tap is already busy", style: .warning, action: nil)
-            return
-        }
-
-        if let blockReason = productRealControlCoordinator.productSessionStartBlockReason(for: appID) {
-            productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
-            return
-        }
-
-        guard let app = apps.first(where: { $0.id == appID }) else {
-            productRealSideEffects.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
-            return
-        }
-
-        guard app.isEligibleForExperimentalLiveControl else {
-            productRealSideEffects.showProductRealStatus("No valid process found", style: .warning, action: nil)
-            return
-        }
-
-        guard let processIdentifier = app.processIdentifier,
-              NSRunningApplication(processIdentifier: pid_t(processIdentifier)) != nil else {
-            productRealSideEffects.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
-            return
-        }
-
-        let target = ProcessTapTarget(
-            appID: app.id,
-            appName: app.name,
-            processIdentifier: app.processIdentifier
-        )
-        startExperimentalControl(for: app, target: target)
-    }
-
-    private func startExperimentalControl(
-        for app: MixerAppItem,
-        target: ProcessTapTarget,
-        resolutionSource: ResolvedAppAudioTarget.Source? = nil
-    ) {
-        guard target.processIdentifier.map({ $0 > 0 }) == true else {
-            productRealSideEffects.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
-            return
-        }
-
-        let gain = ProductRealControlState.gainOption(for: app)
-        // Per-app start-request token: a later start for this app, or any cancellation
-        // (stop / output change / toggle off / termination), supersedes this token so the
-        // async completion and callbacks below can be recognised as stale and rejected.
-        let startRequestID = productRealControlState.beginStartRequest(for: app.id)
-
-        // Optimistic/early session set: `activeVisibleAppID` is read by `visibleMixerApps`
-        // independently of `isProcessTapLiveControlActive`, so setting it now keeps the row
-        // visible during startup and lets `refreshApplications` detect a target-app exit
-        // while the async `startSession` below is still in flight. The success branch
-        // re-asserts this after the await (see below).
-        productRealControlState.beginSession(
-            visibleAppID: app.id,
-            displayName: app.name,
-            controlledProcessIdentifier: target.processIdentifier,
-            source: ProductRealControlStartSource(resolutionSource: resolutionSource),
-            startRequestID: startRequestID
-        )
-        productRealSideEffects.setActiveLiveControlAppName(app.name)
-        productRealSideEffects.setLiveControlDiagnosticResult(
-            ProcessTapTestResult(
-                outcome: .liveControlStarting,
-                message: "Starting experimental live control for \(app.name)...",
-                detail: "This may affect real audio for this app only. Gain \(gain.percentLabel).",
-                severity: .info
-            )
-        )
-        productRealSideEffects.setLiveControlDiagnosticProgress(
-            ProcessTapDiagnosticProgress(
-                callbackCount: 0,
-                peakLevel: 0,
-                rmsLevel: 0,
-                audioDetected: false
-            )
-        )
-        productRealSideEffects.setProcessTapLiveDiagnostics(nil)
-        productRealSideEffects.setLiveControlDiagnosticRunning(true)
-
-        // Mark this row's start transition in flight so rapid re-toggles are ignored until the async
-        // start below resolves (cleared at the top of the post-await block, for every outcome).
-        productRealControlState.beginOperation(for: app.id)
-
-        Task {
-            // Teardown-settle gate: wait for any in-flight Product Real teardown to finish and for
-            // coreaudiod to settle the shared output route before creating this session's Core
-            // Audio objects. Suspends (does not block the main actor); no-op when nothing was torn
-            // down. The optimistic "Starting…" row set above remains visible during the wait.
-            await self.productRealStartSettleGate.waitForReadyToStart()
-
-            let startResult = await processTapLiveController.startSession(
-                for: target,
-                gain: gain,
-                timeoutPolicy: .indefinite
-            ) { _, diagnostics in
-                Task { @MainActor in
-                    guard self.productRealControlState.shouldAcceptCallback(for: app.id, requestID: startRequestID) else {
-                        return
-                    }
-                    self.productRealSideEffects.setProcessTapLiveDiagnostics(diagnostics)
-                    self.productRealSideEffects.setLiveControlDiagnosticProgress(diagnostics.progress)
-                }
-            } onStopped: { sessionID, result, diagnostics in
-                Task { @MainActor in
-                    self.handleProductLiveControlStopped(sessionID: sessionID, result: result, diagnostics: diagnostics)
-                }
-            }
-            let result = startResult.result
-
-            let accepted = await MainActor.run { () -> Bool in
-                // This start attempt has resolved (success, failure, or superseded): the row's start
-                // transition is over, so clear its pending flag regardless of outcome. A cached-helper
-                // retry below re-marks it when it kicks off a fresh attempt.
-                productRealControlState.endOperation(for: app.id)
-
-                // Reject a stale completion: a newer start for this app, or any cancellation,
-                // has superseded this request. Leave current state untouched, but drop this
-                // request's own lingering optimistic entry if a newer request has not already
-                // replaced it (never touch a newer request's session).
-                guard productRealControlState.isCurrentStartRequest(startRequestID, for: app.id) else {
-                    if productRealControlState.activeSessionsByAppID[app.id]?.startRequestID == startRequestID,
-                       productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID == nil {
-                        productRealControlState.clearSession(for: app.id)
-                        updateActiveLiveControlAppNameAfterProductChange()
-                    }
-                    // This start owned the "running" diagnostics flag (starts are serialised by
-                    // the isProcessTapTesting guard), so clear it now that it is rejected.
-                    productRealSideEffects.setLiveControlDiagnosticRunning(false)
-                    productRealSideEffects.setLiveControlDiagnosticProgress(nil)
-                    return false
-                }
-
-                productRealControlState.clearStartRequest(for: app.id)
-                productRealSideEffects.setLiveControlDiagnosticResult(result)
-                productRealSideEffects.setLiveControlDiagnosticRunning(false)
-
-                if result.outcome == .liveControlStarted {
-                    // Re-assert the session after the await with the real engine session id
-                    // and the owning request id, for per-app stop/gain and callback validation.
-                    productRealControlState.beginSession(
-                        visibleAppID: app.id,
-                        displayName: app.name,
-                        controlledProcessIdentifier: target.processIdentifier,
-                        source: ProductRealControlStartSource(resolutionSource: resolutionSource),
-                        liveSessionID: startResult.sessionID,
-                        startRequestID: startRequestID
-                    )
-                    productRealSideEffects.setActiveLiveControlAppName(app.name)
-                } else {
-                    if resolutionSource == .cachedHelper {
-                        appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
-                    }
-
-                    productRealControlState.clearSession(for: app.id)
-                    updateActiveLiveControlAppNameAfterProductChange()
-                    productRealSideEffects.setProcessTapLiveDiagnostics(nil)
-                    productRealSideEffects.setLiveControlDiagnosticProgress(nil)
-
-                    if resolutionSource == .cachedHelper,
-                       isExperimentalRealAppControlEnabled,
-                       !isTwoAppReadinessRunning,
-                       !isProcessTapLiveControlActive,
-                       !isAppAudioTargetResolving {
-                        productRealControlCoordinator.startResolvedExperimentalControl(for: app, allowsCachedLookup: false)
-                    } else {
-                        if resolutionSource == .discoveredHelper {
-                            appAudioTargetResolver.invalidateCachedTarget(for: app.appAudioTargetRequest)
-                        }
-                        productRealSideEffects.showProductRealStatus(
-                            "Could not start live control for this app",
-                            style: .warning,
-                            action: result.suggestsSystemAudioRecordingSettings ? .openSystemAudioRecordingSettings : nil
-                        )
-                    }
-                }
-
-                return true
-            }
-
-            if !accepted {
-                // Stale start: only the just-started orphan session is torn down, by its own
-                // session id. Current state and other apps' sessions are left untouched. Register
-                // the orphan teardown with the settle gate so a concurrent new start waits for it
-                // (and the settle window) before creating its own Core Audio objects.
-                let orphanCleanupTask = Task { await self.productRealControlCoordinator.cleanupStaleProductLiveStart(startResult) }
-                self.productRealStartSettleGate.registerStop(orphanCleanupTask)
-                await orphanCleanupTask.value
-            }
-        }
-    }
-
-    private func handleProductLiveControlStopped(
+    // Internal (not private) so it witnesses `ProductRealControlSideEffects.handleProductLiveControlStopped`,
+    // letting the coordinator's async start body route the engine `onStopped` callback back here. The
+    // method itself is unchanged and still owns the shared stop/display cleanup.
+    func handleProductLiveControlStopped(
         sessionID: ProcessTapLiveSessionID?,
         result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
@@ -1210,7 +1006,7 @@ final class MixerViewModel: ObservableObject {
             productRealControlState.clearAllOperations()
         }
 
-        updateActiveLiveControlAppNameAfterProductChange()
+        productRealControlCoordinator.updateActiveLiveControlAppNameAfterProductChange()
         applyLiveControlStoppedDisplay(result, diagnostics: diagnostics)
     }
 
@@ -1369,13 +1165,6 @@ extension MixerViewModel: ProductRealControlSideEffects {
         advancedProcessTapDiagnostics.setRunning(isRunning)
     }
 
-    func startResolvedProductReal(
-        app: MixerAppItem,
-        target: ProcessTapTarget,
-        resolutionSource: ResolvedAppAudioTarget.Source?
-    ) {
-        startExperimentalControl(for: app, target: target, resolutionSource: resolutionSource)
-    }
 }
 
 extension MixerViewModel: ProductRealControlContext {

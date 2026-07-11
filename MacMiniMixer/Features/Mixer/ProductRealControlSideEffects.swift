@@ -1,15 +1,8 @@
 import Foundation
 
-/// Write-side seam a future `ProductRealControlCoordinator` will use instead of mutating
-/// `MixerViewModel` directly. `MixerViewModel` conforms today and the Product Real paths call
-/// through it, so extracting the coordinator later becomes a mechanical receiver swap
-/// (`self` → an injected `sideEffects`). Intentionally narrow: it exposes only the status/display
-/// writes the Product Real orchestration performs — never the whole view model.
-///
-/// The status/name writes are already routed through this seam. The diagnostics/live-diagnostics
-/// writes are declared here as the documented Phase-C surface and are wired at their call sites when
-/// the async start/stop orchestration actually moves (see docs/HANDOFF ROADMAP), to keep the
-/// preparatory step small and away from the delicate async body.
+/// Write-side seam the `ProductRealControlCoordinator` uses instead of mutating `MixerViewModel`
+/// directly: the coordinator holds this weakly and calls through it for status/display writes and
+/// the stop-callback hand-off. Intentionally narrow — it never exposes the whole view model.
 @MainActor
 protocol ProductRealControlSideEffects: AnyObject {
     /// Publishes a Product Real / live-control status message (same wording/auto-clear as before).
@@ -20,19 +13,18 @@ protocol ProductRealControlSideEffects: AnyObject {
     )
     /// Sets or clears the shared "active live-control app" display name.
     func setActiveLiveControlAppName(_ name: String?)
-    /// Sets or clears the current live-diagnostics stream. (Phase-C write seam.)
+    /// Sets or clears the current live-diagnostics stream.
     func setProcessTapLiveDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics?)
-    /// Advanced-diagnostics surface the Product Real start/stop path writes. (Phase-C write seam.)
+    /// Advanced-diagnostics surface the Product Real start/stop path writes.
     func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult)
     func setLiveControlDiagnosticProgress(_ progress: ProcessTapDiagnosticProgress?)
     func setLiveControlDiagnosticRunning(_ isRunning: Bool)
-    /// Runs the Product Real async start body for a target the coordinator has resolved (or found
-    /// directly eligible). The async start orchestration stays in `MixerViewModel`; the resolution
-    /// slice in the coordinator calls back through this to kick it off.
-    func startResolvedProductReal(
-        app: MixerAppItem,
-        target: ProcessTapTarget,
-        resolutionSource: ResolvedAppAudioTarget.Source?
+    /// Routes a Product Real session's engine `onStopped` callback back to `MixerViewModel`, whose
+    /// `handleProductLiveControlStopped` (still resident there) owns the shared stop/display cleanup.
+    func handleProductLiveControlStopped(
+        sessionID: ProcessTapLiveSessionID?,
+        result: ProcessTapTestResult,
+        diagnostics: ProcessTapLiveDiagnostics?
     )
 }
 
@@ -56,4 +48,7 @@ protocol ProductRealControlContext: AnyObject {
     var isHelperBusy: Bool { get }
     /// Whether an app-audio target resolution is in flight.
     var isAppAudioTargetResolving: Bool { get }
+    /// The derived "live control active" flag (Advanced-manual active OR a confirmed product
+    /// session). Consulted by the cached-helper retry guard in the async start body.
+    var isProcessTapLiveControlActive: Bool { get }
 }
