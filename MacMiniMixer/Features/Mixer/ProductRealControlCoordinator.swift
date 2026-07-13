@@ -573,6 +573,33 @@ final class ProductRealControlCoordinator {
         sideEffects?.applyLiveControlStoppedDisplay(result: result, diagnostics: diagnostics)
     }
 
+    // MARK: - App-exit stop slice
+    //
+    // Moved from `MixerViewModel` (Phase C). Called by the view model's `refreshApplications` after
+    // it refreshes the running-app list (that orchestration stays in the view model). Behavior is
+    // preserved verbatim; only the receivers changed — the running-app list is read via `context`,
+    // and the per-app stop / resolution-cancel go through the coordinator's own leaves (so
+    // pending-operation and active-name behavior are unchanged).
+
+    /// After an app-list refresh, tears down Product Real Control work whose target app is
+    /// no longer running: a live-controlled app that exited stops its session, and a pending
+    /// helper resolution for a vanished app is cancelled.
+    func stopRealControlForExitedTargetApps() {
+        let runningApps = context?.apps ?? []
+        let exitedActiveAppIDs = productRealControlState.activeVisibleAppIDs.filter { activeAppID in
+            !runningApps.contains(where: { $0.id == activeAppID })
+        }
+        // Tear down only the exited apps' sessions/requests; surviving apps keep running.
+        for exitedAppID in exitedActiveAppIDs {
+            stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
+        }
+
+        if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
+           !runningApps.contains(where: { $0.id == resolvingAppID }) {
+            cancelAppAudioTargetResolution(reason: .targetExited)
+        }
+    }
+
     /// Sets the shared "active live-control app" name from the current product sessions, unless the
     /// Advanced manual session owns the display. Moved from `MixerViewModel`; the view model's
     /// remaining stop paths forward here.

@@ -794,28 +794,10 @@ final class MixerViewModel: ObservableObject {
         }
         refreshTwoAppReadinessEligibility()
         invalidateCachedAudioTargetsForRemovedOrChangedApps(previousApps: previousApps, refreshedApps: apps)
-        stopRealControlForExitedTargetApps()
+        productRealControlCoordinator.stopRealControlForExitedTargetApps()
         refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: previousProcessTapAppID)
         refreshTwoAppReadinessSelectionsAfterAppRefresh()
         refreshHelperDiscoverySelectionAfterAppRefresh()
-    }
-
-    /// After an app-list refresh, tears down Product Real Control work whose target app is
-    /// no longer running: a live-controlled app that exited stops its session, and a pending
-    /// helper resolution for a vanished app is cancelled.
-    private func stopRealControlForExitedTargetApps() {
-        let exitedActiveAppIDs = productRealControlState.activeVisibleAppIDs.filter { activeAppID in
-            !apps.contains(where: { $0.id == activeAppID })
-        }
-        // Tear down only the exited apps' sessions/requests; surviving apps keep running.
-        for exitedAppID in exitedActiveAppIDs {
-            productRealControlCoordinator.stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
-        }
-
-        if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
-           !apps.contains(where: { $0.id == resolvingAppID }) {
-            productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .targetExited)
-        }
     }
 
     /// Preserves the Advanced diagnostic selection when the previously selected app survived

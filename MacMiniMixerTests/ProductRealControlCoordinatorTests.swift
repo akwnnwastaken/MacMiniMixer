@@ -504,6 +504,63 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: appA.id))
     }
 
+    // MARK: - App-exit stop slice
+
+    func testStopRealControlForExitedTargetAppsStopsOnlyMissingApps() async {
+        let harness = makeHarness()
+        let (appA, appB, _, sidB) = makeTwoConfirmedSessions(harness)
+        // appA is still running; appB has exited (dropped from the refreshed running-app list).
+        harness.context.apps = [appA]
+
+        harness.coordinator.stopRealControlForExitedTargetApps()
+        await waitUntil { !harness.liveSessionManager.stopSessionCalls.isEmpty }
+
+        // Only the exited app's live session is stopped, with the app-exit reason.
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.count, 1)
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.id, sidB)
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.reason, .targetAppExited)
+        // The still-running app remains active; the exited app's stop is in flight (pending) via the
+        // per-app stop leaf until its stop callback lands.
+        XCTAssertNotNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appA.id])
+        XCTAssertTrue(harness.coordinator.productRealControlState.isOperationPending(for: appB.id))
+    }
+
+    func testStopRealControlForExitedTargetAppsDoesNothingWhenAllTargetsStillRunning() async {
+        let harness = makeHarness()
+        // `makeTwoConfirmedSessions` sets `context.apps = [appA, appB]`, so both targets still run.
+        let (appA, appB, _, _) = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.stopRealControlForExitedTargetApps()
+        await Task.yield()
+
+        // No exited app → no stop, no resolution cancel, sessions unchanged.
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+        XCTAssertTrue(harness.resolver.cancelReasons.isEmpty)
+        XCTAssertNotNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appA.id])
+        XCTAssertNotNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appB.id])
+    }
+
+    // The optimistic-window session (begun, no engine `liveSessionID` yet) is a real state — the
+    // app can exit during the async start before `startSession` returns. Here the app-exit slice
+    // routes it through the per-app stop leaf's optimistic branch: local clear, no engine stop.
+    func testStopRealControlForExitedTargetAppsHandlesOptimisticSessionWithoutLiveID() async {
+        let harness = makeHarness()
+        let app = makeApp(id: "gone", name: "Gone", pid: 9)
+        harness.coordinator.productRealControlState.beginSession(
+            visibleAppID: app.id, displayName: app.name,
+            controlledProcessIdentifier: app.processIdentifier, source: .directVisiblePID
+        )
+        // The optimistic app is not in the refreshed running-app list (it exited mid-start).
+        harness.context.apps = []
+
+        harness.coordinator.stopRealControlForExitedTargetApps()
+        await Task.yield()
+
+        // Optimistic branch of the leaf: session cleared locally, no engine stop issued.
+        XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[app.id])
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+    }
+
     // MARK: - Harness
 
     private struct Harness {
