@@ -33,8 +33,8 @@ final class ProductRealControlCoordinator {
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
     private weak var sideEffects: ProductRealControlSideEffects?
     private weak var context: ProductRealControlContext?
-    private var state = ProductRealControlState()
-    private var onWillChange: (() -> Void)?
+    private let stateStore = ProductRealControlStateStore()
+    private let stopCoordinator: ProductRealStopCoordinator
     private var appAudioResolutionTask: Task<Void, Never>?
 
     deinit {
@@ -57,26 +57,40 @@ final class ProductRealControlCoordinator {
         self.processTapEligibility = processTapEligibility
         self.sideEffects = sideEffects
         self.context = context
+        // The stop coordinator shares the single state store, the same injected engine/settle/resolver
+        // dependencies, and the same weak seam. It has no reference back to the start/resolution side.
+        self.stopCoordinator = ProductRealStopCoordinator(
+            stateStore: stateStore,
+            liveSessionManager: liveSessionManager,
+            startSettleGate: startSettleGate,
+            appAudioTargetResolver: appAudioTargetResolver,
+            sideEffects: sideEffects,
+            context: context
+        )
+        // All stored properties are now initialized, so `self` is usable: wire the one stop→resolution
+        // edge (the app-exit path cancelling an in-flight resolution) as a narrow closure rather than a
+        // sibling reference. `[weak self]` keeps the facade→stopCoordinator→closure chain cycle-free.
+        stopCoordinator.setCancelResolution { [weak self] reason in
+            self?.cancelAppAudioTargetResolution(reason: reason)
+        }
     }
 
     /// Registers a handler fired immediately before every `productRealControlState` mutation, so the
     /// owning view model can forward it to `objectWillChange` — preserving the notification the
-    /// state's previous `@Published` wrapper provided.
+    /// state's previous `@Published` wrapper provided. Forwards to the shared `stateStore`.
     func setOnWillChange(_ onWillChange: @escaping () -> Void) {
-        self.onWillChange = onWillChange
+        stateStore.setOnWillChange(onWillChange)
     }
 
-    /// The Product Real session/pending/resolution state. Reads return the current value; a write
-    /// fires `onWillChange` *before* applying, so a mutating call routed through this property
-    /// notifies exactly once — matching the old `@Published` `willSet` timing. The get/set shape lets
-    /// `MixerViewModel` keep calling the existing state operations unchanged during this ownership
-    /// move (its own `productRealControlState` computed property forwards here).
+    /// The Product Real session/pending/resolution state, owned by the shared `stateStore`. Reads
+    /// return the current value; a write fires `onWillChange` *before* applying, so a mutating call
+    /// routed through this property notifies exactly once — matching the old `@Published` `willSet`
+    /// timing. This facade property remains the mutation path for every coordinator method and keeps
+    /// `MixerViewModel`'s existing call sites unchanged (its own `productRealControlState` computed
+    /// property forwards here).
     var productRealControlState: ProductRealControlState {
-        get { state }
-        set {
-            onWillChange?()
-            state = newValue
-        }
+        get { stateStore.productRealControlState }
+        set { stateStore.productRealControlState = newValue }
     }
 
     /// Tears down a stale/orphaned Product Real start's just-created session by its own session id.
@@ -367,7 +381,7 @@ final class ProductRealControlCoordinator {
                 }
             } onStopped: { sessionID, result, diagnostics in
                 Task { @MainActor in
-                    self.handleProductLiveControlStopped(sessionID: sessionID, result: result, diagnostics: diagnostics)
+                    self.stopCoordinator.handleProductLiveControlStopped(sessionID: sessionID, result: result, diagnostics: diagnostics)
                 }
             }
             let result = startResult.result
@@ -386,7 +400,7 @@ final class ProductRealControlCoordinator {
                     if productRealControlState.activeSessionsByAppID[app.id]?.startRequestID == startRequestID,
                        productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID == nil {
                         productRealControlState.clearSession(for: app.id)
-                        updateActiveLiveControlAppNameAfterProductChange()
+                        stopCoordinator.updateActiveLiveControlAppNameAfterProductChange()
                     }
                     // This start owned the "running" diagnostics flag (starts are serialised by
                     // the isProcessTapTesting guard), so clear it now that it is rejected.
@@ -417,7 +431,7 @@ final class ProductRealControlCoordinator {
                     }
 
                     productRealControlState.clearSession(for: app.id)
-                    updateActiveLiveControlAppNameAfterProductChange()
+                    stopCoordinator.updateActiveLiveControlAppNameAfterProductChange()
                     sideEffects?.setProcessTapLiveDiagnostics(nil)
                     sideEffects?.setLiveControlDiagnosticProgress(nil)
 
@@ -454,188 +468,37 @@ final class ProductRealControlCoordinator {
         }
     }
 
-    // MARK: - Per-app stop leaf
+    // MARK: - Stop path (forwarded to ProductRealStopCoordinator)
     //
-    // Moved from `MixerViewModel` (Phase C). Behavior, ordering, default stop reason,
-    // pending-operation semantics, and settle-gate registration are preserved verbatim; only the
-    // receivers changed — state via the `productRealControlState` property so `onWillChange` still
-    // fires, and the live-session manager / settle gate are the same injected instances the view
-    // model previously used. The terminal pending-flag clear is owned by the stop callback
-    // (`handleProductLiveControlStopped`, also on this coordinator).
+    // Thin facade forwards to `stopCoordinator`, which owns the cohesive Product Real stop logic.
+    // `MixerViewModel` calls only these facade methods; it has no knowledge of the stop coordinator.
+    // The start body above reaches the stop coordinator's `handleProductLiveControlStopped` and
+    // `updateActiveLiveControlAppNameAfterProductChange` directly (both objects are owned by this
+    // facade), so no Start<->Stop sibling reference exists.
 
-    /// Stops Product Real Control for a single app. Invalidates only this app's pending start, then
-    /// reads its `liveSessionID` before clearing anything: with no live session (optimistic window or
-    /// not active) it clears just this app locally and refreshes the active-name display without
-    /// touching the engine; with a live session it marks the row's stop transition in flight and tears
-    /// the session down through the settle gate.
+    /// Stops Product Real Control for a single app. Forwards to the stop coordinator.
     func stopExperimentalControl(
         for appID: MixerAppItem.ID,
         reason: ProcessTapLiveStopReason = .userStopped
     ) {
-        // Per-app stop invalidates only this app's pending start, leaving other apps untouched.
-        productRealControlState.clearStartRequest(for: appID)
-
-        guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
-            // Optimistic window or not active: clear just this app locally.
-            productRealControlState.clearSession(for: appID)
-            updateActiveLiveControlAppNameAfterProductChange()
-            return
-        }
-
-        // Mark this row's stop transition in flight so rapid re-toggles are ignored until the stop
-        // callback (`handleProductLiveControlStopped`) clears it.
-        productRealControlState.beginOperation(for: appID)
-
-        // Track this per-app teardown with the settle gate (see stopProductLiveSessions).
-        let stopTask = Task {
-            _ = await liveSessionManager.stopSession(id: sessionID, reason: reason)
-        }
-        startSettleGate.registerStop(stopTask)
+        stopCoordinator.stopExperimentalControl(for: appID, reason: reason)
     }
 
-    // MARK: - Stop-all core and engine stop-callback handling
-    //
-    // Moved from `MixerViewModel` (Phase C). Behavior, ordering, session-ID matching, pending-operation
-    // clearing, active-name refresh, and diagnostics/display handling are preserved verbatim; only the
-    // receivers changed — state via `productRealControlState` (so `onWillChange` still fires), reads via
-    // the weak `context`, and the shared display cleanup via the `sideEffects` seam callback
-    // (`applyLiveControlStoppedDisplay`, whose implementation stays in the view model because
-    // advanced-manual stop uses it too). The outer product-vs-advanced router, the global/lifecycle
-    // fan-out entry points, and the shared display helper remain in `MixerViewModel`.
-
-    /// Stops every active Product Real session by its own engine session id, tracked with the settle
-    /// gate so a new start waits for the teardown (and coreaudiod settle). In the optimistic window
-    /// (no engine session id yet) it takes the same not-active local-cleanup path the compat stop used.
-    /// Delegated to by the view model's `stopProcessTapLiveControl` router; it clears no advanced-manual
-    /// state.
+    /// Stops every active Product Real session (Stop All product core). Forwards to the stop coordinator.
     func stopProductLiveSessions(reason: ProcessTapLiveStopReason) {
-        let sessionIDs = productRealControlState.activeSessions.compactMap(\.liveSessionID)
-        guard !sessionIDs.isEmpty else {
-            // Optimistic window before the engine returned a session id: clean up locally,
-            // matching the compat path's not-active handling.
-            handleProductLiveControlStopped(
-                sessionID: nil,
-                result: ProcessTapTestResult(
-                    outcome: .liveControlNotActive,
-                    message: "Live control is not active",
-                    severity: .info
-                ),
-                diagnostics: context?.processTapLiveDiagnostics
-            )
-            return
-        }
-
-        // Track this teardown with the settle gate so any new Product Real start waits for it (and
-        // a short coreaudiod settle window) before creating its own Core Audio objects.
-        let stopTask = Task {
-            for sessionID in sessionIDs {
-                _ = await liveSessionManager.stopSession(id: sessionID, reason: reason)
-            }
-        }
-        startSettleGate.registerStop(stopTask)
+        stopCoordinator.stopProductLiveSessions(reason: reason)
     }
 
-    /// Handles a Product Real session's engine `onStopped` callback (and the optimistic-window
-    /// no-session-id stop). Maps the session id to its app and clears only that app's session /
-    /// pending start / operation state; an untracked (stale/orphan) session id leaves every other
-    /// app's state and the shared display untouched. Then refreshes the active-name display and runs
-    /// the shared stop/display cleanup through the seam.
-    func handleProductLiveControlStopped(
-        sessionID: ProcessTapLiveSessionID?,
-        result: ProcessTapTestResult,
-        diagnostics: ProcessTapLiveDiagnostics?
-    ) {
-        if let sessionID {
-            guard let stoppedSession = productRealControlState.activeSessions.first(where: { $0.liveSessionID == sessionID }) else {
-                // A session id we no longer track: a stale orphan that was already rejected
-                // and is being torn down by its own id. Leave every other app's state and the
-                // shared display untouched.
-                return
-            }
-
-            let stoppedAppID = stoppedSession.visibleAppID
-            // If this stop arrived while the same request was still pending (engine-side stop
-            // before the post-await ran), invalidate it so its late success is rejected. A
-            // newer request carries a different token and is left untouched.
-            if let stoppedRequestID = stoppedSession.startRequestID,
-               productRealControlState.isCurrentStartRequest(stoppedRequestID, for: stoppedAppID) {
-                productRealControlState.clearStartRequest(for: stoppedAppID)
-            }
-            productRealControlState.clearSession(for: stoppedAppID)
-            // The stop transition for this row is complete: clear its rapid-toggle pending flag.
-            productRealControlState.endOperation(for: stoppedAppID)
-
-            if result.outcome == .liveControlAppExited,
-               let stoppedApp = context?.apps.first(where: { $0.id == stoppedAppID }) {
-                appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
-            }
-        } else {
-            // No session id: an optimistic-window stop. Clear all product sessions and pending flags.
-            productRealControlState.clearActiveSession()
-            productRealControlState.clearAllOperations()
-        }
-
-        updateActiveLiveControlAppNameAfterProductChange()
-        sideEffects?.applyLiveControlStoppedDisplay(result: result, diagnostics: diagnostics)
-    }
-
-    // MARK: - App-exit stop slice
-    //
-    // Moved from `MixerViewModel` (Phase C). Called by the view model's `refreshApplications` after
-    // it refreshes the running-app list (that orchestration stays in the view model). Behavior is
-    // preserved verbatim; only the receivers changed — the running-app list is read via `context`,
-    // and the per-app stop / resolution-cancel go through the coordinator's own leaves (so
-    // pending-operation and active-name behavior are unchanged).
-
-    /// After an app-list refresh, tears down Product Real Control work whose target app is
-    /// no longer running: a live-controlled app that exited stops its session, and a pending
-    /// helper resolution for a vanished app is cancelled.
+    /// Tears down Product Real work for apps that exited during an app-list refresh. Forwards to the
+    /// stop coordinator (whose app-exit path cancels an in-flight resolution via the facade-wired closure).
     func stopRealControlForExitedTargetApps() {
-        let runningApps = context?.apps ?? []
-        let exitedActiveAppIDs = productRealControlState.activeVisibleAppIDs.filter { activeAppID in
-            !runningApps.contains(where: { $0.id == activeAppID })
-        }
-        // Tear down only the exited apps' sessions/requests; surviving apps keep running.
-        for exitedAppID in exitedActiveAppIDs {
-            stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
-        }
-
-        if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
-           !runningApps.contains(where: { $0.id == resolvingAppID }) {
-            cancelAppAudioTargetResolution(reason: .targetExited)
-        }
+        stopCoordinator.stopRealControlForExitedTargetApps()
     }
 
-    // MARK: - Hard-teardown state reset
-    //
-    // Moved from `MixerViewModel` (Phase C). This is only the Product Real-owned *state* reset block
-    // of `tearDownAllProcessTapWork` — the engine hard stop (`stopLiveControlNow`), two-app readiness,
-    // helper/probe, resolver invalidation, diagnostics/replay cleanup, advanced-manual reset, and the
-    // resolution-task cancel all stay in the view model's teardown at their existing positions (the
-    // resolution-task cancel is left in place rather than folded in here so the surrounding non-product
-    // ordering is unchanged). No engine `stopSession` is issued here.
-
-    /// Clears all Product Real session/request/resolution/operation state and resets the shared
-    /// active-name display, for the synchronous hard teardown (sleep / termination). Mutates state via
-    /// the `productRealControlState` property so `onWillChange` still fires. The view model's
-    /// `tearDownAllProcessTapWork` calls this in place of its previous inline Product Real state resets.
+    /// Clears the Product Real state during hard teardown (sleep / termination). Forwards to the stop
+    /// coordinator.
     func tearDownProductStateForHardStop() {
-        productRealControlState.clearAllStartRequests()
-        productRealControlState.clearAllResolutions()
-        productRealControlState.clearActiveSession()
-        // Synchronous hard teardown uses `stopLiveControlNow`, which does not fire the per-session
-        // onStopped callbacks that normally clear pending flags, so clear them here directly.
-        productRealControlState.clearAllOperations()
-        sideEffects?.setActiveLiveControlAppName(nil)
+        stopCoordinator.tearDownProductStateForHardStop()
     }
 
-    /// Sets the shared "active live-control app" name from the current product sessions, unless the
-    /// Advanced manual session owns the display. Moved from `MixerViewModel`; the view model's
-    /// remaining stop paths forward here.
-    func updateActiveLiveControlAppNameAfterProductChange() {
-        if context?.advancedManualLiveControlActive == true {
-            return
-        }
-        sideEffects?.setActiveLiveControlAppName(productRealControlState.activeSessions.first?.displayName)
-    }
 }

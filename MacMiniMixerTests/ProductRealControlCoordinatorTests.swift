@@ -441,68 +441,11 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.diagnostics?.callbackCount, 3)
     }
 
-    func testHandleProductLiveControlStoppedClearsOnlyMatchingSession() {
-        let harness = makeHarness()
-        let (appA, appB, sidA, _) = makeTwoConfirmedSessions(harness)
-        harness.coordinator.productRealControlState.beginOperation(for: appA.id)
-
-        harness.coordinator.handleProductLiveControlStopped(
-            sessionID: sidA, result: makeResult(.liveControlStopped), diagnostics: nil
-        )
-
-        // Only the matching app's session is cleared; the other remains active.
-        XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appA.id])
-        XCTAssertNotNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appB.id])
-        // The matching app's pending operation clears; active-name refreshes to the surviving session.
-        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: appA.id))
-        XCTAssertEqual(harness.sideEffects.activeNameHistory.last, appB.name)
-    }
-
-    func testHandleProductLiveControlStoppedUnknownSessionDoesNotDisturbActiveSessions() {
-        let harness = makeHarness()
-        let (appA, appB, _, _) = makeTwoConfirmedSessions(harness)
-        harness.coordinator.productRealControlState.beginOperation(for: appA.id)
-
-        harness.coordinator.handleProductLiveControlStopped(
-            sessionID: ProcessTapLiveSessionID(), result: makeResult(.liveControlStopped), diagnostics: nil
-        )
-
-        // An untracked session id leaves every active session and pending flag untouched...
-        XCTAssertNotNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appA.id])
-        XCTAssertNotNil(harness.coordinator.productRealControlState.activeSessionsByAppID[appB.id])
-        XCTAssertTrue(harness.coordinator.productRealControlState.isOperationPending(for: appA.id))
-        // ...and performs no display cleanup.
-        XCTAssertTrue(harness.sideEffects.stoppedDisplayCalls.isEmpty)
-    }
-
-    func testHandleProductLiveControlStoppedRoutesDisplayCleanupThroughSeam() {
-        let harness = makeHarness()
-        let (_, _, sidA, _) = makeTwoConfirmedSessions(harness)
-        let result = makeResult(.liveControlStopped)
-        let diagnostics = makeDiagnostics(callbackCount: 9)
-
-        harness.coordinator.handleProductLiveControlStopped(
-            sessionID: sidA, result: result, diagnostics: diagnostics
-        )
-
-        // The shared display cleanup receives the exact result and diagnostics via the seam callback.
-        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.count, 1)
-        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.result.outcome, result.outcome)
-        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.diagnostics?.callbackCount, 9)
-    }
-
-    func testHandleProductLiveControlStoppedClearsPendingOperation() {
-        let harness = makeHarness()
-        let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)
-        harness.coordinator.productRealControlState.beginOperation(for: appA.id)
-        XCTAssertTrue(harness.coordinator.productRealControlState.isOperationPending(for: appA.id))
-
-        harness.coordinator.handleProductLiveControlStopped(
-            sessionID: sidA, result: makeResult(.liveControlStopped), diagnostics: nil
-        )
-
-        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: appA.id))
-    }
+    // The engine stop-callback (`handleProductLiveControlStopped`) is now owned by
+    // `ProductRealStopCoordinator`; its direct unit coverage lives in
+    // `ProductRealStopCoordinatorTests`. The facade's integration with it is still exercised here by
+    // `testAsyncStartOnStoppedUsesCoordinatorLocalHandler` (onStopped reaching the stop coordinator)
+    // and by the forwarding tests below (`testStopProductLiveSessions*` route through it).
 
     // MARK: - App-exit stop slice
 
@@ -699,7 +642,7 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
 
 // MARK: - Fakes
 
-private final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & ProcessTapLiveSessionManaging, @unchecked Sendable {
+final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & ProcessTapLiveSessionManaging, @unchecked Sendable {
     private let lock = NSLock()
     private var recordedStopSessionCalls: [(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason)] = []
     private var configuredStartResult: ProcessTapLiveSessionStartResult?
@@ -802,7 +745,7 @@ private final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling
     }
 }
 
-private final class StubProductRealControlSideEffects: ProductRealControlSideEffects {
+final class StubProductRealControlSideEffects: ProductRealControlSideEffects {
     private(set) var statusMessages: [String] = []
     private(set) var activeNameHistory: [String?] = []
     private(set) var diagnosticResults: [ProcessTapTestResult] = []
@@ -834,7 +777,7 @@ private final class StubProductRealControlSideEffects: ProductRealControlSideEff
     }
 }
 
-private final class StubProductRealControlContext: ProductRealControlContext {
+final class StubProductRealControlContext: ProductRealControlContext {
     var apps: [MixerAppItem] = []
     var isExperimentalRealAppControlEnabled = false
     var advancedManualLiveControlActive = false
@@ -846,12 +789,17 @@ private final class StubProductRealControlContext: ProductRealControlContext {
     var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
 }
 
-private final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
+final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
     private let lock = NSLock()
     private var recordedCancelReasons: [ProcessTapCandidateProbeStopReason] = []
+    private var recordedInvalidatedTargetCount = 0
 
     var cancelReasons: [ProcessTapCandidateProbeStopReason] {
         lock.withLock { recordedCancelReasons }
+    }
+
+    var invalidatedTargetCount: Int {
+        lock.withLock { recordedInvalidatedTargetCount }
     }
 
     func resolveTarget(
@@ -866,14 +814,16 @@ private final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @u
         lock.withLock { recordedCancelReasons.append(reason) }
     }
 
-    func invalidateCachedTarget(for request: AppAudioTargetRequest) {}
+    func invalidateCachedTarget(for request: AppAudioTargetRequest) {
+        lock.withLock { recordedInvalidatedTargetCount += 1 }
+    }
     func invalidateAllCachedTargets() {}
 }
 
 /// Records `registerStop` calls so stop-path tests can assert teardown was tracked with the settle
 /// gate. Delegates behavior to a real gate with a zero settle delay and a no-op sleeper (no real
 /// sleeps), so `waitForReadyToStart` still awaits registered stop tasks exactly as production does.
-private final class RecordingStartSettleGate: ProductRealStartSettling, @unchecked Sendable {
+final class RecordingStartSettleGate: ProductRealStartSettling, @unchecked Sendable {
     private let lock = NSLock()
     private var recordedRegisterStopCount = 0
     private let inner = ProductRealStartSettleGate(settleDelay: 0, sleeper: { _ in })
