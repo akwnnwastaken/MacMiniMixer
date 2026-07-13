@@ -9,9 +9,10 @@ final class MixerViewModel: ObservableObject {
     @Published private(set) var advancedManualLiveControlActive = false
     @Published private(set) var activeLiveControlAppName: String?
     /// Product Real state now lives in `productRealControlCoordinator`; this forwards reads and
-    /// writes to it so the existing orchestration (still in this view model) is unchanged. The
-    /// coordinator fires `objectWillChange` on every write via the `setOnWillChange` wiring in
-    /// `init`, replacing the previous `@Published` behavior.
+    /// writes to it. Product-only start/stop logic is delegated to that coordinator; the view model
+    /// remains the cross-subsystem / UI orchestration hub (router, shared display, lifecycle, and
+    /// global fan-out). The coordinator fires `objectWillChange` on every write via the
+    /// `setOnWillChange` wiring in `init`, replacing the previous `@Published` behavior.
     private var productRealControlState: ProductRealControlState {
         get { productRealControlCoordinator.productRealControlState }
         set { productRealControlCoordinator.productRealControlState = newValue }

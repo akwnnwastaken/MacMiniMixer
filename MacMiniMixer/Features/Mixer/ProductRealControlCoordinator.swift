@@ -1,22 +1,28 @@
 import AppKit
 import Foundation
 
-/// Dependency container for Product Real Control orchestration.
+/// Owns Product Real Control's state and product-only start/stop logic.
 ///
-/// **Phase C (in progress):** this type owns the Product Real **start** path — stale-start cleanup,
-/// app-audio resolution, and the async start body (both `startExperimentalControl` overloads) — and
-/// calls out through the injected `ProductRealControlSideEffects` / `ProductRealControlContext` seam
-/// instead of touching the view model directly. Still resident in `MixerViewModel`: the **stop**
-/// path (`stop*`, `handleProductLiveControlStopped`), the row **toggle**, and lifecycle /
-/// output-change / sleep teardown. The engine `onStopped` callback is routed back to the view
-/// model's `handleProductLiveControlStopped` via the seam.
+/// This type owns the Product Real **start and stop** paths and calls out through the injected
+/// `ProductRealControlSideEffects` / `ProductRealControlContext` seam instead of touching the view
+/// model directly. It owns: `ProductRealControlState`; app-audio resolution and the resolution task;
+/// the async start body (both `startExperimentalControl` overloads); stale-start cleanup; the per-app
+/// stop leaf (`stopExperimentalControl`); the Stop All core (`stopProductLiveSessions`); engine
+/// stop-callback handling (`handleProductLiveControlStopped`, invoked **locally** from the start
+/// body's `onStopped`); the app-exit cleanup slice (`stopRealControlForExitedTargetApps`); and the
+/// hard-teardown Product Real state reset (`tearDownProductStateForHardStop`).
+///
+/// `MixerViewModel` still owns only the cross-subsystem / UI orchestration: the row
+/// `toggleExperimentalControl` entry point, the product-vs-advanced-manual `stopProcessTapLiveControl`
+/// router, the shared display cleanup helper (`applyLiveControlStoppedDisplay`, reached through the
+/// seam and also used by advanced-manual stop), and the lifecycle / output-device-change / global
+/// teardown fan-out.
 ///
 /// The seam references are held **weakly**: the view model owns this coordinator, so a strong back
 /// reference would form a retain cycle.
 ///
-/// As of this phase the coordinator **owns `ProductRealControlState`** (the Product Real
-/// session/pending/resolution state). The orchestration that mutates it still lives in
-/// `MixerViewModel`, which reaches the state through the `productRealControlState` get/set forwarding
+/// The coordinator **owns `ProductRealControlState`** (the Product Real session/pending/resolution
+/// state). The view model reaches the state through the `productRealControlState` get/set forwarding
 /// property below; the state's previous `@Published` change notification is preserved via
 /// `onWillChange` (the view model forwards it to `objectWillChange`).
 @MainActor
@@ -74,7 +80,7 @@ final class ProductRealControlCoordinator {
     }
 
     /// Tears down a stale/orphaned Product Real start's just-created session by its own session id.
-    /// Called by the async start body (still in `MixerViewModel`) after it rejects a superseded
+    /// Called by the coordinator's async start body after it rejects a superseded
     /// start. Stateless: reads only the start result and the held live-session manager, and uses the
     /// same `.userStopped` stop reason as before. No-op when the start did not actually start a live
     /// session, or when it started without a session-specific cleanup handle.
@@ -243,7 +249,7 @@ final class ProductRealControlCoordinator {
     // policy, settle-gate ordering, pending-operation and diagnostics behavior are all preserved
     // verbatim; only the receivers changed (state via the `productRealControlState` property so
     // `onWillChange` still fires, side effects/reads via the weak seam). The engine `onStopped`
-    // callback is routed back to the view model via the seam (`handleProductLiveControlStopped`).
+    // callback is handled locally by this coordinator's `handleProductLiveControlStopped`.
 
     /// Synchronous start preflight for the row toggle: validates busy/cap/eligibility and builds the
     /// direct-PID target, then hands off to the async start body.
@@ -454,8 +460,8 @@ final class ProductRealControlCoordinator {
     // pending-operation semantics, and settle-gate registration are preserved verbatim; only the
     // receivers changed — state via the `productRealControlState` property so `onWillChange` still
     // fires, and the live-session manager / settle gate are the same injected instances the view
-    // model previously used. The terminal pending-flag clear is still owned by the stop callback
-    // (`handleProductLiveControlStopped`, still resident in the view model).
+    // model previously used. The terminal pending-flag clear is owned by the stop callback
+    // (`handleProductLiveControlStopped`, also on this coordinator).
 
     /// Stops Product Real Control for a single app. Invalidates only this app's pending start, then
     /// reads its `liveSessionID` before clearing anything: with no live session (optimistic window or

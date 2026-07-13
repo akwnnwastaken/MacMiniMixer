@@ -838,7 +838,6 @@ private final class StubProductRealControlContext: ProductRealControlContext {
     var apps: [MixerAppItem] = []
     var isExperimentalRealAppControlEnabled = false
     var advancedManualLiveControlActive = false
-    var selectedProcessTapAppID: MixerAppItem.ID?
     var isTwoAppReadinessRunning = false
     var isProcessTapTesting = false
     var isHelperBusy = false
