@@ -52,7 +52,7 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 ## 4. Current Product Real state
 
 - **Code layout (staged coordinator extraction) — `ProductRealControlCoordinator` now owns the
-  Product Real START path:**
+  Product Real START and STOP paths:**
   - `ProductRealControlState` (the session/pending/resolution value type).
   - App-audio resolution task + resolution handling (`startResolvedExperimentalControl`,
     `handleAppAudioTargetResolution`, `cancelAppAudioTargetResolution`, `cancelResolutionTask`).
@@ -61,27 +61,40 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
     (the sync preflight and the async start body).
   - `productSessionStartBlockReason` (cap/mutual-exclusion decision) and
     `updateActiveLiveControlAppNameAfterProductChange` (shared active-name helper).
-- **Still in `MixerViewModel` (STOP + lifecycle + shared/router):**
-  - `toggleExperimentalControl` (row entry point) — calls `coordinator.startExperimentalControl`
-    on start; still calls the VM's own `stopExperimentalControl` on stop.
-  - `stopExperimentalControl` (per-app stop leaf) — **the next thing to move (Prompt 215)**.
-  - `stopProductLiveSessions` (Stop All product), `handleProductLiveControlStopped` (stop callback),
-    `stopRealControlForExitedTargetApps` (app-exit product slice).
-  - `stopProcessTapLiveControl` (router: product vs advanced-manual), `handleAdvancedManualLiveControlStopped`.
+  - **STOP path (Prompts 215–218):** `stopExperimentalControl(for:reason:)` (per-app stop leaf),
+    `stopProductLiveSessions(reason:)` (Stop All product core), `handleProductLiveControlStopped(...)`
+    (engine stop callback), `stopRealControlForExitedTargetApps()` (app-exit product slice), and
+    `tearDownProductStateForHardStop()` (the Product Real state-reset sub-block of hard teardown).
+- **Still in `MixerViewModel` (cross-subsystem router + lifecycle/UI orchestration — intentional):**
+  - `toggleExperimentalControl` (row entry point) — delegates to `coordinator.startExperimentalControl`
+    on start and `coordinator.stopExperimentalControl` on stop.
+  - `stopProcessTapLiveControl` (router: product vs advanced-manual) — its product branch delegates
+    to `coordinator.stopProductLiveSessions`; `handleAdvancedManualLiveControlStopped` (advanced-manual stop).
   - `applyLiveControlStoppedDisplay` + `showLiveControlWarningIfNeeded` (**shared** display cleanup
-    used by both product and advanced-manual stops — do not move into the product coordinator).
+    used by both product and advanced-manual stops — reached from the coordinator through the seam's
+    `applyLiveControlStoppedDisplay` callback; do **not** move into the product coordinator).
   - `setExperimentalRealAppControlEnabled` (global Real-off command), `stopActiveAudioWorkForOutputDeviceChange`
-    (5-subsystem output-change fan-out), `tearDownAllProcessTapWork` (global sleep/termination teardown),
-    `handleSystemWillSleep` / `handleSystemDidWake` / `stopProcessTapLiveControlForTermination`.
+    (5-subsystem output-change fan-out), `tearDownAllProcessTapWork` (global sleep/termination teardown
+    fan-out — delegates **only** its Product Real state-reset sub-block to
+    `coordinator.tearDownProductStateForHardStop()`; the engine hard stop, resolver/helper/diagnostics
+    cleanup, advanced-manual reset, and the earlier-positioned `cancelResolutionTask()` all stay in place
+    to preserve exact ordering), `handleSystemWillSleep` / `handleSystemDidWake` /
+    `stopProcessTapLiveControlForTermination`.
+  - `refreshApplications` / running-app list orchestration (delegates **only** the app-exit product
+    slice to `coordinator.stopRealControlForExitedTargetApps()`).
 - **The seam** (`MacMiniMixer/Features/Mixer/ProductRealControlSideEffects.swift`):
   - `ProductRealControlSideEffects` (write/callback side, coordinator → VM): `showProductRealStatus`,
     `setActiveLiveControlAppName`, `setProcessTapLiveDiagnostics`, `setLiveControlDiagnosticResult` /
-    `Progress` / `Running`, and `handleProductLiveControlStopped` (routes the engine `onStopped`
-    back to the VM's still-resident handler).
+    `Progress` / `Running`, and `applyLiveControlStoppedDisplay` (routes the coordinator's stop
+    handling into the VM's **shared** display-cleanup helper, which advanced-manual stop also uses).
+    The former `handleProductLiveControlStopped` seam member was **removed** when that handler moved
+    into the coordinator (Prompt 216) — the engine `onStopped` now calls the coordinator's own
+    handler directly.
   - `ProductRealControlContext` (read side, VM → coordinator): `apps`,
     `isExperimentalRealAppControlEnabled`, `advancedManualLiveControlActive`, `selectedProcessTapAppID`,
     `isTwoAppReadinessRunning`, `isProcessTapTesting`, `isHelperBusy`, `isAppAudioTargetResolving`,
-    `isProcessTapLiveControlActive`.
+    `isProcessTapLiveControlActive`, `processTapLiveDiagnostics` (added Prompt 216 for the Stop All
+    no-active-session display path).
   - `MixerViewModel` conforms to both; the coordinator holds them **weakly** (the VM owns the
     coordinator, so a strong back-reference would be a retain cycle).
 - **Coordinator init / IUO note:** `MixerViewModel` stores the coordinator as an implicitly-unwrapped
@@ -119,7 +132,17 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 
 ## 5. Recent key commits
 
-Most recent (the staged `ProductRealControlCoordinator` **start-path** extraction, Prompts 205–214):
+Most recent (the staged `ProductRealControlCoordinator` **stop-path** extraction, Prompts 215–218):
+
+```
+d212fdf Move Product Real hard-teardown state cleanup into coordinator   (Prompt 218)
+ce803a9 Move Product Real app-exit stop slice into coordinator           (Prompt 217)
+55e37d6 Move Product Real stop-all core into coordinator                 (stop-all + stop callback, Prompt 216)
+9867f78 Move per-app Product Real stop leaf into coordinator             (Prompt 215)
+253b4a9 Refresh handoff before Product Real stop extraction              (docs)
+```
+
+Preceding (the staged `ProductRealControlCoordinator` **start-path** extraction, Prompts 205–214):
 
 ```
 c12aa73 Update docs for Product Real start-path coordinator extraction   (Prompt 213)
@@ -154,7 +177,22 @@ bf2bf40 Extract MixerVisibleAppsFilter from MixerViewModel      (Prompt 199)
 - 212 — moved both `startExperimentalControl` overloads (async start body) into the coordinator.
 - 213 — docs refresh.
 - **214 — ANALYSIS-ONLY** (no code): planned the stop/lifecycle migration and recommended the next
-  smallest step (see §10). **215 is not yet implemented.**
+  smallest step.
+
+**Stop-path milestone (Prompts 215–218), all behavior-preserving, each its own reviewed commit:**
+
+- **215** — moved the per-app stop leaf `stopExperimentalControl(for:reason:)` into the coordinator.
+- **216** — moved the Stop All core `stopProductLiveSessions(reason:)` **and** the engine stop
+  callback `handleProductLiveControlStopped(...)`; replaced the removed
+  `handleProductLiveControlStopped` seam member with a narrow `applyLiveControlStoppedDisplay`
+  callback (shared display cleanup stays in the VM) and added the `processTapLiveDiagnostics`
+  context read.
+- **217** — moved the app-exit slice `stopRealControlForExitedTargetApps()`; `refreshApplications`
+  delegates only that slice.
+- **218** — moved only the Product Real **state-reset sub-block** of `tearDownAllProcessTapWork`
+  into `tearDownProductStateForHardStop()`; the engine hard stop, resolver/helper/diagnostics
+  cleanup, advanced-manual reset, and the earlier `cancelResolutionTask()` stay in the VM at their
+  existing positions (exact teardown ordering preserved).
 
 **Hardening bundle `88bbed5` = P177–P182:**
 
@@ -176,8 +214,8 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 ## 6. Test & CI state (as of last update)
 
-- **Local:** last full run = **371 passed / 0 failed / 0 skipped** (code state = `92a82c3`; the
-  current HEAD `c12aa73` is docs-only and does not change the count).
+- **Local:** last full run = **387 passed / 0 failed / 0 skipped** (code state = `d212fdf`, the
+  current HEAD before this docs-only refresh).
 - **CI:** **green** at the last pushed state (GitHub Actions Build workflow, success).
 - An earlier README-only commit had a one-off CI failure that **passed on rerun** (a flake).
 - `xcodebuild test` exits `0` on pass, `65` on any test failure. Get exact counts from the newest
@@ -227,68 +265,48 @@ xcodebuild build -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configura
   -destination 'platform=macOS' -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO
 ```
 
-## 10. Recommended next step
+## 10. What remains & recommended next step
 
-The Product Real **start** path is fully extracted (full suite green, 371). Prompt 214 analyzed the
-**stop/lifecycle** migration and chose the smallest safe next step, recorded below. First re-verify
-live state (§9) and re-read the target methods in `MixerViewModel.swift` — **do not trust the line
-numbers in this file; inspect the repo.**
+The staged Product Real **start** and **stop** paths are now both fully extracted into
+`ProductRealControlCoordinator` (full suite green, 387). First re-verify live state (§9) and
+re-read the target methods in `MixerViewModel.swift` — **do not trust the line numbers in this
+file; inspect the repo.**
 
-### Next implementation: per-app Product Real stop leaf (Prompt 215)
+### What remains in `MixerViewModel` (intentional — the coordinator refactor is NOT "done")
 
-**Move ONLY `stopExperimentalControl(for:reason:)`** from `MixerViewModel` into
-`ProductRealControlCoordinator`. It is the single fully product-only stop method whose every
-dependency is already in the coordinator (`productRealControlState`, `liveSessionManager.stopSession`,
-`startSettleGate.registerStop`, and the coordinator-owned `updateActiveLiveControlAppNameAfterProductChange`).
-No new seam is needed.
+`ProductRealControlCoordinator` owns Product Real **state + product-only start/stop logic**. The
+view model remains the **cross-subsystem router and lifecycle/UI orchestration layer**, and these
+responsibilities are deliberately staying there — they are not product-only, so moving them into a
+product coordinator would *increase* coupling, not reduce it:
 
-- **Behavior to preserve exactly:**
-  - clear this app's pending start request, then read its `liveSessionID`;
-  - if **no** `liveSessionID` (optimistic window / not active): clear the session locally, call
-    `updateActiveLiveControlAppNameAfterProductChange()`, and **return without** calling `stopSession`;
-  - if a `liveSessionID` exists: `beginOperation(for: appID)` (rapid-toggle pending flag), then a
-    `Task { await liveSessionManager.stopSession(id: sessionID, reason: reason) }` registered with
-    `startSettleGate.registerStop(...)`;
-  - default `reason` is `.userStopped`; ordering identical.
-- **Known VM callers to update (both stay in `MixerViewModel`):**
-  - `toggleExperimentalControl` (stop branch) → `coordinator.stopExperimentalControl(for: appID)`.
-  - `stopRealControlForExitedTargetApps` → `coordinator.stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)`.
-- **Must NOT move in this step:** `stopProductLiveSessions`, `handleProductLiveControlStopped`,
-  `stopRealControlForExitedTargetApps` (stays; just delegates), `stopProcessTapLiveControl` router,
-  `applyLiveControlStoppedDisplay`, `showLiveControlWarningIfNeeded`, `handleAdvancedManualLiveControlStopped`,
-  Stop All / global fan-out, lifecycle / sleep / wake / termination / output-device-change teardown,
-  audio-callback code.
-- **Expected files:** `MacMiniMixer/Features/Mixer/ProductRealControlCoordinator.swift`,
-  `MacMiniMixer/Features/Mixer/MixerViewModel.swift`, `MacMiniMixerTests/ProductRealControlCoordinatorTests.swift`.
-  No new files → **no pbxproj change expected** (all three are already registered).
-- **Required coordinator tests (deterministic, no sleeps — the fake `liveSessionManager` records
-  `stopSession(id:reason:)`):**
-  1. `testStopExperimentalControlStopsSessionByIDWithReason` — active session with a `liveSessionID`
-     → `stopSession(id:reason:)` recorded with the correct id + reason (settle-gate registration too
-     if the fake exposes it).
-  2. `testStopExperimentalControlOptimisticWindowClearsLocallyWithoutStopSession` — session without
-     `liveSessionID` → session cleared locally, **no** `stopSession` call.
-  3. `testStopExperimentalControlMarksOperationPendingForLiveSessionStop` — active session with
-     `liveSessionID` → `productRealControlState.isOperationPending(appID)` is true after the call
-     (cleared later by the stop callback).
-  Existing `MixerViewModelLiveControlTests` must remain green **unchanged**.
+- `toggleExperimentalControl` — the row entry point (delegates start/stop to the coordinator).
+- `stopProcessTapLiveControl` — the **product-vs-advanced-manual router** (product branch delegates
+  to `coordinator.stopProductLiveSessions`); `handleAdvancedManualLiveControlStopped`.
+- `applyLiveControlStoppedDisplay` + `showLiveControlWarningIfNeeded` — **shared** display cleanup
+  used by both product and advanced-manual stops (reached from the coordinator through the seam).
+- `tearDownAllProcessTapWork` — the global sleep/termination teardown **fan-out** (engine hard stop,
+  two-app readiness, helper/probe, resolver invalidation, diagnostics/replay, advanced-manual reset,
+  `cancelResolutionTask()`); only its Product Real state-reset sub-block delegates to
+  `coordinator.tearDownProductStateForHardStop()`.
+- `stopActiveAudioWorkForOutputDeviceChange` — the 5-subsystem output-device-change fan-out.
+- `setExperimentalRealAppControlEnabled`, `handleSystemWillSleep` / `handleSystemDidWake` /
+  `stopProcessTapLiveControlForTermination`, and `refreshApplications` / running-app orchestration
+  (delegates only the app-exit product slice).
+- Advanced diagnostics, helper discovery/probe, and Two-App Readiness orchestration.
 
-**Subsequent staged steps (later prompts, per Prompt 214 / `docs/DECISIONS.md`):** S2 = product stop
-core (`stopProductLiveSessions` + `handleProductLiveControlStopped`, which needs a new
-`applyLiveControlStoppedDisplay` seam callback + a `processTapLiveDiagnostics` context read); S3 =
-`stopRealControlForExitedTargetApps`; S4 = the product-state hard-teardown slice inside
-`tearDownAllProcessTapWork`. The router, fan-outs, lifecycle entry points, and shared display helpers
-stay in `MixerViewModel`.
+### Recommended next step (conservative): **stop here — the coordinator boundary is healthy**
 
-### Rollback / stop conditions
+The Product Real start/stop extraction has reached a clean, stable boundary. The remaining
+`MixerViewModel` responsibilities are genuinely cross-subsystem (router, shared display, lifecycle
+entry points, multi-subsystem fan-out) — **do not** move them into `ProductRealControlCoordinator`;
+that would pull non-product concerns into a product-scoped type. If further `MixerViewModel` cleanup
+is desired, prefer a **read-only size/dead-code reassessment** (identify now-thin delegating members
+and any dead code left by the extraction) before committing to any new extraction, and only extract
+another **self-contained, clearly product-only** helper if one is found. Any such step must stay
+behind the unchanged `MixerViewModelLiveControlTests` plus new coordinator tests, use the
+recorded-fake + `waitUntil` observable-wait pattern (no real sleeps), route state mutation through
+`coordinator.productRealControlState` (never raw state), and touch no new seam member unless
+unavoidable — stop and report if it does.
 
-- If the move requires a new seam, mutating raw coordinator state (bypassing `onWillChange`), or any
-  change to a shared display helper or the router → **stop and report**; the leaf move should need none
-  of these.
-- If any existing `MixerViewModelLiveControlTests` fails, or the settle-gate / pending-op ordering
-  changes → revert and reassess (don't force it).
-- Never introduce a real sleep in tests; use the recorded-fake + `waitUntil` observable-wait pattern
-  already in `ProductRealControlCoordinatorTests`.
-
-Either way: do **not** release/tag or bump `MARKETING_VERSION`; keep the cap at 3 and `N > 3`
-deferred.
+Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION`; keep the cap at 3 and
+`N > 3` deferred.

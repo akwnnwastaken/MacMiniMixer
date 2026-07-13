@@ -45,8 +45,9 @@ not yet a finished Windows Volume Mixer replacement.
   - `AdvancedProcessTapDiagnosticsCoordinator`
   - `AdvancedLiveControlCoordinator`
   - `TwoAppReadinessCoordinator`
-  - `ProductRealControlCoordinator` (owns the Product Real **start** path — see below; stop/lifecycle
-    still in `MixerViewModel`)
+  - `ProductRealControlCoordinator` (owns the Product Real **start and stop** paths — see below;
+    the cross-subsystem router, lifecycle entry points, and multi-subsystem fan-out intentionally
+    remain in `MixerViewModel`)
 - Extracted `MixerViewModel` helpers: `RealControlBannerPresenter`, `MixerVisibleAppsFilter`,
   `MixerStatusMessageController`.
 - `CHANGELOG.md` with milestone history.
@@ -67,14 +68,22 @@ not yet a finished Windows Volume Mixer replacement.
   cross-feature coordination, lifecycle cleanup, and status messages.
 - Product Real Control is now **split across a coordinator and the view model**:
   - `ProductRealControlCoordinator` owns `ProductRealControlState`, the app-audio resolution
-    task/handling, stale-start cleanup, and the async Product Real **start** path (preflight +
-    resolved/async start body). It talks to the view model only through the
-    `ProductRealControlSideEffects` / `ProductRealControlContext` seam.
-  - `MixerViewModel` still owns the row `toggleExperimentalControl` entry point,
-    `stopExperimentalControl` / `stopProductLiveSessions` (Stop All),
-    `handleProductLiveControlStopped`, and lifecycle / sleep / wake / termination /
-    output-device-change teardown. Moving the **stop/lifecycle** path is future work.
-  - Rationale for the staged extraction is in `docs/DECISIONS.md`.
+    task/handling, stale-start cleanup, the async Product Real **start** path (preflight +
+    resolved/async start body), and the full Product Real **stop** path — per-app stop
+    (`stopExperimentalControl`), Stop All core (`stopProductLiveSessions`), the engine stop callback
+    (`handleProductLiveControlStopped`), the app-exit slice (`stopRealControlForExitedTargetApps`),
+    and the hard-teardown Product Real state reset (`tearDownProductStateForHardStop`). It talks to
+    the view model only through the `ProductRealControlSideEffects` / `ProductRealControlContext`
+    seam.
+  - `MixerViewModel` remains the **cross-subsystem router and lifecycle/UI orchestration layer**:
+    the row `toggleExperimentalControl` entry point, the `stopProcessTapLiveControl` product-vs-
+    advanced-manual router, the **shared** `applyLiveControlStoppedDisplay` cleanup (used by both
+    product and advanced-manual stops, reached through the seam), advanced-manual stop, the
+    `tearDownAllProcessTapWork` global teardown fan-out (only its Product Real state-reset sub-block
+    delegates to the coordinator; resolution-task cancel stays in place to preserve ordering), the
+    output-device-change fan-out, and all sleep / wake / termination entry points. These are
+    genuinely cross-subsystem and intentionally stay in the view model.
+  - Rationale for the staged extraction (both start and stop paths) is in `docs/DECISIONS.md`.
 - Product sessions use an indefinite timeout policy while healthy. Manual Advanced Live
   and diagnostic/readiness paths remain limited/short-lived.
 - Helper mappings are validation-first, in-memory only, and not persisted across
@@ -99,23 +108,34 @@ not yet a finished Windows Volume Mixer replacement.
 
 ## Next Recommended Low-Risk Work
 
-### Extract Product Real Control coordinator — start path done; stop/lifecycle future
+### Extract Product Real Control coordinator — start + stop paths done
 
-**Priority**: High | **Risk**: Medium | **Status**: Start path extracted (staged); stop/lifecycle remaining
+**Priority**: High | **Risk**: Medium | **Status**: Start path and stop path both extracted (staged)
 
 The initial reassessment deferred the coordinator (the cluster was the central arbiter with ~142
-references and four shared `@Published` properties). That was later superseded: the **start** path
-was extracted into `ProductRealControlCoordinator` in small, independently-tested steps
-(seam → pure decision helpers → state ownership → stale cleanup → resolution slice → async start
-body). The coordinator owns `ProductRealControlState`, resolution, stale-start cleanup, and the
-async start path, talking to the view model through the `ProductRealControlSideEffects` /
+references and four shared `@Published` properties). That was later superseded: both the **start**
+and the **stop** paths were extracted into `ProductRealControlCoordinator` in small,
+independently-tested steps. Start path (seam → pure decision helpers → state ownership → stale
+cleanup → resolution slice → async start body); stop path (per-app stop leaf → Stop All core +
+engine stop callback → app-exit slice → hard-teardown Product Real state reset). The coordinator
+owns `ProductRealControlState`, resolution, stale-start cleanup, the async start path, and the full
+product stop path, talking to the view model through the `ProductRealControlSideEffects` /
 `ProductRealControlContext` seam. Each step stayed behind the unchanged `MixerViewModelLiveControlTests`
-plus new coordinator tests; the full suite is green (371 passed / 0 failed / 0 skipped).
+plus new coordinator tests; the full suite is green (387 passed / 0 failed / 0 skipped).
 
-**Remaining (future work)**: move the Product Real **stop / toggle / lifecycle** path out of
-`MixerViewModel` — `toggleExperimentalControl`, `stopExperimentalControl`,
-`stopProductLiveSessions` (Stop All), `handleProductLiveControlStopped`, and the sleep / wake /
-termination / output-device-change teardown. Full staged rationale in `docs/DECISIONS.md`.
+**Staged stop-path steps (complete):**
+- per-app stop leaf (`stopExperimentalControl(for:reason:)`);
+- Stop All core (`stopProductLiveSessions(reason:)`);
+- engine stop-callback handling (`handleProductLiveControlStopped(...)`);
+- app-exit stop slice (`stopRealControlForExitedTargetApps()`);
+- hard-teardown Product Real state reset (`tearDownProductStateForHardStop()`).
+
+**Intentionally NOT extracted (stays in `MixerViewModel`)**: the global cross-subsystem router
+(`stopProcessTapLiveControl`), the shared display cleanup (`applyLiveControlStoppedDisplay`), the
+lifecycle / sleep / wake / termination entry points, the output-device-change fan-out, and the
+`tearDownAllProcessTapWork` multi-subsystem teardown fan-out. These are not product-only, so keeping
+them in the view model is deliberate — moving them into a product coordinator would increase
+coupling. `N > 3` remains deferred. Full staged rationale in `docs/DECISIONS.md`.
 
 ---
 

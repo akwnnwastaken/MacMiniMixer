@@ -12,19 +12,31 @@ multi-app per-application control is not implemented.
 ## [Unreleased]
 
 ### Changed
+- **Product Real Control stop path extracted into `ProductRealControlCoordinator`** (internal
+  refactor, no behavior change). Following the start-path extraction, the coordinator now also owns
+  the full Product Real **stop** path: the per-app stop leaf (`stopExperimentalControl(for:reason:)`),
+  the Stop All core (`stopProductLiveSessions(reason:)`), the engine stop callback
+  (`handleProductLiveControlStopped(...)`), the app-exit slice (`stopRealControlForExitedTargetApps()`),
+  and the hard-teardown Product Real state reset (`tearDownProductStateForHardStop()`). The
+  cross-subsystem router (`stopProcessTapLiveControl`), the **shared** display cleanup
+  (`applyLiveControlStoppedDisplay`, reached through a new narrow seam callback and also used by
+  advanced-manual stop), the lifecycle / sleep / wake / termination entry points, the
+  output-device-change fan-out, and the `tearDownAllProcessTapWork` teardown fan-out all
+  **intentionally remain** in `MixerViewModel` (they are not product-only). Hard teardown preserved
+  exact ordering by moving only the Product Real state-reset sub-block. Migrated in small,
+  independently-tested steps (per-app leaf → Stop All core + stop callback → app-exit slice →
+  hard-teardown state reset) rather than one large refactor. Full suite green
+  (387 passed / 0 failed / 0 skipped). Product Real Control remains capped at **three** concurrent
+  sessions; `N > 3` stays deferred. `MARKETING_VERSION` unchanged; no tag/release.
 - **Product Real Control start path extracted into `ProductRealControlCoordinator`** (internal
   refactor, no behavior change). The coordinator now owns `ProductRealControlState`, the app-audio
   resolution task and resolution handling, stale-start cleanup, and the async Product Real start
   path (both the `startExperimentalControl` preflight and the resolved/async start body). It talks
   to `MixerViewModel` only through the narrow `ProductRealControlSideEffects` /
-  `ProductRealControlContext` seam. `MixerViewModel` still owns the row `toggleExperimentalControl`
-  entry point, `stopExperimentalControl` / `stopProductLiveSessions` (Stop All),
-  `handleProductLiveControlStopped`, and all lifecycle / sleep / wake / termination /
-  output-device-change teardown; the engine `onStopped` callback is routed back to it through the
-  seam. Migrated in small, independently-tested steps (seam → state ownership → resolution slice →
-  stale cleanup → async start body) rather than one large refactor. Full suite green
-  (371 passed / 0 failed / 0 skipped). Product Real Control remains capped at **three** concurrent
-  sessions; `N > 3` stays deferred. `MARKETING_VERSION` unchanged; no tag/release.
+  `ProductRealControlContext` seam. Migrated in small, independently-tested steps (seam → state
+  ownership → resolution slice → stale cleanup → async start body) rather than one large refactor.
+  Product Real Control remains capped at **three** concurrent sessions; `N > 3` stays deferred.
+  `MARKETING_VERSION` unchanged; no tag/release.
 
 ## [v0.14] - Unreleased
 

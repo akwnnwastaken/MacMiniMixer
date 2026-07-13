@@ -412,7 +412,7 @@ interface.
 ## `ProductRealControlCoordinator`: deferred, then extracted in stages
 
 **Status**: The original decision here was **defer** (keep orchestration in `MixerViewModel`).
-That was later **superseded**: the **start path** was extracted into
+That was later **superseded**: both the **start path** and the **stop path** were extracted into
 `ProductRealControlCoordinator` in small, independently-tested steps. The reasoning below is
 retained because it explains *why the move had to be staged behind a seam* rather than done as one
 refactor, and what is still intentionally left in the view model.
@@ -431,14 +431,42 @@ refactor, and what is still intentionally left in the view model.
    `handleAppAudioTargetResolution`, `cancelAppAudioTargetResolution`, and the
    `productSessionStartBlockReason` preflight moved to the coordinator.
 6. **Async start body** — both `startExperimentalControl` overloads moved to the coordinator; the
-   engine `onStopped` callback is routed back to the view model's `handleProductLiveControlStopped`
-   through the seam.
+   engine `onStopped` callback was initially routed back to the view model's
+   `handleProductLiveControlStopped` through the seam.
 
-**Still in `MixerViewModel` (intentionally, for now)**: the row `toggleExperimentalControl` entry
-point, `stopExperimentalControl` / `stopProductLiveSessions` (Stop All),
-`handleProductLiveControlStopped`, `handleAdvancedManualLiveControlStopped`, and all lifecycle /
-sleep / wake / termination / output-device-change teardown. Moving the **stop/lifecycle** path is
-future work.
+**Then the stop path (Prompts 215–218), same one-slice-per-commit discipline:**
+
+7. **Per-app stop leaf** — `stopExperimentalControl(for:reason:)` moved to the coordinator; its two
+   VM callers (`toggleExperimentalControl` stop branch, `stopRealControlForExitedTargetApps`)
+   delegate. No new seam needed.
+8. **Stop All core + engine stop callback** — `stopProductLiveSessions(reason:)` and
+   `handleProductLiveControlStopped(...)` moved. The `onStopped` routing member was **replaced**: the
+   coordinator now handles `onStopped` locally, and the seam gained a narrow
+   `applyLiveControlStoppedDisplay(result:diagnostics:)` callback so the coordinator can trigger the
+   **shared** VM display cleanup (used by advanced-manual stop too). A `processTapLiveDiagnostics`
+   context read was added for the Stop All no-active-session path. The former
+   `handleProductLiveControlStopped` seam member was removed (no dead seam API).
+9. **App-exit slice** — `stopRealControlForExitedTargetApps()` moved; `refreshApplications`
+   delegates only that slice.
+10. **Hard-teardown Product Real state reset** — only the Product Real state-reset **sub-block** of
+    `tearDownAllProcessTapWork` moved into `tearDownProductStateForHardStop()`. Exact teardown
+    ordering was preserved by moving *only* the contiguous state-reset lines: the engine hard stop,
+    two-app readiness, helper/probe, resolver invalidation, diagnostics/replay cleanup,
+    advanced-manual reset, and the earlier-positioned `cancelResolutionTask()` all stay in the view
+    model at their existing positions (folding `cancelResolutionTask()` into the moved block would
+    have reordered it relative to the non-product steps, so it was deliberately left where it is).
+
+**Still in `MixerViewModel` (intentionally — the view model is the cross-subsystem router and
+lifecycle/UI orchestration layer, and these responsibilities are not product-only)**: the row
+`toggleExperimentalControl` entry point, the `stopProcessTapLiveControl` **product-vs-advanced-manual
+router**, `handleAdvancedManualLiveControlStopped`, the **shared** `applyLiveControlStoppedDisplay` /
+`showLiveControlWarningIfNeeded` display cleanup (reached from the coordinator through the seam), and
+all lifecycle / sleep / wake / termination / output-device-change teardown **fan-out**
+(`tearDownAllProcessTapWork`, `stopActiveAudioWorkForOutputDeviceChange`). Moving any of these into a
+product-scoped coordinator would pull non-product concerns across the seam and *increase* coupling —
+the shared display helper serves advanced-manual stop, the router arbitrates between product and
+advanced-manual, and the fan-outs sequence five-plus subsystems — so they stay in the view model by
+design. This is a healthy stopping point, not unfinished work.
 
 **Why staged instead of one large refactor**: the original reassessment (below) measured ~142
 references and four shared `@Published` properties, and concluded a single-shot extraction would
