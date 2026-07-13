@@ -706,13 +706,10 @@ final class MixerViewModel: ObservableObject {
         advancedHelperDiscovery.stopProbe(reason: .userStopped)
         advancedProcessTapDiagnostics.stopReplayProbeForTermination()
         advancedManualLiveControlActive = false
-        productRealControlState.clearAllStartRequests()
-        productRealControlState.clearAllResolutions()
-        productRealControlState.clearActiveSession()
-        // Synchronous hard teardown uses `stopLiveControlNow`, which does not fire the per-session
-        // onStopped callbacks that normally clear pending flags, so clear them here directly.
-        productRealControlState.clearAllOperations()
-        activeLiveControlAppName = nil
+        // Product Real-owned state reset (clears sessions/requests/resolutions/pending ops and the
+        // active-name display). `stopLiveControlNow` above does not fire the per-session onStopped
+        // callbacks that normally clear pending flags, so this clears them directly.
+        productRealControlCoordinator.tearDownProductStateForHardStop()
     }
 
     func startTwoAppReadinessTest() {

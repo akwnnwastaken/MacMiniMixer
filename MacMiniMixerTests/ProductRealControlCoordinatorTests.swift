@@ -561,6 +561,63 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
     }
 
+    // MARK: - Hard-teardown state reset
+
+    func testTearDownProductStateForHardStopClearsAllProductState() {
+        let harness = makeHarness()
+        let (appA, appB, _, _) = makeTwoConfirmedSessions(harness)
+        let reqID = harness.coordinator.productRealControlState.beginStartRequest(for: appA.id)
+        harness.coordinator.productRealControlState.beginResolution(for: "resolving-app")
+        harness.coordinator.productRealControlState.beginOperation(for: appB.id)
+        XCTAssertFalse(harness.coordinator.productRealControlState.activeVisibleAppIDs.isEmpty)
+
+        harness.coordinator.tearDownProductStateForHardStop()
+
+        let state = harness.coordinator.productRealControlState
+        // Sessions, start requests, resolutions, and pending operations are all cleared.
+        XCTAssertTrue(state.activeVisibleAppIDs.isEmpty)
+        XCTAssertFalse(state.hasConfirmedLiveSession)
+        XCTAssertFalse(state.isCurrentStartRequest(reqID, for: appA.id))
+        XCTAssertTrue(state.resolvingAppIDs.isEmpty)
+        XCTAssertFalse(state.isOperationPending(for: appA.id))
+        XCTAssertFalse(state.isOperationPending(for: appB.id))
+    }
+
+    func testTearDownProductStateForHardStopClearsActiveName() {
+        let harness = makeHarness()
+        _ = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.tearDownProductStateForHardStop()
+
+        // The shared active-name display is reset to nil, exactly as the old VM block did.
+        XCTAssertEqual(harness.sideEffects.activeNameHistory.last, .some(nil))
+    }
+
+    func testTearDownProductStateForHardStopDoesNotCallEngineStopSession() async {
+        let harness = makeHarness()
+        _ = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.tearDownProductStateForHardStop()
+        await Task.yield()
+
+        // This is a pure state reset; the engine hard stop stays in the VM's teardown flow.
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+    }
+
+    func testTearDownProductStateForHardStopDoesNotTouchAdvancedManualOrUnrelatedContext() {
+        let harness = makeHarness()
+        _ = makeTwoConfirmedSessions(harness)
+        harness.context.advancedManualLiveControlActive = true
+        harness.context.isProcessTapTesting = true
+
+        harness.coordinator.tearDownProductStateForHardStop()
+
+        // The Product Real state reset leaves advanced-manual and unrelated subsystem context alone.
+        XCTAssertTrue(harness.context.advancedManualLiveControlActive)
+        XCTAssertTrue(harness.context.isProcessTapTesting)
+        XCTAssertTrue(harness.resolver.cancelReasons.isEmpty)
+    }
+
     // MARK: - Harness
 
     private struct Harness {

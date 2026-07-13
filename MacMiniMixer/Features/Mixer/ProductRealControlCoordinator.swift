@@ -600,6 +600,29 @@ final class ProductRealControlCoordinator {
         }
     }
 
+    // MARK: - Hard-teardown state reset
+    //
+    // Moved from `MixerViewModel` (Phase C). This is only the Product Real-owned *state* reset block
+    // of `tearDownAllProcessTapWork` — the engine hard stop (`stopLiveControlNow`), two-app readiness,
+    // helper/probe, resolver invalidation, diagnostics/replay cleanup, advanced-manual reset, and the
+    // resolution-task cancel all stay in the view model's teardown at their existing positions (the
+    // resolution-task cancel is left in place rather than folded in here so the surrounding non-product
+    // ordering is unchanged). No engine `stopSession` is issued here.
+
+    /// Clears all Product Real session/request/resolution/operation state and resets the shared
+    /// active-name display, for the synchronous hard teardown (sleep / termination). Mutates state via
+    /// the `productRealControlState` property so `onWillChange` still fires. The view model's
+    /// `tearDownAllProcessTapWork` calls this in place of its previous inline Product Real state resets.
+    func tearDownProductStateForHardStop() {
+        productRealControlState.clearAllStartRequests()
+        productRealControlState.clearAllResolutions()
+        productRealControlState.clearActiveSession()
+        // Synchronous hard teardown uses `stopLiveControlNow`, which does not fire the per-session
+        // onStopped callbacks that normally clear pending flags, so clear them here directly.
+        productRealControlState.clearAllOperations()
+        sideEffects?.setActiveLiveControlAppName(nil)
+    }
+
     /// Sets the shared "active live-control app" name from the current product sessions, unless the
     /// Advanced manual session owns the display. Moved from `MixerViewModel`; the view model's
     /// remaining stop paths forward here.
