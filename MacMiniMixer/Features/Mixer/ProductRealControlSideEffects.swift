@@ -19,10 +19,10 @@ protocol ProductRealControlSideEffects: AnyObject {
     func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult)
     func setLiveControlDiagnosticProgress(_ progress: ProcessTapDiagnosticProgress?)
     func setLiveControlDiagnosticRunning(_ isRunning: Bool)
-    /// Routes a Product Real session's engine `onStopped` callback back to `MixerViewModel`, whose
-    /// `handleProductLiveControlStopped` (still resident there) owns the shared stop/display cleanup.
-    func handleProductLiveControlStopped(
-        sessionID: ProcessTapLiveSessionID?,
+    /// Runs the shared stop/display cleanup (`MixerViewModel.applyLiveControlStoppedDisplay`) after the
+    /// coordinator has cleared the Product Real state for a stopped session. Kept as a seam callback —
+    /// not moved — because the same view-model helper also serves the advanced-manual stop path.
+    func applyLiveControlStoppedDisplay(
         result: ProcessTapTestResult,
         diagnostics: ProcessTapLiveDiagnostics?
     )
@@ -51,4 +51,7 @@ protocol ProductRealControlContext: AnyObject {
     /// The derived "live control active" flag (Advanced-manual active OR a confirmed product
     /// session). Consulted by the cached-helper retry guard in the async start body.
     var isProcessTapLiveControlActive: Bool { get }
+    /// The current live-diagnostics stream, read by the Stop All path to carry the last diagnostics
+    /// into its no-active-session cleanup (matching the previous view-model behavior).
+    var processTapLiveDiagnostics: ProcessTapLiveDiagnostics? { get }
 }
