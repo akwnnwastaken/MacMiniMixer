@@ -301,6 +301,78 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
     // two-phase resolve + eligibility fixture at the coordinator unit level would be broad and
     // brittle, so it is intentionally left to the VM suite.
 
+    // MARK: - Per-app stop leaf
+
+    func testStopExperimentalControlStopsSessionByIDWithReason() async {
+        let harness = makeHarness()
+        let app = makeApp()
+        let sessionID = ProcessTapLiveSessionID()
+        harness.coordinator.productRealControlState.beginSession(
+            visibleAppID: app.id,
+            displayName: app.name,
+            controlledProcessIdentifier: app.processIdentifier,
+            source: .directVisiblePID,
+            liveSessionID: sessionID
+        )
+
+        harness.coordinator.stopExperimentalControl(for: app.id, reason: .targetAppExited)
+        await waitUntil { !harness.liveSessionManager.stopSessionCalls.isEmpty }
+
+        // The stop task (registered with the settle gate) tears the session down by its own engine id
+        // with the caller's reason.
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.count, 1)
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.id, sessionID)
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.reason, .targetAppExited)
+        // The live-session path does NOT clear the local session; that terminal clear is owned by the
+        // stop callback (`handleProductLiveControlStopped`). The session therefore remains present here.
+        XCTAssertEqual(harness.coordinator.productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID, sessionID)
+    }
+
+    func testStopExperimentalControlOptimisticWindowClearsLocallyWithoutStopSession() async {
+        let harness = makeHarness()
+        let app = makeApp()
+        // No `liveSessionID` → optimistic window (start still in flight / not yet confirmed).
+        harness.coordinator.productRealControlState.beginSession(
+            visibleAppID: app.id,
+            displayName: app.name,
+            controlledProcessIdentifier: app.processIdentifier,
+            source: .directVisiblePID
+        )
+
+        harness.coordinator.stopExperimentalControl(for: app.id)
+        // Give any (erroneous) async stop task a chance to run before asserting it never fired.
+        await Task.yield()
+
+        // The session is cleared locally and the active-name display refreshed, without touching the
+        // engine.
+        XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[app.id])
+        XCTAssertTrue(harness.coordinator.productRealControlState.activeVisibleAppIDs.isEmpty)
+        XCTAssertEqual(harness.sideEffects.activeNameHistory.last, .some(nil))
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+        // No stop transition is marked in flight in the optimistic window.
+        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: app.id))
+    }
+
+    func testStopExperimentalControlMarksOperationPendingForLiveSessionStop() {
+        let harness = makeHarness()
+        let app = makeApp()
+        let sessionID = ProcessTapLiveSessionID()
+        harness.coordinator.productRealControlState.beginSession(
+            visibleAppID: app.id,
+            displayName: app.name,
+            controlledProcessIdentifier: app.processIdentifier,
+            source: .directVisiblePID,
+            liveSessionID: sessionID
+        )
+
+        harness.coordinator.stopExperimentalControl(for: app.id)
+
+        // `beginOperation` runs synchronously before the async stop task; the pending flag stays set
+        // here because its terminal clear is owned by the later stop callback (not exercised in this
+        // test, so we deliberately do not clear it).
+        XCTAssertTrue(harness.coordinator.productRealControlState.isOperationPending(for: app.id))
+    }
+
     // MARK: - Harness
 
     private struct Harness {

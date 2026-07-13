@@ -448,6 +448,45 @@ final class ProductRealControlCoordinator {
         }
     }
 
+    // MARK: - Per-app stop leaf
+    //
+    // Moved from `MixerViewModel` (Phase C). Behavior, ordering, default stop reason,
+    // pending-operation semantics, and settle-gate registration are preserved verbatim; only the
+    // receivers changed — state via the `productRealControlState` property so `onWillChange` still
+    // fires, and the live-session manager / settle gate are the same injected instances the view
+    // model previously used. The terminal pending-flag clear is still owned by the stop callback
+    // (`handleProductLiveControlStopped`, still resident in the view model).
+
+    /// Stops Product Real Control for a single app. Invalidates only this app's pending start, then
+    /// reads its `liveSessionID` before clearing anything: with no live session (optimistic window or
+    /// not active) it clears just this app locally and refreshes the active-name display without
+    /// touching the engine; with a live session it marks the row's stop transition in flight and tears
+    /// the session down through the settle gate.
+    func stopExperimentalControl(
+        for appID: MixerAppItem.ID,
+        reason: ProcessTapLiveStopReason = .userStopped
+    ) {
+        // Per-app stop invalidates only this app's pending start, leaving other apps untouched.
+        productRealControlState.clearStartRequest(for: appID)
+
+        guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
+            // Optimistic window or not active: clear just this app locally.
+            productRealControlState.clearSession(for: appID)
+            updateActiveLiveControlAppNameAfterProductChange()
+            return
+        }
+
+        // Mark this row's stop transition in flight so rapid re-toggles are ignored until the stop
+        // callback (`handleProductLiveControlStopped`) clears it.
+        productRealControlState.beginOperation(for: appID)
+
+        // Track this per-app teardown with the settle gate (see stopProductLiveSessions).
+        let stopTask = Task {
+            _ = await liveSessionManager.stopSession(id: sessionID, reason: reason)
+        }
+        startSettleGate.registerStop(stopTask)
+    }
+
     /// Sets the shared "active live-control app" name from the current product sessions, unless the
     /// Advanced manual session owns the display. Moved from `MixerViewModel`; the view model's
     /// remaining stop paths forward here.

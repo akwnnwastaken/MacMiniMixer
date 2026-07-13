@@ -793,36 +793,11 @@ final class MixerViewModel: ObservableObject {
         }
 
         if isExperimentalControlActive(for: appID) {
-            stopExperimentalControl(for: appID)
+            productRealControlCoordinator.stopExperimentalControl(for: appID)
             return
         }
 
         productRealControlCoordinator.startExperimentalControl(for: appID)
-    }
-
-    private func stopExperimentalControl(
-        for appID: MixerAppItem.ID,
-        reason: ProcessTapLiveStopReason = .userStopped
-    ) {
-        // Per-app stop invalidates only this app's pending start, leaving other apps untouched.
-        productRealControlState.clearStartRequest(for: appID)
-
-        guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
-            // Optimistic window or not active: clear just this app locally.
-            productRealControlState.clearSession(for: appID)
-            productRealControlCoordinator.updateActiveLiveControlAppNameAfterProductChange()
-            return
-        }
-
-        // Mark this row's stop transition in flight so rapid re-toggles are ignored until the stop
-        // callback (`handleProductLiveControlStopped`) clears it.
-        productRealControlState.beginOperation(for: appID)
-
-        // Track this per-app teardown with the settle gate (see stopProductLiveSessions).
-        let stopTask = Task {
-            _ = await processTapLiveController.stopSession(id: sessionID, reason: reason)
-        }
-        productRealStartSettleGate.registerStop(stopTask)
     }
 
     func refreshApplications() {
@@ -861,7 +836,7 @@ final class MixerViewModel: ObservableObject {
         }
         // Tear down only the exited apps' sessions/requests; surviving apps keep running.
         for exitedAppID in exitedActiveAppIDs {
-            stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
+            productRealControlCoordinator.stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
         }
 
         if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
