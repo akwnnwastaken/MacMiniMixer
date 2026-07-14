@@ -468,19 +468,20 @@ the shared display helper serves advanced-manual stop, the router arbitrates bet
 advanced-manual, and the fan-outs sequence five-plus subsystems — so they stay in the view model by
 design.
 
-### Internal split into sub-coordinators (Prompts 222–224)
+### Internal split into sub-coordinators (Prompts 222–228) — complete
 
 After the start + stop paths were extracted, `ProductRealControlCoordinator` had grown to ~640 lines.
 Prompt 222 designed an **internal** split into cohesive sub-objects **behind the unchanged facade**
-(so `MixerViewModel` still knows only `ProductRealControlCoordinator`). Prompts 223–224 implemented
-the first two pieces. Key decisions:
+(so `MixerViewModel` still knows only `ProductRealControlCoordinator`). It is now **complete**: the
+facade composes `ProductRealControlStateStore` + `ProductRealStartCoordinator` +
+`ProductRealStopCoordinator`, and is itself down to ~170 lines. Key decisions:
 
 - **Resolution stays inside Start** (not a separate `ProductRealResolutionCoordinator`). Resolution
   and Start are **bidirectionally coupled**: resolution calls the start body to launch, and the start
   body's cached-helper-failure path re-enters resolution (`startResolvedExperimentalControl(...,
   allowsCachedLookup: false)`); they also share the per-app start-request tokens carried in
   `ProductRealControlState`. Splitting them would introduce a hard cycle for little benefit (together
-  they are the bulk of the file), so the future `ProductRealStartCoordinator` keeps both.
+  they are the bulk of the code), so `ProductRealStartCoordinator` keeps both.
 
 - **State moved to a dedicated reference store** (`ProductRealControlStateStore`), chosen over
   "facade owns state + closures" or "one sub-coordinator owns state, siblings call in", and over
@@ -491,20 +492,22 @@ the first two pieces. Key decisions:
   source). There is **exactly one** production instance, constructed by the facade and passed by
   reference.
 
-- **Stop was extracted before Start** (into `ProductRealStopCoordinator`). Stop is the smaller, more
-  self-contained unit (~200 lines: the five stop methods + the shared active-name helper), so it
-  isolates cleanly first and de-risks the larger Start extraction. The state store
-  (`ProductRealControlStateStore`) was extracted first of all (foundational, zero cross-edges,
-  everything else references it). The future Start piece will be `ProductRealStartCoordinator`.
+- **Stop was extracted before Start** (into `ProductRealStopCoordinator`, Prompt 224; Start followed
+  in Prompt 227). Stop is the smaller, more self-contained unit (~200 lines: the five stop methods +
+  the shared active-name helper), so it isolates cleanly first and de-risks the larger Start
+  extraction. The state store (`ProductRealControlStateStore`) was extracted first of all
+  (foundational, zero cross-edges, everything else references it).
 
-- **Cross-edges are narrow closures, not sibling ownership.** After the split there are exactly two
-  Start↔Stop edges: start `onStopped` → stop's `handleProductLiveControlStopped`, and stop's app-exit
-  → resolution's `cancelResolution`. Giving either sub-coordinator a direct reference to the other
-  would create a mutual ownership cycle and couple their lifecycles. Instead the facade (which owns
-  both) wires each edge as a `@MainActor` closure — during this intermediate step the facade's own
-  start body calls the stop coordinator directly, and the app-exit edge is a `cancelResolution`
-  closure installed via a post-init setter with `[weak self]` (cycle-free). The shared active-name
-  refresh is likewise routed to the stop coordinator's helper rather than duplicated.
+- **Cross-edges are narrow closures, not sibling ownership.** After the full split there are exactly
+  three Start↔Stop edges: start `onStopped` → stop's `handleProductLiveControlStopped`, start's
+  active-name refresh → stop's `updateActiveLiveControlAppNameAfterProductChange`, and stop's app-exit
+  → start's `cancelAppAudioTargetResolution`. Giving either sub-coordinator a direct reference to the
+  other would create a mutual ownership cycle and couple their lifecycles. Instead the facade (which
+  owns both) wires **all three** as `@MainActor` `[weak self]` closures via post-init setters
+  (`setOnEngineStopped` / `setRefreshActiveName` on Start, `setCancelResolution` on Stop) — installed
+  after both sub-coordinators exist, so nothing captures `self` before init completes and the
+  facade → sub-coordinator → closure → facade chain stays cycle-free. The active-name algorithm lives
+  only on Stop; Start routes to it rather than duplicating it.
 
 - **Prompts 223 and 224 landed as one combined commit (`7af8b2f`).** Prompt 223 (the state store)
   was reviewed but **not committed** before Prompt 224 (the stop coordinator) began, so the
@@ -512,6 +515,36 @@ the first two pieces. Key decisions:
   changes. Rather than reconstruct an artificial split with `git add -p`, `reset`/`restore`, temporary
   patches, or history rewriting, they were committed together as one reviewed architectural commit.
   **History was not rewritten or artificially split.**
+
+- **The facade initializer signature was preserved.** The whole split had to keep `MixerViewModel`
+  unchanged, and the VM constructs the facade with a fixed argument list. So the facade keeps accepting
+  the same six dependencies (`liveSessionManager`, `appAudioTargetResolver`, `startSettleGate`,
+  `processTapEligibility`, `sideEffects`, `context`) even though it no longer stores them — it threads
+  them straight into the two sub-coordinator constructors. Changing the signature would have forced a
+  VM edit, which the plan explicitly forbade.
+
+- **Redundant facade stored dependencies were removed only *after* the extractions** (Prompt 228, the
+  facade-slimming step), not during them. While start/stop logic still lived in the facade those
+  properties had real runtime reads; only once every start/stop method had moved did they become
+  provably write-only (assigned in `init`, never read — the sub-coordinator constructions use the init
+  *parameters*, which shadow the properties). Removing them earlier would have broken compilation or
+  hidden a real read; removing them as a final, isolated, behavior-preserving cleanup kept each step
+  reviewable. The unused `import AppKit` (whose only user, `NSRunningApplication`, moved to Start) was
+  dropped in the same step.
+
+- **`MixerViewModel` intentionally stayed byte-for-byte unchanged** through all four code steps
+  (state store, Stop, Start, facade slimming). The facade is the single seam the VM depends on;
+  keeping its public API and initializer fixed meant the entire internal restructuring was invisible to
+  the VM and to the unchanged `MixerViewModelLiveControlTests` — the strongest possible guarantee that
+  behavior was preserved.
+
+- **The Product Real structural refactor should now stop.** The facade/store/start/stop boundary is
+  cohesive and complete; the facade has no implementation logic left to extract, and the remaining
+  `MixerViewModel` responsibilities (router, shared display/status, lifecycle entry points,
+  multi-subsystem fan-out) are genuinely cross-subsystem — pulling them into a *product* coordinator
+  would increase coupling. Further decomposition, if any, belongs to their *own* focused types and only
+  after a separate read-only reassessment; there is no concrete defect that justifies more Product Real
+  splitting.
 
 **Why staged instead of one large refactor**: the original reassessment (below) measured ~142
 references and four shared `@Published` properties, and concluded a single-shot extraction would

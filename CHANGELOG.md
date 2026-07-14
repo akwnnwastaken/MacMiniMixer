@@ -12,6 +12,20 @@ multi-app per-application control is not implemented.
 ## [Unreleased]
 
 ### Changed
+- **Product Real coordinator internal split completed: `ProductRealStartCoordinator` extracted, facade
+  slimmed** (internal refactor, no behavior change). Following the state-store and stop-coordinator
+  extractions, the start + resolution path (app-audio resolution + task ownership/`deinit`, start
+  preflight, both `startExperimentalControl` overloads, async start body, cached-helper retry,
+  stale-start rejection/cleanup, settle-gate ordering) moved into `ProductRealStartCoordinator`, and
+  `ProductRealControlCoordinator` was slimmed to a **true facade** (~170 lines, no start/stop logic,
+  no redundant stored dependencies). Final architecture: the facade composes one
+  `ProductRealControlStateStore` (single state source), `ProductRealStartCoordinator`, and
+  `ProductRealStopCoordinator`; the three Start↔Stop cross-edges are narrow `[weak self]` facade-wired
+  closures (no sibling ownership, no retain cycle). The facade **public API and initializer signature
+  are unchanged** and **`MixerViewModel` is byte-for-byte unchanged**. Start/resolution tests moved to
+  `ProductRealStartCoordinatorTests` (facade forwarding + cross-edge integration tests retained). Full
+  suite green (**414 passed / 0 failed / 0 skipped**). Cap stays **3**; `N > 3` deferred;
+  `MARKETING_VERSION` unchanged; no tag/release.
 - **Product Real coordinator internal split: `ProductRealControlStateStore` + `ProductRealStopCoordinator`**
   (internal refactor, no behavior change). `ProductRealControlCoordinator` is now a thin facade that
   composes two internal sub-objects behind its **unchanged public API**: `ProductRealControlStateStore`
