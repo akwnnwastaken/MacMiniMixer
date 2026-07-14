@@ -51,20 +51,40 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 
 ## 4. Current Product Real state
 
-- **Code layout (staged coordinator extraction) — `ProductRealControlCoordinator` now owns the
-  Product Real START and STOP paths:**
-  - `ProductRealControlState` (the session/pending/resolution value type).
-  - App-audio resolution task + resolution handling (`startResolvedExperimentalControl`,
-    `handleAppAudioTargetResolution`, `cancelAppAudioTargetResolution`, `cancelResolutionTask`).
-  - Stale-start cleanup (`cleanupStaleProductLiveStart`).
-  - Start preflight + resolved-start path + **both `startExperimentalControl` overloads**
-    (the sync preflight and the async start body).
-  - `productSessionStartBlockReason` (cap/mutual-exclusion decision) and
-    `updateActiveLiveControlAppNameAfterProductChange` (shared active-name helper).
-  - **STOP path (Prompts 215–218):** `stopExperimentalControl(for:reason:)` (per-app stop leaf),
-    `stopProductLiveSessions(reason:)` (Stop All product core), `handleProductLiveControlStopped(...)`
-    (engine stop callback), `stopRealControlForExitedTargetApps()` (app-exit product slice), and
-    `tearDownProductStateForHardStop()` (the Product Real state-reset sub-block of hard teardown).
+- **Code layout (internal Product Real split, Prompts 223–224) — `ProductRealControlCoordinator` is
+  a thin facade that owns the START and STOP paths and composes two internal sub-objects.
+  `MixerViewModel` knows **only** the facade (never the store or the stop coordinator), and the
+  facade's public API is unchanged:**
+  - **`ProductRealControlStateStore`** (`ProductRealControlStateStore.swift`, Prompt 223) — the
+    **single** production source of `ProductRealControlState` plus the `onWillChange` callback
+    storage. Its get/set `productRealControlState` fires `onWillChange` **before** applying a write
+    (willSet-style timing); a read never notifies. **Exactly one** production instance exists: the
+    facade constructs it and passes it **by reference** to the stop coordinator, so both mutate one
+    shared source (single source of truth).
+  - **`ProductRealStopCoordinator`** (`ProductRealStopCoordinator.swift`, Prompt 224) — owns the
+    product-only STOP path: `stopExperimentalControl(for:reason:)` (per-app stop leaf),
+    `stopProductLiveSessions(reason:)` (Stop All core), `handleProductLiveControlStopped(sessionID:result:diagnostics:)`
+    (engine stop callback), `stopRealControlForExitedTargetApps()` (app-exit slice),
+    `tearDownProductStateForHardStop()` (hard-teardown state-reset sub-block), and the shared
+    `updateActiveLiveControlAppNameAfterProductChange()`. Deps: the **shared** state store, the
+    live-session manager, the settle gate, the app-audio resolver (only for app-exit cached-target
+    invalidation), weak `sideEffects`/`context`, and a narrow `cancelResolution` closure. It holds
+    **no** reference to the start/resolution side.
+  - **Facade START + resolution path** (still in `ProductRealControlCoordinator.swift`): state access
+    via the store; the app-audio resolution task + handling (`startResolvedExperimentalControl`,
+    `handleAppAudioTargetResolution`, `cancelAppAudioTargetResolution`, `cancelResolutionTask`);
+    `productSessionStartBlockReason` (cap/mutual-exclusion decision); **both `startExperimentalControl`
+    overloads** (sync preflight + async body); cached-helper retry; stale-start cleanup
+    (`cleanupStaleProductLiveStart`); and the resolution-task `deinit` cancellation. The facade
+    constructs and owns the stop coordinator and forwards the four public stop methods to it.
+  - **Cross-edges (no direct Start↔Stop ownership cycle):**
+    - **Start `onStopped` → Stop:** the async start body calls
+      `stopCoordinator.handleProductLiveControlStopped(...)` directly (both objects owned by the facade).
+    - **Start active-name refresh → Stop:** the start body calls
+      `stopCoordinator.updateActiveLiveControlAppNameAfterProductChange()` (algorithm not duplicated).
+    - **Stop app-exit → resolution cancel:** wired as a narrow closure the facade installs after init —
+      `stopCoordinator.setCancelResolution { [weak self] reason in self?.cancelAppAudioTargetResolution(reason: reason) }`
+      (post-init setter; `[weak self]` keeps the facade → stopCoordinator → closure chain cycle-free).
 - **Still in `MixerViewModel` (cross-subsystem router + lifecycle/UI orchestration — intentional):**
   - `toggleExperimentalControl` (row entry point) — delegates to `coordinator.startExperimentalControl`
     on start and `coordinator.stopExperimentalControl` on stop.
@@ -91,10 +111,11 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
     into the coordinator (Prompt 216) — the engine `onStopped` now calls the coordinator's own
     handler directly.
   - `ProductRealControlContext` (read side, VM → coordinator): `apps`,
-    `isExperimentalRealAppControlEnabled`, `advancedManualLiveControlActive`, `selectedProcessTapAppID`,
+    `isExperimentalRealAppControlEnabled`, `advancedManualLiveControlActive`,
     `isTwoAppReadinessRunning`, `isProcessTapTesting`, `isHelperBusy`, `isAppAudioTargetResolving`,
     `isProcessTapLiveControlActive`, `processTapLiveDiagnostics` (added Prompt 216 for the Stop All
-    no-active-session display path).
+    no-active-session display path). The unused `selectedProcessTapAppID` requirement was **removed**
+    in Prompt 221 (the coordinator never read it; the VM keeps its own property for the row filter).
   - `MixerViewModel` conforms to both; the coordinator holds them **weakly** (the VM owns the
     coordinator, so a strong back-reference would be a retain cycle).
 - **Coordinator init / IUO note:** `MixerViewModel` stores the coordinator as an implicitly-unwrapped
@@ -104,11 +125,13 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   while nil. Do **not** convert it to `lazy` (a lazy coordinator could be created on first state
   access before the change handler is installed, dropping a UI update).
 - **Why `ProductRealControlState` change notifications still work:** the state moved out of the VM's
-  `@Published`. The coordinator owns it and exposes a get/set `productRealControlState` property that
-  fires `onWillChange` **before every write**; the VM wires
-  `coordinator.setOnWillChange { objectWillChange.send() }` in `init`, so a mutating call still emits
-  exactly one `objectWillChange` (matching the old `@Published willSet`). The VM keeps a forwarding
-  computed `productRealControlState` so all its existing call sites are unchanged.
+  `@Published`. Since Prompt 223 the **`ProductRealControlStateStore`** owns it and exposes the get/set
+  `productRealControlState` property that fires `onWillChange` **before every write**; the facade's own
+  `productRealControlState` and `setOnWillChange` forward to the store (as does the stop coordinator's
+  private state accessor). The VM wires `coordinator.setOnWillChange { objectWillChange.send() }` in
+  `init` (unchanged), so a mutating call still emits exactly one `objectWillChange` (matching the old
+  `@Published willSet`). The VM keeps a forwarding computed `productRealControlState` so all its
+  existing call sites are unchanged.
 - Uses Core Audio **Process Tap + `.mutedWhenTapped` + AudioQueue replay/gain**. Each session owns
   its own tap / private aggregate device / IOProc / replay AudioQueue.
 - **Up to 3 concurrent** Product Real sessions; the active banner summarizes 3+ apps as "first two
@@ -132,7 +155,21 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 
 ## 5. Recent key commits
 
-Most recent (the staged `ProductRealControlCoordinator` **stop-path** extraction, Prompts 215–218):
+Most recent (the **internal Product Real split** — state store + stop coordinator):
+
+```
+7af8b2f Extract Product Real state store and stop coordinator            (Prompts 223 + 224, combined)
+b9fdffc Fix stale Product Real comments and remove dead context requirement (Prompt 221)
+e4b04b5 Update docs after Product Real stop-path coordinator extraction   (Prompt 219, docs)
+```
+
+> **Note:** `7af8b2f` intentionally **combines Prompt 223 (state store) and Prompt 224 (stop
+> coordinator)** in one commit. Prompt 223 was never committed before Prompt 224 began, so the
+> coordinator and `project.pbxproj` diffs interleaved both changes; they were committed together
+> rather than split with history rewriting, `git add -p`, or artificial patches. Prompt 222 was
+> analysis-only (design of the internal split); Prompt 220 was a read-only reassessment.
+
+Preceding (the staged `ProductRealControlCoordinator` **stop-path** extraction, Prompts 215–218):
 
 ```
 d212fdf Move Product Real hard-teardown state cleanup into coordinator   (Prompt 218)
@@ -194,6 +231,20 @@ bf2bf40 Extract MixerVisibleAppsFilter from MixerViewModel      (Prompt 199)
   cleanup, advanced-manual reset, and the earlier `cancelResolutionTask()` stay in the VM at their
   existing positions (exact teardown ordering preserved).
 
+**Internal split milestone (Prompts 220–224):**
+
+- **220** — read-only reassessment (also corrected a stale finding: the `ProductRealControlContext`
+  member removed in 221 was `selectedProcessTapAppID`, not `isHelperBusy`, which is live).
+- **222** — analysis-only design of the internal split; concluded Resolution must stay with Start
+  (bidirectional coupling), recommended a shared state store first, and closure-broken cross-edges.
+- **223** — extracted `ProductRealControlStateStore` (single state source + `onWillChange` storage)
+  behind the unchanged facade; MixerViewModel unchanged.
+- **224** — extracted `ProductRealStopCoordinator` (the six stop methods) behind the unchanged facade;
+  wired the app-exit resolution-cancel as a `cancelResolution` closure (no Start↔Stop cycle), routed
+  start `onStopped` and active-name refresh to the stop coordinator, and moved the stop unit tests
+  into `ProductRealStopCoordinatorTests` while keeping facade forwarding/integration tests. 223 + 224
+  landed as the single combined commit `7af8b2f`.
+
 **Hardening bundle `88bbed5` = P177–P182:**
 
 - **P177** — process-tap destroy retry + fault reporting (a leaked `.mutedWhenTapped` tap can
@@ -214,8 +265,10 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 ## 6. Test & CI state (as of last update)
 
-- **Local:** last full run = **387 passed / 0 failed / 0 skipped** (code state = `d212fdf`, the
-  current HEAD before this docs-only refresh).
+- **Local:** last full run = **407 passed / 0 failed / 0 skipped** (code state = `7af8b2f`, the
+  current HEAD before this docs-only refresh). The +20 over the previous 387 = 4 new
+  `ProductRealControlStateStoreTests` + 20 new `ProductRealStopCoordinatorTests` − 4 stop-callback
+  tests moved out of `ProductRealControlCoordinatorTests`.
 - **CI:** **green** at the last pushed state (GitHub Actions Build workflow, success).
 - An earlier README-only commit had a one-off CI failure that **passed on rerun** (a flake).
 - `xcodebuild test` exits `0` on pass, `65` on any test failure. Get exact counts from the newest
@@ -241,6 +294,11 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
   authoritative.
 - `grep`-piped shell commands sometimes error in this environment; prefer `git grep`, pathspecs,
   writing output to a file, and reading files directly.
+- `MacMiniMixer.xcodeproj/project.pbxproj` uses **explicit file references** (no synchronized folder
+  groups), so **every new `.swift` file needs manual pbxproj registration** — 4 entries per file
+  (`PBXBuildFile`, `PBXFileReference`, `PBXGroup` membership, `PBXSourcesBuildPhase` membership) in
+  the correct target. The project's UUIDs follow the `9B7D1BXX2C8F4A9A8B2D0101` pattern; pick unused
+  suffixes and add only the required entries (no reordering/reformatting).
 
 ## 9. Verification commands
 
@@ -267,10 +325,12 @@ xcodebuild build -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configura
 
 ## 10. What remains & recommended next step
 
-The staged Product Real **start** and **stop** paths are now both fully extracted into
-`ProductRealControlCoordinator` (full suite green, 387). First re-verify live state (§9) and
-re-read the target methods in `MixerViewModel.swift` — **do not trust the line numbers in this
-file; inspect the repo.**
+The Product Real **start** and **stop** paths are extracted, and the coordinator has begun an
+**internal split**: state now lives in `ProductRealControlStateStore` and the stop path in
+`ProductRealStopCoordinator`, both behind the unchanged facade (full suite green, 407). The next
+internal target is `ProductRealStartCoordinator` (see below). First re-verify live state (§9) and
+re-read the target methods in the repo — **do not trust the line numbers in this file; inspect the
+repo.**
 
 ### What remains in `MixerViewModel` (intentional — the coordinator refactor is NOT "done")
 
@@ -294,19 +354,40 @@ product coordinator would *increase* coupling, not reduce it:
   (delegates only the app-exit product slice).
 - Advanced diagnostics, helper discovery/probe, and Two-App Readiness orchestration.
 
-### Recommended next step (conservative): **stop here — the coordinator boundary is healthy**
+Note also: the remaining `MixerViewModel` responsibilities above are genuinely cross-subsystem — do
+**not** move the router, shared display, lifecycle entry points, or multi-subsystem fan-out into any
+Product Real coordinator; that would pull non-product concerns into a product-scoped type.
 
-The Product Real start/stop extraction has reached a clean, stable boundary. The remaining
-`MixerViewModel` responsibilities are genuinely cross-subsystem (router, shared display, lifecycle
-entry points, multi-subsystem fan-out) — **do not** move them into `ProductRealControlCoordinator`;
-that would pull non-product concerns into a product-scoped type. If further `MixerViewModel` cleanup
-is desired, prefer a **read-only size/dead-code reassessment** (identify now-thin delegating members
-and any dead code left by the extraction) before committing to any new extraction, and only extract
-another **self-contained, clearly product-only** helper if one is found. Any such step must stay
-behind the unchanged `MixerViewModelLiveControlTests` plus new coordinator tests, use the
-recorded-fake + `waitUntil` observable-wait pattern (no real sleeps), route state mutation through
-`coordinator.productRealControlState` (never raw state), and touch no new seam member unless
-unavoidable — stop and report if it does.
+### Next internal extraction: `ProductRealStartCoordinator`
+
+The next target is to move the START + resolution path out of the facade into a
+`ProductRealStartCoordinator`, mirroring the stop-coordinator extraction. It should contain:
+
+- app-audio resolution (`startResolvedExperimentalControl`, `handleAppAudioTargetResolution`,
+  `cancelAppAudioTargetResolution`, `cancelResolutionTask`);
+- resolution-task ownership **and** the `deinit` cancellation of that task;
+- Product Real start preflight (`productSessionStartBlockReason`);
+- **both** `startExperimentalControl` overloads (sync preflight + async body);
+- the async start body;
+- cached-helper retry;
+- stale-start cleanup (`cleanupStaleProductLiveStart`).
+
+Constraints for that extraction:
+
+- **Resolution must remain with Start** — they are bidirectionally coupled (Resolution → Start to
+  launch; Start → Resolution for the cached-helper retry) and share per-app start-request tokens.
+- **`ProductRealControlCoordinator` must remain the only facade `MixerViewModel` knows** — the
+  facade's public API and `MixerViewModel` stay unchanged.
+- **`ProductRealStopCoordinator` must not directly own or reference `ProductRealStartCoordinator`**
+  (and vice-versa). The existing cross-edges stay **narrow closures** wired by the facade:
+  start `onStopped` → stop's `handleProductLiveControlStopped`; start active-name refresh → stop's
+  `updateActiveLiveControlAppNameAfterProductChange`; stop app-exit → start/resolution's
+  `cancelResolution`. Both sub-coordinators share the one `ProductRealControlStateStore` by reference.
+- Do a **read-only implementation-boundary reassessment** against the post-Stop architecture
+  **before moving any code**, then implement in staged, test-backed, individually reviewable commits
+  (new `ProductRealStartCoordinatorTests`; keep `MixerViewModelLiveControlTests` unchanged; no real
+  sleeps; state mutation only through the shared store). After Start lands, slim the facade and do a
+  final docs/handoff refresh.
 
 Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION`; keep the cap at 3 and
 `N > 3` deferred.

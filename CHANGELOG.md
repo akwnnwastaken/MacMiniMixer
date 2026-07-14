@@ -12,6 +12,17 @@ multi-app per-application control is not implemented.
 ## [Unreleased]
 
 ### Changed
+- **Product Real coordinator internal split: `ProductRealControlStateStore` + `ProductRealStopCoordinator`**
+  (internal refactor, no behavior change). `ProductRealControlCoordinator` is now a thin facade that
+  composes two internal sub-objects behind its **unchanged public API**: `ProductRealControlStateStore`
+  (the single `ProductRealControlState` source and `onWillChange` notification storage — one shared
+  instance, notifies exactly once before each write, never on reads) and `ProductRealStopCoordinator`
+  (the product-only stop path: per-app stop, Stop All, stop callback, app-exit cleanup, hard-teardown
+  reset, active-name helper). `MixerViewModel` is **unchanged** and still knows only the facade;
+  start/resolution logic remains in the facade for now; the Start↔Stop cross-edges are narrow closures
+  (no ownership cycle). Focused `ProductRealControlStateStoreTests` and `ProductRealStopCoordinatorTests`
+  added. Full suite green (**407 passed / 0 failed / 0 skipped**). Cap stays **3**; `N > 3` deferred;
+  `MARKETING_VERSION` unchanged; no tag/release.
 - **Product Real Control stop path extracted into `ProductRealControlCoordinator`** (internal
   refactor, no behavior change). Following the start-path extraction, the coordinator now also owns
   the full Product Real **stop** path: the per-app stop leaf (`stopExperimentalControl(for:reason:)`),
