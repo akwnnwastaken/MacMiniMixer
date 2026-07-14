@@ -1,38 +1,35 @@
-import AppKit
 import Foundation
 
-/// Owns Product Real Control's state and product-only start/stop logic.
+/// Thin facade for Product Real Control. `MixerViewModel` knows only this type, and its public API is
+/// unchanged across the internal split. The facade owns exactly three things — the single
+/// `ProductRealControlStateStore`, a `ProductRealStartCoordinator` (start + resolution), and a
+/// `ProductRealStopCoordinator` (stop path) — and does three jobs:
 ///
-/// This type owns the Product Real **start and stop** paths and calls out through the injected
-/// `ProductRealControlSideEffects` / `ProductRealControlContext` seam instead of touching the view
-/// model directly. It owns: `ProductRealControlState`; app-audio resolution and the resolution task;
-/// the async start body (both `startExperimentalControl` overloads); stale-start cleanup; the per-app
-/// stop leaf (`stopExperimentalControl`); the Stop All core (`stopProductLiveSessions`); engine
-/// stop-callback handling (`handleProductLiveControlStopped`, invoked **locally** from the start
-/// body's `onStopped`); the app-exit cleanup slice (`stopRealControlForExitedTargetApps`); and the
-/// hard-teardown Product Real state reset (`tearDownProductStateForHardStop`).
+/// - **constructs** both sub-coordinators, threading the injected engine / settle-gate / resolver
+///   dependencies and the weak seam straight through (the facade stores none of them itself), and
+///   sharing the one state store by reference;
+/// - **wires** the three Start↔Stop cross-edges as narrow `[weak self]` closures — stop→start
+///   resolution cancellation, start→stop engine-stopped handling, and start→stop active-name refresh —
+///   so neither sub-coordinator references the other (no sibling ownership, no retain cycle);
+/// - **forwards** `productRealControlState` / `setOnWillChange` to the store and the public start/stop
+///   methods to the sub-coordinators.
 ///
-/// `MixerViewModel` still owns only the cross-subsystem / UI orchestration: the row
+/// `MixerViewModel` still owns the cross-subsystem / UI orchestration: the row
 /// `toggleExperimentalControl` entry point, the product-vs-advanced-manual `stopProcessTapLiveControl`
 /// router, the shared display cleanup helper (`applyLiveControlStoppedDisplay`, reached through the
 /// seam and also used by advanced-manual stop), and the lifecycle / output-device-change / global
 /// teardown fan-out.
 ///
-/// The seam references are held **weakly**: the view model owns this coordinator, so a strong back
-/// reference would form a retain cycle.
+/// The seam references (`ProductRealControlSideEffects` / `ProductRealControlContext`) are held
+/// **weakly** by the sub-coordinators — the view model owns this facade, so a strong back reference
+/// would form a retain cycle.
 ///
-/// The coordinator **owns `ProductRealControlState`** (the Product Real session/pending/resolution
-/// state). The view model reaches the state through the `productRealControlState` get/set forwarding
-/// property below; the state's previous `@Published` change notification is preserved via
-/// `onWillChange` (the view model forwards it to `objectWillChange`).
+/// State: the `ProductRealControlStateStore` owns `ProductRealControlState`. The view model reaches it
+/// through the `productRealControlState` get/set forwarding property below; the state's previous
+/// `@Published` change notification is preserved via `onWillChange` (the view model forwards it to
+/// `objectWillChange`).
 @MainActor
 final class ProductRealControlCoordinator {
-    private let liveSessionManager: ProcessTapLiveControlling & ProcessTapLiveSessionManaging
-    private let appAudioTargetResolver: AppAudioTargetResolving
-    private let startSettleGate: ProductRealStartSettling
-    private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
-    private weak var sideEffects: ProductRealControlSideEffects?
-    private weak var context: ProductRealControlContext?
     private let stateStore = ProductRealControlStateStore()
     private let startCoordinator: ProductRealStartCoordinator
     private let stopCoordinator: ProductRealStopCoordinator
@@ -45,16 +42,11 @@ final class ProductRealControlCoordinator {
         sideEffects: ProductRealControlSideEffects,
         context: ProductRealControlContext
     ) {
-        self.liveSessionManager = liveSessionManager
-        self.appAudioTargetResolver = appAudioTargetResolver
-        self.startSettleGate = startSettleGate
-        self.processTapEligibility = processTapEligibility
-        self.sideEffects = sideEffects
-        self.context = context
-        // Both sub-coordinators share the single state store, the same injected engine/settle/resolver
-        // dependencies, and the same weak seam. Neither holds a reference to the other; the three
-        // Start↔Stop cross-edges are wired below as narrow closures. Constructed with their default
-        // no-op callbacks so nothing captures `self` before initialization completes.
+        // The facade stores none of these dependencies directly — they are threaded straight into the
+        // two sub-coordinators, which share the single state store and the same weak seam. Neither
+        // sub-coordinator holds a reference to the other; the three Start↔Stop cross-edges are wired
+        // below as narrow closures. Constructed with their default no-op callbacks so nothing captures
+        // `self` before initialization completes.
         self.startCoordinator = ProductRealStartCoordinator(
             stateStore: stateStore,
             liveSessionManager: liveSessionManager,
