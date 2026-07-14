@@ -10,47 +10,6 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
     }
 
-    func testCleanupStopsStartedSessionByItsOwnID() async {
-        let harness = makeHarness()
-        let sessionID = ProcessTapLiveSessionID()
-        let startResult = ProcessTapLiveSessionStartResult(
-            sessionID: sessionID,
-            result: makeResult(.liveControlStarted)
-        )
-
-        await harness.coordinator.cleanupStaleProductLiveStart(startResult)
-
-        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.count, 1)
-        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.id, sessionID)
-        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.reason, .userStopped)
-    }
-
-    func testCleanupIsNoOpWhenStartDidNotSucceed() async {
-        let harness = makeHarness()
-        // A failed start still carries a session id in this contrived fixture; cleanup must ignore it
-        // because the outcome is not `.liveControlStarted`.
-        let startResult = ProcessTapLiveSessionStartResult(
-            sessionID: ProcessTapLiveSessionID(),
-            result: makeResult(.liveControlSetupFailed)
-        )
-
-        await harness.coordinator.cleanupStaleProductLiveStart(startResult)
-
-        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
-    }
-
-    func testCleanupIsNoOpWhenStartedWithoutSessionID() async {
-        let harness = makeHarness()
-        let startResult = ProcessTapLiveSessionStartResult(
-            sessionID: nil,
-            result: makeResult(.liveControlStarted)
-        )
-
-        await harness.coordinator.cleanupStaleProductLiveStart(startResult)
-
-        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
-    }
-
     // MARK: - State ownership / forwarding
 
     func testStateMutationThroughCoordinatorFiresOnWillChangeOncePerWrite() {
@@ -118,68 +77,6 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.sideEffects.activeNameHistory.last, app.name)
     }
 
-    func testHandleResolvedResultStartsWithResolvedTargetWhenResolving() {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        harness.coordinator.productRealControlState.beginResolution(for: app.id)
-
-        let resolved = ResolvedAppAudioTarget(
-            visibleAppID: app.id,
-            visibleAppName: app.name,
-            target: makeTarget(for: app),
-            kind: .helper,
-            source: .discoveredHelper
-        )
-        harness.coordinator.handleAppAudioTargetResolution(.resolved(resolved), for: app.id)
-
-        // Resolved → async start body runs; optimistic session created carrying the resolved source;
-        // no longer resolving.
-        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
-        XCTAssertEqual(harness.coordinator.productRealControlState.activeSessionsByAppID[app.id]?.source, .discoveredHelper)
-    }
-
-    func testHandleUnavailableResultReportsReasonAndClearsResolving() {
-        let harness = makeHarness()
-        harness.coordinator.productRealControlState.beginResolution(for: "safari")
-
-        harness.coordinator.handleAppAudioTargetResolution(.unavailable("No audio helper found"), for: "safari")
-
-        XCTAssertEqual(harness.sideEffects.statusMessages, ["No audio helper found"])
-        XCTAssertTrue(harness.coordinator.productRealControlState.activeSessions.isEmpty)
-        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
-    }
-
-    func testHandleCancelledResultClearsResolvingWithoutStatus() {
-        let harness = makeHarness()
-        harness.coordinator.productRealControlState.beginResolution(for: "safari")
-
-        harness.coordinator.handleAppAudioTargetResolution(.cancelled, for: "safari")
-
-        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
-        XCTAssertTrue(harness.coordinator.productRealControlState.activeSessions.isEmpty)
-        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
-    }
-
-    func testHandleResultIgnoredWhenNotResolving() {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        let resolved = ResolvedAppAudioTarget(
-            visibleAppID: app.id,
-            visibleAppName: app.name,
-            target: makeTarget(for: app),
-            kind: .helper,
-            source: .discoveredHelper
-        )
-
-        // Not resolving for this app → the result is stale and must be ignored.
-        harness.coordinator.handleAppAudioTargetResolution(.resolved(resolved), for: app.id)
-
-        XCTAssertTrue(harness.coordinator.productRealControlState.activeSessions.isEmpty)
-        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
-    }
-
     func testCancelAppAudioTargetResolutionClearsResolvingAndCancelsResolver() {
         let harness = makeHarness()
         harness.coordinator.productRealControlState.beginResolution(for: "safari")
@@ -198,117 +95,42 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.resolver.cancelReasons.isEmpty)
     }
 
-    // MARK: - Async start body
+    // MARK: - Start↔Stop cross-edge integration (through the real facade wiring)
 
-    func testSuccessfulStartConfirmsSession() async {
-        let harness = makeHarness()
+    func testFacadeStartOnStoppedReachesStopHandler() async {
+        let harness = makeHarness(visibleProcessEligible: true)
         let app = makeApp()
         harness.context.apps = [app]
         let sessionID = ProcessTapLiveSessionID()
         harness.liveSessionManager.configureStart(result: startedResult(sessionID))
 
-        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
-        await waitUntil { harness.coordinator.productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID != nil }
-
-        let session = harness.coordinator.productRealControlState.activeSessionsByAppID[app.id]
-        XCTAssertEqual(session?.liveSessionID, sessionID)
-        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: app.id))
-        XCTAssertEqual(harness.sideEffects.activeNameHistory.last, app.name)
-        XCTAssertTrue(harness.sideEffects.diagnosticResults.contains { $0.outcome == .liveControlStarted })
-        XCTAssertEqual(harness.sideEffects.diagnosticRunningHistory.last, false)
-    }
-
-    func testFailedStartClearsPendingAndReportsFailure() async {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        harness.liveSessionManager.configureStart(
-            result: ProcessTapLiveSessionStartResult(sessionID: nil, result: makeResult(.liveControlSetupFailed))
-        )
-
-        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
-        await waitUntil { harness.sideEffects.statusMessages.contains("Could not start live control for this app") }
-
-        XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[app.id])
-        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: app.id))
-        XCTAssertEqual(harness.sideEffects.diagnosticRunningHistory.last, false)
-    }
-
-    func testStaleStartResultRejectedAndCleanupRegistered() async {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        let orphanSessionID = ProcessTapLiveSessionID()
-        harness.liveSessionManager.configureStart(result: startedResult(orphanSessionID))
-
-        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
-        // Supersede the in-flight request synchronously, before the queued start task runs its
-        // post-await block, so the completion is recognised as stale.
-        _ = harness.coordinator.productRealControlState.beginStartRequest(for: app.id)
-
-        await waitUntil { !harness.liveSessionManager.stopSessionCalls.isEmpty }
-
-        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.contains { $0.id == orphanSessionID })
-        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: app.id))
-    }
-
-    func testDiagnosticsProgressCallbackUpdatesWhenAccepted() async {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        harness.liveSessionManager.configureStart(result: startedResult(ProcessTapLiveSessionID()))
-        harness.liveSessionManager.configureEmitDiagnostics(makeDiagnostics(callbackCount: 5))
-
-        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
-        await waitUntil { harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 5 } }
-
-        XCTAssertTrue(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 5 })
-    }
-
-    func testDiagnosticsProgressCallbackIgnoredWhenStale() async {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        harness.liveSessionManager.configureStart(result: startedResult(ProcessTapLiveSessionID()))
-        harness.liveSessionManager.configureEmitDiagnostics(makeDiagnostics(callbackCount: 7))
-
-        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
-        _ = harness.coordinator.productRealControlState.beginStartRequest(for: app.id) // supersede
-
-        await waitUntil { !harness.coordinator.productRealControlState.isOperationPending(for: app.id) }
-
-        // The superseded request's diagnostics callback must be rejected by shouldAcceptCallback.
-        XCTAssertFalse(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 7 })
-    }
-
-    func testAsyncStartOnStoppedUsesCoordinatorLocalHandler() async {
-        let harness = makeHarness()
-        let app = makeApp()
-        harness.context.apps = [app]
-        let sessionID = ProcessTapLiveSessionID()
-        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
-
-        // Start and let the async body confirm the session with its engine id.
-        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
+        // Drive a start through the facade's public forward (→ start coordinator → engine).
+        harness.coordinator.startResolvedExperimentalControl(for: app)
         await waitUntil { harness.coordinator.productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID == sessionID }
 
-        // Deliver the engine stop through the *captured* onStopped closure — the real wiring the
-        // coordinator installed. Post-move this reaches the coordinator's own
-        // `handleProductLiveControlStopped` (the `ProductRealControlSideEffects` seam no longer has a
-        // `handleProductLiveControlStopped` member — its absence is a compile-time guarantee here).
+        // Deliver the engine stop. The full facade wiring must route it: start coordinator's
+        // `onStopped` → facade-wired `onEngineStopped` closure → stop coordinator's
+        // `handleProductLiveControlStopped` → session cleared + shared display cleanup.
         harness.liveSessionManager.emitCapturedStopped(id: sessionID, result: makeResult(.liveControlStopped), diagnostics: nil)
         await waitUntil { !harness.sideEffects.stoppedDisplayCalls.isEmpty }
 
-        // The coordinator handled it locally: cleared its own session and ran the shared display
-        // cleanup through the new seam callback.
         XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[app.id])
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlStopped)
     }
 
-    // Cached-helper retry (a `.cachedHelper` failure re-attempting with `allowsCachedLookup: false`)
-    // is exercised end-to-end by the existing MixerViewModelLiveControlTests; reproducing its
-    // two-phase resolve + eligibility fixture at the coordinator unit level would be broad and
-    // brittle, so it is intentionally left to the VM suite.
+    func testFacadeStopAppExitCancelsResolutionThroughStartCoordinator() {
+        let harness = makeHarness()
+        // A resolving app that is no longer in the running-app list.
+        harness.coordinator.productRealControlState.beginResolution(for: "ghost")
+        harness.context.apps = []
+
+        harness.coordinator.stopRealControlForExitedTargetApps()
+
+        // Stop's app-exit path → facade-wired `cancelResolution` closure →
+        // start coordinator's `cancelAppAudioTargetResolution` → resolver cancel with the app-exit reason.
+        XCTAssertEqual(harness.resolver.cancelReasons, [.targetExited])
+        XCTAssertFalse(harness.coordinator.productRealControlState.isResolving)
+    }
 
     // MARK: - Per-app stop leaf
 
