@@ -25,6 +25,13 @@ final class ProductRealStartCoordinator {
     private weak var context: ProductRealControlContext?
     private var appAudioResolutionTask: Task<Void, Never>?
 
+    /// Diagnostics-only, per-live-session bookkeeping for starvation-escalation attribution logging.
+    /// **Not** a source of truth: it never drives audio, UI, `ProductRealControlState`, or any published
+    /// value — it only decides whether a session's `outputStarvationCount` has risen enough to warrant
+    /// one debug log so an intermittent Starv spike can be attributed to a specific session/app. See
+    /// `ProductRealStarvationAttributionLog`.
+    private var starvationAttribution = ProductRealStarvationAttributionLog()
+
     /// Routes the engine `onStopped` callback to the stop side. No-op default so construction never
     /// captures the sibling before the facade wires it (post-init).
     private var onEngineStopped: @MainActor (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void = { _, _, _ in }
@@ -350,16 +357,29 @@ final class ProductRealStartCoordinator {
                 for: target,
                 gain: gain,
                 timeoutPolicy: .indefinite
-            ) { _, diagnostics in
+            ) { sessionID, diagnostics in
                 Task { @MainActor in
                     guard self.productRealControlState.shouldAcceptCallback(for: app.id, requestID: startRequestID) else {
                         return
                     }
                     self.sideEffects?.setProcessTapLiveDiagnostics(diagnostics)
                     self.sideEffects?.setLiveControlDiagnosticProgress(diagnostics.progress)
+                    // Diagnostics-only attribution: emitted *after* the accept guard and the unchanged
+                    // publish calls, so a stale/rejected callback returns above and never logs or moves
+                    // the per-session baseline, and what is published to the UI is exactly as before.
+                    self.logDiagnosticsAttributionIfEscalated(
+                        sessionID: sessionID,
+                        appID: app.id,
+                        appName: app.name,
+                        diagnostics: diagnostics
+                    )
                 }
             } onStopped: { sessionID, result, diagnostics in
                 Task { @MainActor in
+                    // Drop this session's starvation-attribution baseline as it terminates so the map
+                    // stays bounded to live sessions. Diagnostics-only; the stop routing below and its
+                    // ordering are unchanged.
+                    self.starvationAttribution.forget(sessionID: sessionID)
                     self.onEngineStopped(sessionID, result, diagnostics)
                 }
             }
@@ -445,5 +465,140 @@ final class ProductRealStartCoordinator {
                 await orphanCleanupTask.value
             }
         }
+    }
+
+    /// Diagnostics-only: emit at most one *bounded* debug log per escalation for a live Product Real
+    /// session, tagging it with the session id, app id/name, and the Starv/Drops/Fail/enqueued/warmup
+    /// context already carried in the diagnostics. Emission is rate-shaped by
+    /// `ProductRealStarvationAttributionLog` (first nonzero Starv, then Starv 100-count bucket
+    /// crossings; any Drops/Fail increase immediately), so a spike to ~1300 produces a handful of
+    /// lines rather than hundreds. This changes nothing the app does or shows; it only makes an
+    /// intermittent spike attributable to a specific session. Only reached for callbacks already
+    /// accepted by `shouldAcceptCallback`, so a stale/rejected callback neither logs nor moves the
+    /// per-session attribution state.
+    private func logDiagnosticsAttributionIfEscalated(
+        sessionID: ProcessTapLiveSessionID,
+        appID: MixerAppItem.ID,
+        appName: String,
+        diagnostics: ProcessTapLiveDiagnostics
+    ) {
+        guard let decision = starvationAttribution.decision(
+            sessionID: sessionID,
+            outputStarvationCount: diagnostics.outputStarvationCount,
+            droppedBufferCount: diagnostics.droppedBufferCount,
+            totalFailureCount: diagnostics.totalFailureCount
+        ) else {
+            return
+        }
+
+        AppLogger.processTap.debug("Product Real diagnostics escalated reason=\(decision.reasonLabel, privacy: .public) sessionID=\(sessionID.rawValue.uuidString, privacy: .public) appID=\(appID, privacy: .public) app=\(appName, privacy: .public) starv=\(diagnostics.outputStarvationCount, privacy: .public) drops=\(diagnostics.droppedBufferCount, privacy: .public) fail=\(diagnostics.totalFailureCount, privacy: .public) enqueued=\(diagnostics.enqueuedBufferCount, privacy: .public) warmingUp=\(diagnostics.isWarmingUpOutput, privacy: .public)")
+    }
+}
+
+/// Diagnostics-only, per-session bookkeeping that *rate-shapes* Product Real attribution logging so a
+/// starvation spike cannot flood the local log. It is **not** a source of truth for anything the app
+/// does: it never drives audio, UI, or `ProductRealControlState`, and it is never published to the
+/// view model; it exists solely so an intermittent spike can be attributed to a specific live session
+/// without emitting hundreds of records. Kept internal (not `private`) only so it can be unit-tested
+/// directly. Deterministic — no clocks, no sleeps.
+struct ProductRealStarvationAttributionLog {
+    /// Why an attribution log should be emitted (any combination). Returned so the log line can name
+    /// the trigger; carries no session state.
+    struct Decision: Equatable {
+        var starvationBucketCrossed: Bool
+        var dropsIncreased: Bool
+        var failIncreased: Bool
+
+        /// Compact, human-readable trigger label for the log line (e.g. `starv`, `drops`, `starv+fail`).
+        var reasonLabel: String {
+            var parts: [String] = []
+            if starvationBucketCrossed { parts.append("starv") }
+            if dropsIncreased { parts.append("drops") }
+            if failIncreased { parts.append("fail") }
+            return parts.joined(separator: "+")
+        }
+    }
+
+    private struct SessionState: Equatable {
+        /// Highest Starv seen; never moves backward, so a lower/out-of-order value cannot re-trigger.
+        var starvationHighWater = 0
+        /// Bucket (`Starv / 100`) of the last Starv value that logged; `nil` until the first nonzero
+        /// Starv logs. Distinguishes "first nonzero" (always logs) from "already logged bucket 0".
+        var loggedStarvationBucket: Int?
+        var droppedBufferHighWater = 0
+        var totalFailureHighWater = 0
+    }
+
+    private var stateBySession: [ProcessTapLiveSessionID: SessionState] = [:]
+
+    /// Returns a `Decision` describing why a log should be emitted, or `nil` when this snapshot should
+    /// not log. Emission policy (per session, diagnostics-only):
+    ///   - **Starv** logs on the first nonzero value, then only when it crosses into a new 100-count
+    ///     bucket (`1`→log, …, `99`→no, `100`→log, `199`→no, `200`→log, …); a first value of `1300`
+    ///     logs once (not thirteen times), and `1301` does not re-log while `1400` does;
+    ///   - **Drops** logs immediately on any increase, regardless of the current Starv bucket;
+    ///   - **Fail** logs immediately on any increase, regardless of the current Starv bucket;
+    ///   - identical or lower values never log and never move the stored high-water marks backward;
+    ///   - each session id is tracked independently.
+    /// Call this only for callbacks already accepted by `shouldAcceptCallback`, so a stale/rejected
+    /// callback never reaches here and thus never logs or mutates the tracker.
+    mutating func decision(
+        sessionID: ProcessTapLiveSessionID,
+        outputStarvationCount: Int,
+        droppedBufferCount: Int,
+        totalFailureCount: Int
+    ) -> Decision? {
+        var state = stateBySession[sessionID] ?? SessionState()
+
+        var starvationBucketCrossed = false
+        if outputStarvationCount > state.starvationHighWater {
+            if let loggedBucket = state.loggedStarvationBucket {
+                let newBucket = outputStarvationCount / 100
+                if newBucket > loggedBucket {
+                    starvationBucketCrossed = true
+                    state.loggedStarvationBucket = newBucket
+                }
+            } else if outputStarvationCount > 0 {
+                // First nonzero starvation for this session always logs once, whatever its value.
+                starvationBucketCrossed = true
+                state.loggedStarvationBucket = outputStarvationCount / 100
+            }
+            state.starvationHighWater = outputStarvationCount
+        }
+
+        var dropsIncreased = false
+        if droppedBufferCount > state.droppedBufferHighWater {
+            dropsIncreased = true
+            state.droppedBufferHighWater = droppedBufferCount
+        }
+
+        var failIncreased = false
+        if totalFailureCount > state.totalFailureHighWater {
+            failIncreased = true
+            state.totalFailureHighWater = totalFailureCount
+        }
+
+        stateBySession[sessionID] = state
+
+        guard starvationBucketCrossed || dropsIncreased || failIncreased else {
+            return nil
+        }
+
+        return Decision(
+            starvationBucketCrossed: starvationBucketCrossed,
+            dropsIncreased: dropsIncreased,
+            failIncreased: failIncreased
+        )
+    }
+
+    /// Drops a session's attribution state as it stops/cleans up, so the map stays bounded to live
+    /// sessions and a later session (always a fresh id) starts clean. Safe for an unknown id.
+    mutating func forget(sessionID: ProcessTapLiveSessionID) {
+        stateBySession.removeValue(forKey: sessionID)
+    }
+
+    /// Test-only: whether a session currently has recorded attribution state.
+    func hasBaseline(for sessionID: ProcessTapLiveSessionID) -> Bool {
+        stateBySession[sessionID] != nil
     }
 }
