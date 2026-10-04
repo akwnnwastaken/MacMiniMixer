@@ -1831,10 +1831,11 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             appAudioTargetResolver: resolver,
             eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
         )
-        // Pin the Advanced diagnostic selection to a surviving app so removing youtube does not
-        // also trip refreshProcessTapSelectionAfterAppRefresh's selection-driven global stop —
-        // this test isolates the per-session app-exit teardown, not that orthogonal path.
-        harness.viewModel.selectProcessTapApp("spotify")
+        // Point the Advanced diagnostic selection at the app that is about to exit. Losing the
+        // selected app must stop only Advanced manual control (none is running here), never the
+        // surviving product session — so this also covers the selection-refresh path.
+        harness.viewModel.selectProcessTapApp("youtube")
+        XCTAssertEqual(harness.viewModel.selectedProcessTapAppID, "youtube")
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         // Wait for each start to FULLY settle (post-await confirmation ran, session id recorded,
@@ -1858,6 +1859,93 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
         // Only youtube's session was stopped, and for the target-app-exited reason.
         XCTAssertEqual(liveController.stopReasons, [.targetAppExited])
+    }
+
+    // MARK: - Advanced-selected app exit with several Product sessions
+    //
+    // The Advanced picker defaults to the first eligible app, so quitting that app used to route
+    // through the global stop and tear down every Product session. Losing the selection now stops
+    // only Advanced manual control; Product sessions are stopped per exited app only. The spy gate
+    // records each teardown synchronously, so the stop count is asserted without any waiting.
+
+    func testQuittingAdvancedSelectedAppStopsOnlyItsOwnProductSessionAndLeavesOthersRunning() async {
+        let spyGate = SpyStartSettleGate()
+        let harness = makeHarness(productRealStartSettleGate: spyGate)
+        // Production default: the Advanced picker selects the first eligible app (Spotify).
+        XCTAssertEqual(harness.viewModel.selectedProcessTapAppID, "spotify")
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.liveController.startedSessionIDs.count == 3 && !harness.viewModel.isProcessTapTesting }
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 3)
+
+        // The Advanced-selected app (Spotify) quits.
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "spotify" }
+        harness.viewModel.refreshApplications()
+
+        // Exactly one teardown was issued (Spotify's per-app stop); no global stop of all sessions.
+        XCTAssertEqual(spyGate.registeredStopCount, 1)
+
+        await waitFor {
+            !harness.viewModel.isExperimentalControlActive(for: "spotify")
+                && !harness.viewModel.isExperimentalControlPending(for: "spotify")
+        }
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.targetAppExited])
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlAppNames, ["Music", "YouTube"])
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+        // The Advanced picker falls back to a surviving app.
+        XCTAssertEqual(harness.viewModel.selectedProcessTapAppID, "music")
+    }
+
+    func testQuittingAdvancedSelectedAppWithoutProductSessionLeavesEveryProductSessionRunning() async {
+        let spyGate = SpyStartSettleGate()
+        let harness = makeHarness(productRealStartSettleGate: spyGate)
+        XCTAssertEqual(harness.viewModel.selectedProcessTapAppID, "spotify")
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        // Product sessions run for Music and YouTube; the Advanced-selected app (Spotify) has none.
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "spotify" }
+        harness.viewModel.refreshApplications()
+
+        // No teardown at all: neither product session belongs to the quitting app.
+        XCTAssertEqual(spyGate.registeredStopCount, 0)
+        await drainMainActor()
+
+        XCTAssertTrue(harness.liveController.stopReasons.isEmpty)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 2)
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "music"))
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "youtube"))
+        XCTAssertEqual(harness.viewModel.selectedProcessTapAppID, "music")
+    }
+
+    // The guard still stops Advanced manual control when its (selected) target app quits.
+    func testQuittingAdvancedSelectedAppStillStopsAdvancedManualLiveControl() async {
+        let harness = makeHarness()
+        harness.viewModel.selectProcessTapApp("music")
+        harness.viewModel.startProcessTapLiveControl()
+        await waitFor { harness.viewModel.isProcessTapLiveControlActive }
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "music" }
+        harness.viewModel.refreshApplications()
+        await waitFor { !harness.viewModel.isProcessTapLiveControlActive }
+
+        XCTAssertEqual(harness.liveController.stopReasons, [.targetAppExited])
+        XCTAssertNil(harness.viewModel.activeLiveControlAppName)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
     }
 
     // MARK: - Phase 3d-iii step 1: confirmed Product Real Control banner model

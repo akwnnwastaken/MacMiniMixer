@@ -799,8 +799,11 @@ final class MixerViewModel: ObservableObject {
     }
 
     /// Preserves the Advanced diagnostic selection when the previously selected app survived
-    /// the refresh; otherwise stops any active live control for the vanished app and falls
-    /// back to a preferred selection.
+    /// the refresh; otherwise stops the Advanced manual live session (which always targets the
+    /// selected app) and falls back to a preferred selection. Product Real sessions are not
+    /// stopped here: the Advanced picker's selection is unrelated to which apps Product Real
+    /// controls, an exited app's own product session is already torn down per app by
+    /// `stopRealControlForExitedTargetApps`, and every other app's session keeps running.
     private func refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: MixerAppItem.ID?) {
         if let previousProcessTapAppID,
            apps.contains(where: { $0.id == previousProcessTapAppID }) {
@@ -808,7 +811,12 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        if isProcessTapLiveControlActive {
+        // Only the Advanced manual session is tied to the vanished selection. Guarding on the
+        // derived `isProcessTapLiveControlActive` here would route through the global stop and
+        // tear down every product session whenever the selected app (by default the first
+        // eligible one) quits. Advanced manual and product control are mutually exclusive, so the
+        // router below takes its Advanced manual branch.
+        if advancedManualLiveControlActive {
             stopProcessTapLiveControl(reason: .targetAppExited)
         }
 
