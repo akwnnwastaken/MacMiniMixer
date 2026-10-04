@@ -153,6 +153,22 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.diagnostics?.callbackCount, 9)
     }
 
+    // Only per-callback live diagnostics are gated on the Advanced display being visible; the stop
+    // display cleanup still carries the stopped session's final diagnostics while it is hidden.
+    func testStopDisplayCleanupCarriesDiagnosticsWhileLiveDiagnosticsDisplayHidden() {
+        let harness = makeStopHarness()
+        harness.context.isLiveDiagnosticsDisplayVisible = false
+        let (_, _, sidA, _) = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA, result: makeResult(.liveControlStopped), diagnostics: makeDiagnostics(callbackCount: 13)
+        )
+
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.count, 1)
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.result.outcome, .liveControlStopped)
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.diagnostics?.callbackCount, 13)
+    }
+
     func testHandleProductLiveControlStoppedAppExitInvalidatesCachedTarget() {
         let harness = makeStopHarness()
         let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)

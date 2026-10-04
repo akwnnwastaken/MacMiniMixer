@@ -50,6 +50,8 @@ struct MixerPanelView: View {
         .animation(.snappy(duration: 0.18), value: viewModel.statusMessage)
         .animation(.snappy(duration: 0.18), value: viewModel.isProcessTapLiveControlActive)
         .onAppear {
+            // Product live diagnostics are only published while the Advanced section is on screen.
+            viewModel.setLiveDiagnosticsDisplayVisible(isShowingAdvanced)
             viewModel.refreshApplications()
             viewModel.refreshOutputDevices()
             viewModel.refreshSystemOutputVolume()
@@ -61,6 +63,7 @@ struct MixerPanelView: View {
             await runOutputDeviceRefreshLoop()
         }
         .onDisappear {
+            viewModel.setLiveDiagnosticsDisplayVisible(false)
             viewModel.stopTwoAppReadinessForPanelClose()
         }
     }
@@ -356,9 +359,11 @@ struct MixerPanelView: View {
     private var advancedSection: some View {
         VStack(alignment: .leading, spacing: isShowingAdvanced ? 8 : 0) {
             Button {
+                let showsAdvanced = !isShowingAdvanced
                 withAnimation(.snappy(duration: 0.16)) {
-                    isShowingAdvanced.toggle()
+                    isShowingAdvanced = showsAdvanced
                 }
+                viewModel.setLiveDiagnosticsDisplayVisible(showsAdvanced)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "wrench.and.screwdriver")

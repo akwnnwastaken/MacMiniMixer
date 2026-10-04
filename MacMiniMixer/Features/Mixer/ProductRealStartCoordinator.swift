@@ -36,6 +36,14 @@ final class ProductRealStartCoordinator {
     /// `ProductRealStarvationAttributionLog`.
     private var starvationAttribution = ProductRealStarvationAttributionLog()
 
+    /// The app whose Product Real session owns the single shared Advanced live-diagnostics surface
+    /// (`setProcessTapLiveDiagnostics` / `setLiveControlDiagnosticProgress`), so concurrent sessions
+    /// do not interleave their values there. The newest start takes it; when the focused app no
+    /// longer has a session, the next accepted callback from a surviving session adopts it (see
+    /// `shouldPublishLiveDiagnostics(for:)`), so the stop side needs no bookkeeping. Display-only:
+    /// it never affects audio, `ProductRealControlState`, or attribution logging.
+    private var liveDiagnosticsFocusAppID: MixerAppItem.ID?
+
     /// Routes the engine `onStopped` callback to the stop side. No-op default so construction never
     /// captures the sibling before the facade wires it (post-init).
     private var onEngineStopped: @MainActor (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void = { _, _, _ in }
@@ -329,6 +337,8 @@ final class ProductRealStartCoordinator {
             startRequestID: startRequestID
         )
         sideEffects?.setActiveLiveControlAppName(app.name)
+        // The newest start owns the shared live-diagnostics surface, matching its "Starting…" line.
+        liveDiagnosticsFocusAppID = app.id
         sideEffects?.setLiveControlDiagnosticResult(
             ProcessTapTestResult(
                 outcome: .liveControlStarting,
@@ -368,11 +378,17 @@ final class ProductRealStartCoordinator {
                     guard self.productRealControlState.shouldAcceptCallback(for: app.id, requestID: startRequestID) else {
                         return
                     }
-                    self.sideEffects?.setProcessTapLiveDiagnostics(diagnostics)
-                    self.sideEffects?.setLiveControlDiagnosticProgress(diagnostics.progress)
-                    // Diagnostics-only attribution: emitted *after* the accept guard and the unchanged
-                    // publish calls, so a stale/rejected callback returns above and never logs or moves
-                    // the per-session baseline, and what is published to the UI is exactly as before.
+                    // Only the focused session publishes to the shared Advanced surface, and only
+                    // while that surface is on screen. Checked after the accept guard, so a
+                    // stale/rejected callback can never take the focus.
+                    if self.shouldPublishLiveDiagnostics(for: app.id) {
+                        self.sideEffects?.setProcessTapLiveDiagnostics(diagnostics)
+                        self.sideEffects?.setLiveControlDiagnosticProgress(diagnostics.progress)
+                    }
+                    // Diagnostics-only attribution: emitted *after* the accept guard, so a
+                    // stale/rejected callback returns above and never logs or moves the per-session
+                    // baseline. It runs for every accepted callback, whether or not this session
+                    // published above (non-focused session, or the display is hidden).
                     self.logDiagnosticsAttributionIfEscalated(
                         sessionID: sessionID,
                         appID: app.id,
@@ -500,6 +516,30 @@ final class ProductRealStartCoordinator {
         }
 
         AppLogger.processTap.debug("Product Real diagnostics escalated reason=\(decision.reasonLabel, privacy: .public) sessionID=\(sessionID.rawValue.uuidString, privacy: .public) appID=\(appID, privacy: .public) app=\(appName, privacy: .public) starv=\(diagnostics.outputStarvationCount, privacy: .public) drops=\(diagnostics.droppedBufferCount, privacy: .public) fail=\(diagnostics.totalFailureCount, privacy: .public) enqueued=\(diagnostics.enqueuedBufferCount, privacy: .public) warmingUp=\(diagnostics.isWarmingUpOutput, privacy: .public)")
+    }
+
+    /// Whether an *accepted* live-diagnostics callback for `appID` should be published to the shared
+    /// Advanced surface. Updates the focus first: `appID` adopts it when no app holds it or the
+    /// focused app no longer has a session (stopped, failed, superseded) — so focus falls back to a
+    /// surviving session without stop-side bookkeeping. Then only the focused app publishes, and
+    /// only while the Advanced display is on screen (focus still moves while it is hidden).
+    private func shouldPublishLiveDiagnostics(for appID: MixerAppItem.ID) -> Bool {
+        if liveDiagnosticsFocusAppID != appID,
+           liveDiagnosticsFocusAppID.map({ productRealControlState.activeSessionsByAppID[$0] == nil }) ?? true {
+            liveDiagnosticsFocusAppID = appID
+        }
+
+        guard liveDiagnosticsFocusAppID == appID else {
+            return false
+        }
+
+        return context?.isLiveDiagnosticsDisplayVisible ?? true
+    }
+
+    /// Test-only: whether a live session currently has starvation-attribution state, i.e. at least
+    /// one of its diagnostics callbacks was accepted and reached the attribution logger.
+    func hasStarvationAttributionBaseline(for sessionID: ProcessTapLiveSessionID) -> Bool {
+        starvationAttribution.hasBaseline(for: sessionID)
     }
 }
 

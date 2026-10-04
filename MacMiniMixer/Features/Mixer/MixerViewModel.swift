@@ -26,6 +26,13 @@ final class MixerViewModel: ObservableObject {
     }
     @Published private(set) var showAllApps = false
     @Published private(set) var isExperimentalRealAppControlEnabled = false
+    /// Whether the Advanced section's live-diagnostics display is on screen (panel open with
+    /// Advanced expanded). Set by `MixerPanelView`; read by the Product Real start path through
+    /// `ProductRealControlContext` so per-callback product live diagnostics are not published (and
+    /// do not re-render the panel / menu bar scene) while nobody can see them. Deliberately a plain
+    /// stored property, NOT `@Published`: nothing renders from it, so changing it must not itself
+    /// fire `objectWillChange`. Hidden by default.
+    private(set) var isLiveDiagnosticsDisplayVisible = false
 
     private let applicationLister: ApplicationListing
     private let audioController: AudioControlling
@@ -393,6 +400,13 @@ final class MixerViewModel: ObservableObject {
 
     func setShowAllApps(_ showAllApps: Bool) {
         self.showAllApps = showAllApps
+    }
+
+    /// Records whether the Advanced live-diagnostics display is on screen (see
+    /// `isLiveDiagnosticsDisplayVisible`). Called by the panel on appear/disappear and when the
+    /// Advanced section is expanded or collapsed. Never publishes a change itself.
+    func setLiveDiagnosticsDisplayVisible(_ isVisible: Bool) {
+        isLiveDiagnosticsDisplayVisible = isVisible
     }
 
     func setExperimentalRealAppControlEnabled(_ isEnabled: Bool) {

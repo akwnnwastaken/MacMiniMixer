@@ -377,6 +377,183 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         XCTAssertFalse(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 11 })
     }
 
+    // MARK: - Live diagnostics: focused session only, and only while the display is visible
+    //
+    // Diagnostics are delivered through each session's captured `onDiagnostics` closure. Every
+    // emission from the test enqueues its main-actor hop in order, so once a later emission is
+    // observed every earlier one has already been handled; negative assertions are exact.
+
+    func testOnlyFocusedSessionPublishesLiveDiagnostics() async {
+        let harness = makeStartHarness()
+        let (appA, appB) = (makeApp(id: "a", name: "Alpha", pid: 1), makeApp(id: "b", name: "Bravo", pid: 2))
+        harness.context.apps = [appA, appB]
+        let (sidA, sidB) = (ProcessTapLiveSessionID(), ProcessTapLiveSessionID())
+        await startConfirmedDiagnosticsSession(appA, sessionID: sidA, in: harness)
+        await startConfirmedDiagnosticsSession(appB, sessionID: sidB, in: harness)
+
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidA, makeDiagnostics(callbackCount: 11))
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidB, makeDiagnostics(callbackCount: 22))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 22 } }
+
+        // Bravo (the newest start) owns the shared surface; Alpha's snapshot is not interleaved.
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 11 })
+        XCTAssertFalse(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 11 })
+        XCTAssertTrue(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 22 })
+    }
+
+    func testNewestStartTakesLiveDiagnosticsFocus() async {
+        let harness = makeStartHarness()
+        let (appA, appB) = (makeApp(id: "a", name: "Alpha", pid: 1), makeApp(id: "b", name: "Bravo", pid: 2))
+        harness.context.apps = [appA, appB]
+        let (sidA, sidB) = (ProcessTapLiveSessionID(), ProcessTapLiveSessionID())
+
+        // Alone, Alpha publishes.
+        await startConfirmedDiagnosticsSession(appA, sessionID: sidA, in: harness)
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidA, makeDiagnostics(callbackCount: 11))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 11 } }
+
+        // Once Bravo starts, it takes the focus and Alpha stops publishing.
+        await startConfirmedDiagnosticsSession(appB, sessionID: sidB, in: harness)
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidA, makeDiagnostics(callbackCount: 12))
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidB, makeDiagnostics(callbackCount: 21))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 21 } }
+
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 12 })
+    }
+
+    func testLiveDiagnosticsFocusFallsBackToSurvivingSessionAfterFocusedSessionClears() async {
+        let harness = makeStartHarness()
+        let (appA, appB) = (makeApp(id: "a", name: "Alpha", pid: 1), makeApp(id: "b", name: "Bravo", pid: 2))
+        harness.context.apps = [appA, appB]
+        let (sidA, sidB) = (ProcessTapLiveSessionID(), ProcessTapLiveSessionID())
+        await startConfirmedDiagnosticsSession(appA, sessionID: sidA, in: harness)
+        await startConfirmedDiagnosticsSession(appB, sessionID: sidB, in: harness)
+
+        // The focused session (Bravo) goes away, as its stop callback would clear it.
+        harness.stateStore.productRealControlState.clearSession(for: appB.id)
+
+        // The surviving session adopts the focus on its next accepted callback and publishes.
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidA, makeDiagnostics(callbackCount: 31))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 31 } }
+        XCTAssertTrue(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 31 })
+    }
+
+    func testStaleCallbackCannotStealLiveDiagnosticsFocus() async {
+        let harness = makeStartHarness()
+        let appA = makeApp(id: "a", name: "Alpha", pid: 1)
+        let appB = makeApp(id: "b", name: "Bravo", pid: 2)
+        let appC = makeApp(id: "c", name: "Charlie", pid: 3)
+        harness.context.apps = [appA, appB, appC]
+
+        // Alpha's first start is superseded before it completes: rejected as stale, its orphan
+        // session torn down — but that orphan's diagnostics closure is still captured by the engine.
+        let staleSidA = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(staleSidA))
+        harness.coordinator.startExperimentalControl(for: appA, target: makeTarget(for: appA))
+        _ = harness.stateStore.productRealControlState.beginStartRequest(for: appA.id) // supersede
+        await waitUntil { harness.liveSessionManager.stopSessionCalls.contains { $0.id == staleSidA } }
+
+        // Alpha restarts (a valid newer session), then Bravo and Charlie start; Charlie is focused.
+        await startConfirmedDiagnosticsSession(appA, sessionID: ProcessTapLiveSessionID(), in: harness)
+        let sidB = ProcessTapLiveSessionID()
+        await startConfirmedDiagnosticsSession(appB, sessionID: sidB, in: harness)
+        await startConfirmedDiagnosticsSession(appC, sessionID: ProcessTapLiveSessionID(), in: harness)
+        // The focused session goes away, so the focus is up for adoption.
+        harness.stateStore.productRealControlState.clearSession(for: appC.id)
+
+        // The stale orphan callback arrives first. Alpha does have a live session, so if the stale
+        // callback could reach the focus logic it would take the focus and block Bravo below.
+        harness.liveSessionManager.emitCapturedDiagnostics(id: staleSidA, makeDiagnostics(callbackCount: 41))
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidB, makeDiagnostics(callbackCount: 42))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 42 } }
+
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 41 })
+        XCTAssertFalse(harness.coordinator.hasStarvationAttributionBaseline(for: staleSidA))
+    }
+
+    func testNonFocusedSessionStillRecordsStarvationAttribution() async {
+        let harness = makeStartHarness()
+        let (appA, appB) = (makeApp(id: "a", name: "Alpha", pid: 1), makeApp(id: "b", name: "Bravo", pid: 2))
+        harness.context.apps = [appA, appB]
+        let (sidA, sidB) = (ProcessTapLiveSessionID(), ProcessTapLiveSessionID())
+        await startConfirmedDiagnosticsSession(appA, sessionID: sidA, in: harness)
+        await startConfirmedDiagnosticsSession(appB, sessionID: sidB, in: harness)
+        XCTAssertFalse(harness.coordinator.hasStarvationAttributionBaseline(for: sidA))
+
+        // Alpha is not focused (Bravo started later) and reports a starvation spike.
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidA, makeDiagnostics(callbackCount: 51, outputStarvationCount: 1300))
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sidB, makeDiagnostics(callbackCount: 52))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 52 } }
+
+        // Not published, but still attributed (logging is independent of the shared surface).
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 51 })
+        XCTAssertTrue(harness.coordinator.hasStarvationAttributionBaseline(for: sidA))
+    }
+
+    func testHiddenDisplaySkipsLiveDiagnosticsPublishButStillRecordsAttribution() async {
+        let harness = makeStartHarness()
+        harness.context.isLiveDiagnosticsDisplayVisible = false
+        let app = makeApp()
+        harness.context.apps = [app]
+        let sessionID = ProcessTapLiveSessionID()
+        await startConfirmedDiagnosticsSession(app, sessionID: sessionID, in: harness)
+        let progressCountAfterStart = harness.sideEffects.diagnosticProgressHistory.count
+
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sessionID, makeDiagnostics(callbackCount: 61, outputStarvationCount: 5))
+        // The attribution baseline appears once the accepted callback has been handled.
+        await waitUntil { harness.coordinator.hasStarvationAttributionBaseline(for: sessionID) }
+
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 61 })
+        XCTAssertEqual(harness.sideEffects.diagnosticProgressHistory.count, progressCountAfterStart)
+    }
+
+    func testLiveDiagnosticsPublishResumesWhenDisplayBecomesVisible() async {
+        let harness = makeStartHarness()
+        harness.context.isLiveDiagnosticsDisplayVisible = false
+        let app = makeApp()
+        harness.context.apps = [app]
+        let sessionID = ProcessTapLiveSessionID()
+        await startConfirmedDiagnosticsSession(app, sessionID: sessionID, in: harness)
+
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sessionID, makeDiagnostics(callbackCount: 71))
+        await waitUntil { harness.coordinator.hasStarvationAttributionBaseline(for: sessionID) }
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 71 })
+
+        harness.context.isLiveDiagnosticsDisplayVisible = true
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sessionID, makeDiagnostics(callbackCount: 72))
+        await waitUntil { harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 72 } }
+
+        XCTAssertTrue(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 72 })
+        XCTAssertFalse(harness.sideEffects.liveDiagnosticsHistory.contains { $0?.callbackCount == 71 })
+    }
+
+    func testStartAndFailureDisplayWritesAreNotGatedWhileDisplayHidden() async {
+        let harness = makeStartHarness()
+        harness.context.isLiveDiagnosticsDisplayVisible = false
+        let app = makeApp()
+        harness.context.apps = [app]
+        harness.liveSessionManager.configureStart(
+            result: ProcessTapLiveSessionStartResult(sessionID: nil, result: makeResult(.liveControlSetupFailed))
+        )
+        let zeroProgress = ProcessTapDiagnosticProgress(callbackCount: 0, peakLevel: 0, rmsLevel: 0, audioDetected: false)
+
+        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
+
+        // Synchronous "Starting…" writes: result, zero progress, cleared diagnostics, running flag.
+        XCTAssertEqual(harness.sideEffects.diagnosticResults.map(\.outcome), [.liveControlStarting])
+        XCTAssertEqual(harness.sideEffects.diagnosticProgressHistory, [zeroProgress])
+        XCTAssertEqual(harness.sideEffects.liveDiagnosticsHistory, [nil])
+        XCTAssertEqual(harness.sideEffects.diagnosticRunningHistory, [true])
+
+        await waitUntil { harness.sideEffects.statusMessages.contains("Could not start live control for this app") }
+
+        // Post-await failure writes: final result, running cleared, diagnostics and progress cleared.
+        XCTAssertEqual(harness.sideEffects.diagnosticResults.map(\.outcome), [.liveControlStarting, .liveControlSetupFailed])
+        XCTAssertEqual(harness.sideEffects.diagnosticRunningHistory, [true, false])
+        XCTAssertEqual(harness.sideEffects.diagnosticProgressHistory, [zeroProgress, nil])
+        XCTAssertEqual(harness.sideEffects.liveDiagnosticsHistory, [nil, nil])
+    }
+
     // MARK: - Stale-start cleanup
 
     func testCleanupStopsStartedSessionByItsOwnID() async {
@@ -500,6 +677,21 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
 
     private func startedResult(_ sessionID: ProcessTapLiveSessionID) -> ProcessTapLiveSessionStartResult {
         ProcessTapLiveSessionStartResult(sessionID: sessionID, result: makeResult(.liveControlStarted))
+    }
+
+    /// Starts `app` through the real async start body with `sessionID` as its engine session id and
+    /// waits until the post-await block has confirmed it (engine id recorded, transition finished).
+    private func startConfirmedDiagnosticsSession(
+        _ app: MixerAppItem,
+        sessionID: ProcessTapLiveSessionID,
+        in harness: StartHarness
+    ) async {
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID == sessionID
+                && !harness.stateStore.productRealControlState.isOperationPending(for: app.id)
+        }
     }
 
     private func makeDiagnostics(

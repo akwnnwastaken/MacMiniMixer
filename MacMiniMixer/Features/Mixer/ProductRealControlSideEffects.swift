@@ -52,4 +52,9 @@ protocol ProductRealControlContext: AnyObject {
     /// The current live-diagnostics stream, read by the Stop All path to carry the last diagnostics
     /// into its no-active-session cleanup (matching the previous view-model behavior).
     var processTapLiveDiagnostics: ProcessTapLiveDiagnostics? { get }
+    /// Whether the Advanced live-diagnostics display (the panel's expanded Advanced section) is on
+    /// screen. Product Real sessions publish their per-callback live diagnostics to the shared
+    /// Advanced surface only while this is true; start / failure / stop display writes are never
+    /// gated by it, and neither is the diagnostics-only attribution logging.
+    var isLiveDiagnosticsDisplayVisible: Bool { get }
 }

@@ -555,9 +555,19 @@ final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & Proce
     private var stoppedToEmit: (id: ProcessTapLiveSessionID?, result: ProcessTapTestResult, diagnostics: ProcessTapLiveDiagnostics?)?
     private var capturedOnStopped: (@Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
     private var recordedStartSessionTargets: [ProcessTapTarget] = []
+    private var capturedOnDiagnosticsBySessionID: [ProcessTapLiveSessionID: @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void] = [:]
 
     var stopSessionCalls: [(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason)] {
         lock.withLock { recordedStopSessionCalls }
+    }
+
+    /// Delivers a diagnostics snapshot through the `onDiagnostics` closure captured for session `id`
+    /// (the real per-session wiring the start coordinator installs), so a test can drive each of
+    /// several concurrent sessions' diagnostics after their starts have confirmed. No-op for an
+    /// unknown id.
+    func emitCapturedDiagnostics(id: ProcessTapLiveSessionID, _ diagnostics: ProcessTapLiveDiagnostics) {
+        let onDiagnostics = lock.withLock { capturedOnDiagnosticsBySessionID[id] }
+        onDiagnostics?(id, diagnostics)
     }
 
     /// Every target `startSession` was called with, in call order (one entry per engine start).
@@ -610,7 +620,7 @@ final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & Proce
         }
         let startResult = result ?? notActiveStartResult
         let callbackSessionID = startResult.sessionID ?? ProcessTapLiveSessionID()
-        lock.withLock { recordedStartSessionTargets.append(target) }
+        lock.withLock { recordedStartSessionTargets.append(target); capturedOnDiagnosticsBySessionID[callbackSessionID] = onDiagnostics }
         if let diagnostics {
             onDiagnostics(callbackSessionID, diagnostics)
         }
@@ -664,6 +674,7 @@ final class StubProductRealControlSideEffects: ProductRealControlSideEffects {
     private(set) var diagnosticProgressHistory: [ProcessTapDiagnosticProgress?] = []
     private(set) var diagnosticRunningHistory: [Bool] = []
     private(set) var stoppedDisplayCalls: [(result: ProcessTapTestResult, diagnostics: ProcessTapLiveDiagnostics?)] = []
+    private(set) var liveDiagnosticsHistory: [ProcessTapLiveDiagnostics?] = []
 
     func showProductRealStatus(_ text: String, style: MixerStatusMessage.Style, action: MixerStatusMessage.Action?) {
         statusMessages.append(text)
@@ -671,7 +682,9 @@ final class StubProductRealControlSideEffects: ProductRealControlSideEffects {
     func setActiveLiveControlAppName(_ name: String?) {
         activeNameHistory.append(name)
     }
-    func setProcessTapLiveDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics?) {}
+    func setProcessTapLiveDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics?) {
+        liveDiagnosticsHistory.append(diagnostics)
+    }
     func setLiveControlDiagnosticResult(_ result: ProcessTapTestResult) {
         diagnosticResults.append(result)
     }
@@ -699,6 +712,9 @@ final class StubProductRealControlContext: ProductRealControlContext {
     var isAppAudioTargetResolving = false
     var isProcessTapLiveControlActive = false
     var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
+    /// Visible by default so coordinator tests observe product live-diagnostics publishing unless a
+    /// test hides the display explicitly.
+    var isLiveDiagnosticsDisplayVisible = true
 }
 
 final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {

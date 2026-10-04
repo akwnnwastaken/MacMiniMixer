@@ -1585,6 +1585,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     func testStaleDiagnosticsAfterCancelledStartDoNotRepopulateState() async {
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
+        // Display visible, so this exercises the stale-callback rejection, not the hidden-display gate.
+        harness.viewModel.setLiveDiagnosticsDisplayVisible(true)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
         harness.viewModel.setAppVolume(50, for: "spotify")
@@ -1596,6 +1598,86 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         controller.emitDiagnosticsForPendingStart(at: 0)
         await drainMainActor()
         XCTAssertNil(harness.viewModel.processTapLiveDiagnostics)
+    }
+
+    // MARK: - Product live diagnostics are published only while the Advanced display is visible
+    //
+    // The fake controller emits one diagnostics snapshot (callbackCount 10) while a session starts,
+    // before `startSession` returns, so its main-actor hop is handled before the start's post-await
+    // block; once the start has settled (`!isProcessTapTesting`) the snapshot has been processed.
+
+    func testLiveDiagnosticsDisplayDefaultsHiddenAndIsSettable() {
+        let harness = makeHarness()
+        XCTAssertFalse(harness.viewModel.isLiveDiagnosticsDisplayVisible)
+
+        harness.viewModel.setLiveDiagnosticsDisplayVisible(true)
+        XCTAssertTrue(harness.viewModel.isLiveDiagnosticsDisplayVisible)
+        harness.viewModel.setLiveDiagnosticsDisplayVisible(false)
+        XCTAssertFalse(harness.viewModel.isLiveDiagnosticsDisplayVisible)
+    }
+
+    func testProductLiveDiagnosticsNotPublishedWhileDisplayHidden() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        await drainMainActor()
+
+        // The start itself still reports normally; only the per-callback snapshot is withheld, so
+        // the shared surface keeps the start's cleared diagnostics and zero progress.
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertEqual(harness.viewModel.processTapTestResult?.outcome, .liveControlStarted)
+        XCTAssertNil(harness.viewModel.processTapLiveDiagnostics)
+        XCTAssertEqual(harness.viewModel.processTapDiagnosticProgress?.callbackCount, 0)
+    }
+
+    func testProductLiveDiagnosticsPublishedWhileDisplayVisible() async {
+        let harness = makeHarness()
+        harness.viewModel.setLiveDiagnosticsDisplayVisible(true)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor {
+            harness.viewModel.processTapLiveDiagnostics?.callbackCount == 10
+                && !harness.viewModel.isProcessTapTesting
+        }
+
+        XCTAssertEqual(harness.viewModel.processTapDiagnosticProgress?.callbackCount, 10)
+        XCTAssertEqual(harness.viewModel.processTapTestResult?.outcome, .liveControlStarted)
+    }
+
+    func testProductStopResultDiagnosticsAppliedWhileDisplayHidden() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        XCTAssertNil(harness.viewModel.processTapLiveDiagnostics)
+
+        // The stop display cleanup is not gated: the stopped session's final diagnostics and the
+        // stop result reach the shared surface even while the display is hidden.
+        harness.viewModel.toggleExperimentalControl(for: "spotify")
+        await waitFor {
+            !harness.viewModel.isExperimentalControlActive(for: "spotify")
+                && harness.viewModel.processTapLiveDiagnostics?.callbackCount == 10
+        }
+
+        XCTAssertEqual(harness.viewModel.processTapTestResult?.outcome, .liveControlStopped)
+        XCTAssertEqual(harness.viewModel.processTapDiagnosticProgress?.callbackCount, 10)
+    }
+
+    func testAdvancedManualLiveDiagnosticsUnaffectedByDisplayVisibility() async {
+        let harness = makeHarness()
+        XCTAssertFalse(harness.viewModel.isLiveDiagnosticsDisplayVisible)
+        harness.viewModel.selectProcessTapApp("music")
+
+        harness.viewModel.startProcessTapLiveControl()
+        await waitFor {
+            harness.viewModel.isProcessTapLiveControlActive
+                && harness.viewModel.processTapLiveDiagnostics?.callbackCount == 10
+        }
+
+        XCTAssertEqual(harness.viewModel.processTapDiagnosticProgress?.callbackCount, 10)
     }
 
     func testPerAppStopOfConfirmedSessionDoesNotDisturbAnotherAppsPendingStart() async {
