@@ -236,6 +236,57 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(harness.resolver.invalidatedTargetCount, 1)
     }
 
+    // The cached-helper retry is no longer suppressed by other confirmed Product sessions: they run
+    // concurrently with a fresh resolve/start just like with a first start. The visible process is
+    // eligible in this fixture, so the fresh retry starts directly and reaches the engine a second
+    // time (its own failure has no cached source, so it reports instead of retrying again).
+    func testCachedHelperRetryRunsWhileAnotherProductSessionIsActive() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let app = makeApp()
+        harness.context.apps = [makeApp(id: "music", name: "Music", pid: 102), app]
+        harness.context.isExperimentalRealAppControlEnabled = true
+        beginConfirmedSessions(["music"], in: harness)
+        // The view model derives this from the confirmed "music" session above.
+        harness.context.isProcessTapLiveControlActive = true
+        harness.liveSessionManager.configureStart(
+            result: ProcessTapLiveSessionStartResult(sessionID: nil, result: makeResult(.liveControlSetupFailed))
+        )
+
+        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app), resolutionSource: .cachedHelper)
+        await waitUntil {
+            harness.liveSessionManager.startSessionTargetHistory.count == 2
+                && harness.sideEffects.statusMessages.contains("Could not start live control for this app")
+        }
+
+        XCTAssertEqual(harness.liveSessionManager.startSessionTargetHistory.map(\.appID), [app.id, app.id])
+        XCTAssertGreaterThanOrEqual(harness.resolver.invalidatedTargetCount, 1)
+        XCTAssertFalse(harness.stateStore.productRealControlState.isOperationPending(for: app.id))
+        // The other app's confirmed session is untouched.
+        XCTAssertNotNil(harness.stateStore.productRealControlState.activeSessionsByAppID["music"]?.liveSessionID)
+    }
+
+    // The mutually exclusive Advanced manual session still suppresses the retry (it would run a
+    // helper probe alongside it): the failure is reported and nothing else starts or resolves.
+    func testCachedHelperRetryIsSkippedWhileAdvancedManualLiveControlIsActive() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let app = makeApp()
+        harness.context.apps = [app]
+        harness.context.isExperimentalRealAppControlEnabled = true
+        harness.context.advancedManualLiveControlActive = true
+        harness.context.isProcessTapLiveControlActive = true
+        harness.liveSessionManager.configureStart(
+            result: ProcessTapLiveSessionStartResult(sessionID: nil, result: makeResult(.liveControlSetupFailed))
+        )
+
+        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app), resolutionSource: .cachedHelper)
+        await waitUntil { harness.sideEffects.statusMessages.contains("Could not start live control for this app") }
+
+        XCTAssertEqual(harness.liveSessionManager.startSessionTargetHistory.count, 1)
+        XCTAssertFalse(harness.stateStore.productRealControlState.isResolving)
+        XCTAssertFalse(harness.stateStore.productRealControlState.isOperationPending(for: app.id))
+        XCTAssertGreaterThanOrEqual(harness.resolver.invalidatedTargetCount, 1)
+    }
+
     // MARK: - Concurrent-session limit (start preflight)
 
     // Owner decision: Product Real Control has no app-count limit by default.

@@ -271,6 +271,65 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
     }
 
+    // Same cached-helper recovery while another Product session (Spotify) is already confirmed:
+    // the other session must not suppress the fresh-resolve retry, and it keeps running.
+    func testCachedHelperSetupFailureRetriesFreshResolveWhileAnotherProductSessionIsActive() async {
+        let resolver = FakeAppAudioTargetResolver(results: [
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .cachedHelper
+                )
+            ),
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:202", appName: "YouTube", processIdentifier: 202),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        ])
+        // Start results are consumed in order: Spotify, YouTube via the stale cached helper, then
+        // YouTube via the freshly discovered helper.
+        let liveController = FakeLiveControlController(startResults: [
+            ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info),
+            ProcessTapTestResult(outcome: .liveControlSetupFailed, message: "Could not start live control", severity: .warning),
+            ProcessTapTestResult(outcome: .liveControlStarted, message: "Live control started", severity: .info)
+        ])
+        let harness = makeHarness(
+            liveController: liveController,
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [
+                200: .unavailable("Core Audio process unavailable"),
+                201: .eligible,
+                202: .eligible
+            ]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedSessionIDs.count == 1 && !harness.viewModel.isProcessTapTesting }
+        XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
+
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        await waitFor {
+            harness.viewModel.confirmedProductRealControlSessionCount == 2 && !harness.viewModel.isProcessTapTesting
+        }
+
+        XCTAssertEqual(resolver.allowsCachedLookupRequests, [true, false])
+        XCTAssertEqual(resolver.invalidatedRequests.map(\.appID), ["youtube"])
+        XCTAssertEqual(liveController.startedTargets.map(\.processIdentifier), [101, 201, 202])
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertTrue(liveController.stopReasons.isEmpty)
+        XCTAssertNotEqual(harness.viewModel.statusMessage?.text, "Could not start live control for this app")
+    }
+
     func testManualAdvancedLiveSetupFailureDoesNotTouchHelperCache() async {
         let resolver = FakeAppAudioTargetResolver()
         let liveController = FakeLiveControlController(startResults: [

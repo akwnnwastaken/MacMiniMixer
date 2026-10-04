@@ -554,9 +554,15 @@ final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & Proce
     private var diagnosticsToEmit: ProcessTapLiveDiagnostics?
     private var stoppedToEmit: (id: ProcessTapLiveSessionID?, result: ProcessTapTestResult, diagnostics: ProcessTapLiveDiagnostics?)?
     private var capturedOnStopped: (@Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
+    private var recordedStartSessionTargets: [ProcessTapTarget] = []
 
     var stopSessionCalls: [(id: ProcessTapLiveSessionID, reason: ProcessTapLiveStopReason)] {
         lock.withLock { recordedStopSessionCalls }
+    }
+
+    /// Every target `startSession` was called with, in call order (one entry per engine start).
+    var startSessionTargetHistory: [ProcessTapTarget] {
+        lock.withLock { recordedStartSessionTargets }
     }
 
     /// Delivers an engine stop through the most recently started session's captured `onStopped`
@@ -604,6 +610,7 @@ final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & Proce
         }
         let startResult = result ?? notActiveStartResult
         let callbackSessionID = startResult.sessionID ?? ProcessTapLiveSessionID()
+        lock.withLock { recordedStartSessionTargets.append(target) }
         if let diagnostics {
             onDiagnostics(callbackSessionID, diagnostics)
         }

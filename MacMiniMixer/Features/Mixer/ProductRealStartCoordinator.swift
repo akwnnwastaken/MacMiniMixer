@@ -440,10 +440,12 @@ final class ProductRealStartCoordinator {
                     sideEffects?.setProcessTapLiveDiagnostics(nil)
                     sideEffects?.setLiveControlDiagnosticProgress(nil)
 
+                    // Only the mutually exclusive Advanced manual session suppresses this helper-probe
+                    // retry; other Product sessions run concurrently (a normal start resolves alongside them).
                     if resolutionSource == .cachedHelper,
                        context?.isExperimentalRealAppControlEnabled == true,
                        context?.isTwoAppReadinessRunning != true,
-                       context?.isProcessTapLiveControlActive != true,
+                       context?.advancedManualLiveControlActive != true,
                        context?.isAppAudioTargetResolving != true {
                         startResolvedExperimentalControl(for: app, allowsCachedLookup: false)
                     } else {

@@ -47,7 +47,7 @@ protocol ProductRealControlContext: AnyObject {
     /// Whether an app-audio target resolution is in flight.
     var isAppAudioTargetResolving: Bool { get }
     /// The derived "live control active" flag (Advanced-manual active OR a confirmed product
-    /// session). Consulted by the cached-helper retry guard in the async start body.
+    /// session).
     var isProcessTapLiveControlActive: Bool { get }
     /// The current live-diagnostics stream, read by the Stop All path to carry the last diagnostics
     /// into its no-active-session cleanup (matching the previous view-model behavior).
