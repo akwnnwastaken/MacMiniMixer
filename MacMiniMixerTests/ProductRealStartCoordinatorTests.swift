@@ -925,3 +925,509 @@ final class ProductRealStarvationAttributionLogTests: XCTestCase {
         XCTAssertFalse(log.hasBaseline(for: ProcessTapLiveSessionID()))
     }
 }
+
+/// Queued Product Real start lane (single FIFO): at most one helper resolution or product start is
+/// physically in flight, and a start requested meanwhile is queued instead of rejected, then drained
+/// with a fresh preflight when the lane frees. Deterministic: the fake engine and resolver suspend
+/// until the test completes them, and every wait is on observable state (deadline-bounded, no sleeps).
+@MainActor
+final class ProductRealStartLaneTests: XCTestCase {
+    // MARK: - Queued instead of rejected
+
+    func testToggleWhileResolutionInFlightIsQueuedNotRejected() async {
+        let safari = makeApp("safari", "Safari", pid: 100)
+        let music = makeApp("music", "Music", pid: 101)
+        let harness = makeLaneHarness(apps: [safari, music], eligiblePIDs: [101])
+
+        harness.coordinator.requestAutomaticStart(for: safari.id)
+        await waitFor { harness.resolver.pendingResolutionCount == 1 }
+        XCTAssertTrue(laneState(harness).isResolving(appID: safari.id))
+        XCTAssertTrue(harness.coordinator.isStartLaneBusy)
+
+        // Row toggle for another app while the helper probe runs (the view model reports resolving):
+        // queued and shown pending, instead of "Process Tap is already busy".
+        harness.context.isAppAudioTargetResolving = true
+        harness.coordinator.startExperimentalControl(for: music.id)
+
+        XCTAssertEqual(laneState(harness).queuedStarts, [ProductRealQueuedStart(appID: music.id, origin: .toggle)])
+        XCTAssertTrue(laneState(harness).isOperationPending(for: music.id))
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+        XCTAssertTrue(harness.liveSessionManager.startCalls.isEmpty)
+
+        // Finish the resolution. Advanced manual control became active meanwhile, so the drained toggle
+        // re-runs its preflight and is dropped with that block's message (no in-flight work is left).
+        harness.context.isAppAudioTargetResolving = false
+        harness.context.advancedManualLiveControlActive = true
+        harness.resolver.completeNext(.unavailable("No audio helper found"))
+        await waitFor { harness.sideEffects.statusMessages.contains("Stop the active live control first") }
+
+        XCTAssertEqual(harness.sideEffects.statusMessages, ["No audio helper found", "Stop the active live control first"])
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+        XCTAssertFalse(laneState(harness).isOperationPending(for: music.id))
+        XCTAssertFalse(harness.coordinator.isStartLaneBusy)
+        XCTAssertTrue(harness.liveSessionManager.startCalls.isEmpty)
+    }
+
+    func testAutomaticStartWhileProductStartInFlightIsQueuedNotRejected() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102)
+        let harness = makeLaneHarness(apps: [music, notes], eligiblePIDs: [101, 102])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+        // The view model reports its shared "running" flag while a product start is in flight.
+        harness.context.isProcessTapTesting = true
+
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+
+        XCTAssertEqual(laneState(harness).queuedStartAppIDs, [notes.id])
+        XCTAssertTrue(laneState(harness).isOperationPending(for: notes.id))
+        XCTAssertFalse(harness.sideEffects.statusMessages.contains("Stop active live control first"))
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id])
+
+        // In production the post-await block clears the running flag before it drains the queue.
+        harness.context.isProcessTapTesting = false
+        await completeStart(harness, appID: music.id)
+        await waitForPendingStart(harness, startCount: 2)
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id, notes.id])
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+        await completeStart(harness, appID: notes.id)
+        XCTAssertNotNil(laneState(harness).activeSessionsByAppID[music.id]?.liveSessionID)
+    }
+
+    // MARK: - Drain points
+
+    func testQueuedStartRunsAfterResolutionCompletesUnavailable() async {
+        let safari = makeApp("safari", "Safari", pid: 100)
+        let music = makeApp("music", "Music", pid: 101)
+        let harness = makeLaneHarness(apps: [safari, music], eligiblePIDs: [101])
+
+        harness.coordinator.requestAutomaticStart(for: safari.id)
+        await waitFor { harness.resolver.pendingResolutionCount == 1 }
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        XCTAssertEqual(laneState(harness).queuedStartAppIDs, [music.id])
+        XCTAssertTrue(harness.liveSessionManager.startCalls.isEmpty)
+
+        harness.resolver.completeNext(.unavailable("No audio helper found"))
+        await waitForPendingStart(harness, startCount: 1)
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id])
+        XCTAssertEqual(harness.sideEffects.statusMessages, ["No audio helper found"])
+        XCTAssertFalse(laneState(harness).isResolving)
+        await completeStart(harness, appID: music.id)
+    }
+
+    func testQueuedStartWaitsForResolvedHelperStartToFinish() async {
+        let safari = makeApp("safari", "Safari", pid: 100)
+        let music = makeApp("music", "Music", pid: 101)
+        let harness = makeLaneHarness(apps: [safari, music], eligiblePIDs: [101])
+
+        harness.coordinator.requestAutomaticStart(for: safari.id)
+        await waitFor { harness.resolver.pendingResolutionCount == 1 }
+        harness.coordinator.requestAutomaticStart(for: music.id)
+
+        harness.resolver.completeNext(.resolved(helperTarget(for: safari, pid: 300, source: .discoveredHelper)))
+        await waitForPendingStart(harness, startCount: 1)
+
+        // The resolved helper start took the lane straight from the resolution: music keeps waiting.
+        XCTAssertEqual(harness.liveSessionManager.startCalls.first?.target.processIdentifier, 300)
+        XCTAssertEqual(laneState(harness).activeSessionsByAppID[safari.id]?.source, .discoveredHelper)
+        XCTAssertEqual(laneState(harness).queuedStartAppIDs, [music.id])
+        XCTAssertTrue(harness.coordinator.isStartLaneBusy)
+
+        await completeStart(harness, appID: safari.id)
+        await waitForPendingStart(harness, startCount: 2)
+
+        XCTAssertEqual(harness.liveSessionManager.startCalls.last?.target.appID, music.id)
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+        await completeStart(harness, appID: music.id)
+    }
+
+    func testQueuedStartsDrainInFIFOOrderOneAtATime() async {
+        let apps = [
+            makeApp("music", "Music", pid: 101),
+            makeApp("notes", "Notes", pid: 102),
+            makeApp("mail", "Mail", pid: 103),
+            makeApp("maps", "Maps", pid: 104)
+        ]
+        let harness = makeLaneHarness(apps: apps, eligiblePIDs: [101, 102, 103, 104])
+
+        harness.coordinator.requestAutomaticStart(for: apps[0].id)
+        await waitForPendingStart(harness, startCount: 1)
+        for app in apps.dropFirst() {
+            harness.coordinator.requestAutomaticStart(for: app.id)
+        }
+        XCTAssertEqual(laneState(harness).queuedStartAppIDs, ["notes", "mail", "maps"])
+
+        for (index, app) in apps.enumerated() {
+            // Exactly one start is in flight at a time, and it is the oldest request.
+            XCTAssertEqual(harness.liveSessionManager.startedAppIDs, apps.prefix(index + 1).map(\.id))
+            XCTAssertEqual(harness.liveSessionManager.pendingStartCount, 1)
+            XCTAssertEqual(laneState(harness).queuedStartAppIDs, apps.dropFirst(index + 1).map(\.id))
+
+            await completeStart(harness, appID: app.id)
+            if index + 1 < apps.count {
+                await waitForPendingStart(harness, startCount: index + 2)
+            }
+        }
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, ["music", "notes", "mail", "maps"])
+        XCTAssertEqual(laneState(harness).activeSessions.filter { $0.liveSessionID != nil }.count, apps.count)
+        XCTAssertFalse(harness.coordinator.isStartLaneBusy)
+    }
+
+    func testDuplicateRequestsForAQueuedAppProduceOneStart() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102)
+        let harness = makeLaneHarness(apps: [music, notes], eligiblePIDs: [101, 102])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.coordinator.startExperimentalControl(for: notes.id)
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+
+        // One entry, keeping the first request's place and origin.
+        XCTAssertEqual(laneState(harness).queuedStarts, [ProductRealQueuedStart(appID: notes.id, origin: .automatic)])
+
+        await completeStart(harness, appID: music.id)
+        await waitForPendingStart(harness, startCount: 2)
+        await completeStart(harness, appID: notes.id)
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id, notes.id])
+        XCTAssertEqual(harness.liveSessionManager.pendingStartCount, 0)
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+    }
+
+    // MARK: - Fresh preflight at drain
+
+    func testDrainRechecksPreflightAndDropsBlockedEntryWithItsMessage() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102)
+        let mail = makeApp("mail", "Mail", pid: 103)
+        let harness = makeLaneHarness(apps: [music, notes, mail], eligiblePIDs: [101, 102, 103])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.coordinator.requestAutomaticStart(for: mail.id)
+
+        // Notes lost its process while queued: its drained preflight rejects it, and the loop moves on.
+        harness.context.apps = [music, makeApp("notes", "Notes", pid: nil), mail]
+        await completeStart(harness, appID: music.id)
+        await waitForPendingStart(harness, startCount: 2)
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id, mail.id])
+        XCTAssertEqual(harness.sideEffects.statusMessages, ["This app is not available for real app control"])
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+        XCTAssertFalse(laneState(harness).isOperationPending(for: notes.id))
+        await completeStart(harness, appID: mail.id)
+    }
+
+    func testDrainSkipsQueuedAppThatDisappeared() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102)
+        let mail = makeApp("mail", "Mail", pid: 103)
+        let harness = makeLaneHarness(apps: [music, notes, mail], eligiblePIDs: [101, 102, 103])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.coordinator.requestAutomaticStart(for: mail.id)
+
+        // Notes is gone from the app list by the time its entry drains: skipped silently.
+        harness.context.apps = [music, mail]
+        await completeStart(harness, appID: music.id)
+        await waitForPendingStart(harness, startCount: 2)
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id, mail.id])
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+        await completeStart(harness, appID: mail.id)
+    }
+
+    func testQueuedStartUsesGainCurrentAtDrain() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102, volume: 50)
+        let harness = makeLaneHarness(apps: [music, notes], eligiblePIDs: [101, 102])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+
+        // The slider keeps moving while the start is queued.
+        harness.context.apps = [music, makeApp("notes", "Notes", pid: 102, volume: 20)]
+        await completeStart(harness, appID: music.id)
+        await waitForPendingStart(harness, startCount: 2)
+
+        let drainedGain = harness.liveSessionManager.startCalls.last?.gain
+        XCTAssertEqual(drainedGain?.percentLabel, "20%")
+        XCTAssertEqual(Double(drainedGain?.scalar ?? -1), 0.2, accuracy: 0.0001)
+        await completeStart(harness, appID: notes.id)
+    }
+
+    // MARK: - Lane release
+
+    func testCancelledResolutionDrainsOnlyAfterResolutionTaskFinishes() async {
+        let safari = makeApp("safari", "Safari", pid: 100)
+        let music = makeApp("music", "Music", pid: 101)
+        let harness = makeLaneHarness(apps: [safari, music], eligiblePIDs: [101])
+
+        harness.coordinator.requestAutomaticStart(for: safari.id)
+        await waitFor { harness.resolver.pendingResolutionCount == 1 }
+        harness.coordinator.requestAutomaticStart(for: music.id)
+
+        harness.coordinator.cancelAppAudioTargetResolution(reason: .userStopped)
+
+        // Resolving state is cleared, but the cancelled probe is still running (its task has not
+        // returned), so the lane stays busy and nothing drains.
+        XCTAssertFalse(laneState(harness).isResolving)
+        XCTAssertEqual(harness.resolver.cancelReasons, [.userStopped])
+        XCTAssertTrue(harness.coordinator.isStartLaneBusy)
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+        XCTAssertTrue(harness.liveSessionManager.startCalls.isEmpty)
+        XCTAssertEqual(laneState(harness).queuedStartAppIDs, [music.id])
+
+        // The probe returns: only now does the lane free and the queued start run.
+        harness.resolver.completeNext(.cancelled)
+        await waitForPendingStart(harness, startCount: 1)
+
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id])
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+        await completeStart(harness, appID: music.id)
+    }
+
+    func testHardBlocksRejectImmediatelyEvenWhileLaneBusy() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102)
+        let radio = makeApp("radio", "Radio", pid: nil)
+        let harness = makeLaneHarness(apps: [music, notes, radio], eligiblePIDs: [101, 102])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+        XCTAssertTrue(harness.coordinator.isStartLaneBusy)
+
+        harness.context.isHelperBusy = true
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.context.isHelperBusy = false
+
+        harness.context.isTwoAppReadinessRunning = true
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.coordinator.startExperimentalControl(for: notes.id)
+        harness.context.isTwoAppReadinessRunning = false
+
+        harness.coordinator.requestAutomaticStart(for: radio.id)
+
+        harness.context.isExperimentalRealAppControlEnabled = false
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+        harness.context.isExperimentalRealAppControlEnabled = true
+
+        XCTAssertEqual(harness.sideEffects.statusMessages, [
+            "Stop helper probe first",
+            "Stop two-app test first",
+            "Stop two-app test first",
+            "This app is not available for real app control"
+        ])
+        XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)
+
+        await completeStart(harness, appID: music.id)
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [music.id])
+        XCTAssertEqual(harness.liveSessionManager.pendingStartCount, 0)
+    }
+
+    func testStaleStartDrainsOnlyAfterOrphanCleanupIsRegistered() async {
+        let music = makeApp("music", "Music", pid: 101)
+        let notes = makeApp("notes", "Notes", pid: 102)
+        let harness = makeLaneHarness(apps: [music, notes], eligiblePIDs: [101, 102])
+
+        harness.coordinator.requestAutomaticStart(for: music.id)
+        await waitForPendingStart(harness, startCount: 1)
+        harness.coordinator.requestAutomaticStart(for: notes.id)
+
+        // Supersede music's in-flight start, so its (successful) completion is stale.
+        _ = harness.stateStore.productRealControlState.beginStartRequest(for: music.id)
+        let orphanID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.completeNextStart(startedResult(orphanID))
+        await waitForPendingStart(harness, startCount: 2)
+
+        // The orphan teardown was registered with the settle gate before the lane was released, so the
+        // drained start's settle wait awaited it: the orphan stop precedes the next engine start.
+        XCTAssertEqual(harness.liveSessionManager.startCalls.last?.target.appID, notes.id)
+        XCTAssertEqual(harness.liveSessionManager.startCalls.last?.priorStopSessionCount, 1)
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.map(\.id), [orphanID])
+        XCTAssertEqual(harness.settleGate.registerStopCount, 1)
+        XCTAssertNil(laneState(harness).activeSessionsByAppID[music.id])
+        await completeStart(harness, appID: notes.id)
+    }
+
+    func testCachedHelperRetryTakesLaneBeforeQueueDrains() async {
+        let safari = makeApp("safari", "Safari", pid: 100)
+        let music = makeApp("music", "Music", pid: 101)
+        let harness = makeLaneHarness(apps: [safari, music], eligiblePIDs: [101])
+
+        harness.coordinator.startExperimentalControl(
+            for: safari,
+            target: helperTarget(for: safari, pid: 300, source: .cachedHelper).target,
+            resolutionSource: .cachedHelper
+        )
+        await waitForPendingStart(harness, startCount: 1)
+        harness.coordinator.requestAutomaticStart(for: music.id)
+
+        // The cached helper fails to start: its post-await retries a fresh resolution, which takes the
+        // lane before the queue would drain, so music keeps waiting.
+        harness.liveSessionManager.completeNextStart(
+            ProcessTapLiveSessionStartResult(sessionID: nil, result: makeResult(.liveControlSetupFailed))
+        )
+        await waitFor { harness.resolver.pendingResolutionCount == 1 }
+
+        XCTAssertGreaterThanOrEqual(harness.resolver.invalidatedTargetCount, 1)
+        XCTAssertTrue(laneState(harness).isResolving(appID: safari.id))
+        XCTAssertEqual(laneState(harness).queuedStartAppIDs, [music.id])
+        XCTAssertEqual(harness.liveSessionManager.startCalls.count, 1)
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+
+        harness.resolver.completeNext(.unavailable("No audio helper found"))
+        await waitForPendingStart(harness, startCount: 2)
+
+        XCTAssertEqual(harness.liveSessionManager.startCalls.last?.target.appID, music.id)
+        await completeStart(harness, appID: music.id)
+    }
+
+    // MARK: - Harness
+
+    private struct LaneHarness {
+        let coordinator: ProductRealStartCoordinator
+        let stateStore: ProductRealControlStateStore
+        let liveSessionManager: FakeProductRealLiveSessionManager
+        let settleGate: RecordingStartSettleGate
+        let resolver: RecordingAppAudioTargetResolver
+        // Held so the coordinator's `weak` seam references stay alive for the test's lifetime.
+        let sideEffects: StubProductRealControlSideEffects
+        let context: StubProductRealControlContext
+    }
+
+    /// Real App Control on; engine starts and helper resolutions suspend until the test completes
+    /// them. A visible PID in `eligiblePIDs` starts directly; any other app needs a helper resolution.
+    private func makeLaneHarness(apps: [MixerAppItem], eligiblePIDs: Set<Int32>) -> LaneHarness {
+        let stateStore = ProductRealControlStateStore()
+        let liveSessionManager = FakeProductRealLiveSessionManager()
+        liveSessionManager.suspendsStarts = true
+        let settleGate = RecordingStartSettleGate()
+        let resolver = RecordingAppAudioTargetResolver()
+        resolver.suspendsResolution = true
+        let sideEffects = StubProductRealControlSideEffects()
+        let context = StubProductRealControlContext()
+        context.apps = apps
+        context.isExperimentalRealAppControlEnabled = true
+        let coordinator = ProductRealStartCoordinator(
+            stateStore: stateStore,
+            liveSessionManager: liveSessionManager,
+            appAudioTargetResolver: resolver,
+            startSettleGate: settleGate,
+            processTapEligibility: { processIdentifier in
+                guard let processIdentifier, eligiblePIDs.contains(processIdentifier) else {
+                    return ProcessTapProcessEligibility(isEligible: false, reason: nil)
+                }
+                return .eligible
+            },
+            sideEffects: sideEffects,
+            context: context
+        )
+        return LaneHarness(
+            coordinator: coordinator,
+            stateStore: stateStore,
+            liveSessionManager: liveSessionManager,
+            settleGate: settleGate,
+            resolver: resolver,
+            sideEffects: sideEffects,
+            context: context
+        )
+    }
+
+    private func laneState(_ harness: LaneHarness) -> ProductRealControlState {
+        harness.stateStore.productRealControlState
+    }
+
+    private func makeApp(_ id: String, _ name: String, pid: Int32?, volume: Double = 50) -> MixerAppItem {
+        MixerAppItem(id: id, name: name, icon: .systemSymbol("app"), processIdentifier: pid, volume: volume)
+    }
+
+    private func helperTarget(
+        for app: MixerAppItem,
+        pid: Int32,
+        source: ResolvedAppAudioTarget.Source
+    ) -> ResolvedAppAudioTarget {
+        ResolvedAppAudioTarget(
+            visibleAppID: app.id,
+            visibleAppName: app.name,
+            target: ProcessTapTarget(appID: "helper:\(app.id):\(pid)", appName: app.name, processIdentifier: pid),
+            kind: .helper,
+            source: source
+        )
+    }
+
+    private func startedResult(_ sessionID: ProcessTapLiveSessionID) -> ProcessTapLiveSessionStartResult {
+        ProcessTapLiveSessionStartResult(sessionID: sessionID, result: makeResult(.liveControlStarted))
+    }
+
+    private func makeResult(_ outcome: ProcessTapTestResult.Outcome) -> ProcessTapTestResult {
+        ProcessTapTestResult(outcome: outcome, message: "test", severity: .info)
+    }
+
+    /// Waits until exactly one engine start is suspended in flight and `startCount` starts have reached
+    /// the engine in total (the fake registers the continuation together with the record, so it can be
+    /// completed as soon as this returns).
+    private func waitForPendingStart(
+        _ harness: LaneHarness,
+        startCount: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        await waitFor(file: file, line: line) {
+            harness.liveSessionManager.pendingStartCount == 1
+                && harness.liveSessionManager.startCalls.count == startCount
+        }
+    }
+
+    /// Completes the oldest in-flight engine start successfully and waits until `appID`'s session is
+    /// confirmed with that engine id (so its post-await block — lane release and drain — has run).
+    @discardableResult
+    private func completeStart(
+        _ harness: LaneHarness,
+        appID: MixerAppItem.ID,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> ProcessTapLiveSessionID {
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.completeNextStart(startedResult(sessionID))
+        await waitFor(file: file, line: line) {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[appID]?.liveSessionID == sessionID
+        }
+        return sessionID
+    }
+
+    /// Deadline-bounded observable wait: returns as soon as `condition` holds, cooperatively yielding
+    /// otherwise; the deadline is a failure bound, not a sleep.
+    private func waitFor(
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: @MainActor () -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for condition", file: file, line: line)
+                return
+            }
+
+            await Task.yield()
+        }
+    }
+}

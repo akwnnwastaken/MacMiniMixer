@@ -405,6 +405,73 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertNil(harness.coordinator.productSessionStartBlockReason(for: apps[0].id))
     }
 
+    // MARK: - Queued start lane (through the facade forwards)
+
+    // `requestAutomaticStart` queues a second app behind an in-flight start (instead of rejecting it),
+    // the queue drains when that start completes, and `clearQueuedStarts` drops a still-queued entry so
+    // it never starts.
+    func testFacadeRequestAutomaticStartQueuesBehindInFlightStartAndClearQueuedStartsDropsIt() async {
+        let harness = makeHarness(visibleProcessEligible: true)
+        let apps = (1...3).map { makeApp(id: "app\($0)", name: "App \($0)", pid: Int32(100 + $0)) }
+        harness.context.apps = apps
+        harness.context.isExperimentalRealAppControlEnabled = true
+        harness.liveSessionManager.suspendsStarts = true
+
+        harness.coordinator.requestAutomaticStart(for: apps[0].id)
+        await waitUntilDeadline { harness.liveSessionManager.pendingStartCount == 1 }
+        harness.coordinator.requestAutomaticStart(for: apps[1].id)
+        harness.coordinator.requestAutomaticStart(for: apps[2].id)
+
+        // Both later requests are queued (pending rows), not rejected.
+        XCTAssertEqual(harness.coordinator.productRealControlState.queuedStartAppIDs, [apps[1].id, apps[2].id])
+        XCTAssertTrue(harness.coordinator.productRealControlState.isOperationPending(for: apps[1].id))
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [apps[0].id])
+
+        // The third app's queued start is dropped before it can drain.
+        harness.coordinator.productRealControlState.removeQueuedStart(for: apps[2].id)
+        // Completing the first start drains the queue: the second app starts next.
+        harness.liveSessionManager.completeNextStart(startedResult(ProcessTapLiveSessionID()))
+        await waitUntilDeadline { harness.liveSessionManager.pendingStartCount == 1 && harness.liveSessionManager.startedAppIDs.count == 2 }
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [apps[0].id, apps[1].id])
+
+        // Queue the third app again behind the second app's in-flight start, then clear the queue.
+        harness.coordinator.requestAutomaticStart(for: apps[2].id)
+        XCTAssertEqual(harness.coordinator.productRealControlState.queuedStartAppIDs, [apps[2].id])
+        harness.coordinator.clearQueuedStarts()
+        XCTAssertTrue(harness.coordinator.productRealControlState.queuedStarts.isEmpty)
+        XCTAssertFalse(harness.coordinator.productRealControlState.isOperationPending(for: apps[2].id))
+
+        let secondID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.completeNextStart(startedResult(secondID))
+        await waitUntilDeadline { harness.coordinator.productRealControlState.activeSessionsByAppID[apps[1].id]?.liveSessionID == secondID }
+
+        // The cleared entry never started.
+        XCTAssertEqual(harness.liveSessionManager.startedAppIDs, [apps[0].id, apps[1].id])
+        XCTAssertEqual(harness.liveSessionManager.pendingStartCount, 0)
+        XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[apps[2].id])
+    }
+
+    /// Deadline-bounded observable wait for the queued-lane tests, whose starts complete across the
+    /// fake engine's off-main suspension: returns as soon as `condition` holds, cooperatively yielding
+    /// otherwise; the deadline is a failure bound, not a sleep.
+    private func waitUntilDeadline(
+        timeout: TimeInterval = 5,
+        _ condition: @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for condition", file: file, line: line)
+                return
+            }
+
+            await Task.yield()
+        }
+    }
+
     // MARK: - Hard-teardown state reset
 
     func testTearDownProductStateForHardStopClearsAllProductState() {
@@ -614,6 +681,9 @@ final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & Proce
         onDiagnostics: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapLiveSessionStartResult {
+        if let suspendedResult = await recordStartAndSuspendIfConfigured(target: target, gain: gain, onStopped: onStopped) {
+            return suspendedResult
+        }
         let (result, diagnostics, stopped) = lock.withLock {
             capturedOnStopped = onStopped
             return (configuredStartResult, diagnosticsToEmit, stoppedToEmit)
@@ -664,6 +734,71 @@ final class FakeProductRealLiveSessionManager: ProcessTapLiveControlling & Proce
 
     private var notActiveStartResult: ProcessTapLiveSessionStartResult {
         ProcessTapLiveSessionStartResult(sessionID: nil, result: notActiveResult)
+    }
+
+    // MARK: Suspended-start mode (queued start-lane tests)
+    //
+    // Off by default, so existing tests keep the immediate-return behavior. Every `startSession` call
+    // is recorded (target, gain, and how many `stopSession` calls preceded it). With `suspendsStarts`
+    // on, `startSession` parks until the test resumes it with `completeNextStart(_:)` (FIFO). The
+    // continuation is registered in the same lock as the record, so a test that waits on
+    // `startCalls`/`pendingStartCount` can always complete the start it observed.
+
+    private var suspendsStartsStorage = false
+    private var pendingStartContinuations: [CheckedContinuation<ProcessTapLiveSessionStartResult, Never>] = []
+    private var recordedStartCalls: [(target: ProcessTapTarget, gain: ProcessTapReplayGainOption, priorStopSessionCount: Int)] = []
+
+    var suspendsStarts: Bool {
+        get { lock.withLock { suspendsStartsStorage } }
+        set { lock.withLock { suspendsStartsStorage = newValue } }
+    }
+
+    var pendingStartCount: Int {
+        lock.withLock { pendingStartContinuations.count }
+    }
+
+    var startCalls: [(target: ProcessTapTarget, gain: ProcessTapReplayGainOption, priorStopSessionCount: Int)] {
+        lock.withLock { recordedStartCalls }
+    }
+
+    var startedAppIDs: [MixerAppItem.ID] {
+        startCalls.map { $0.target.appID }
+    }
+
+    /// Resumes the oldest suspended start with `result`. No-op when no start is suspended.
+    func completeNextStart(_ result: ProcessTapLiveSessionStartResult) {
+        let continuation = lock.withLock { () -> CheckedContinuation<ProcessTapLiveSessionStartResult, Never>? in
+            guard !pendingStartContinuations.isEmpty else {
+                return nil
+            }
+            return pendingStartContinuations.removeFirst()
+        }
+        continuation?.resume(returning: result)
+    }
+
+    /// Records the start; in suspended mode parks it until `completeNextStart(_:)` and returns that
+    /// result (capturing `onStopped` like an immediate start). Returns nil in the default mode.
+    private func recordStartAndSuspendIfConfigured(
+        target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        onStopped: @escaping @Sendable (ProcessTapLiveSessionID, ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) async -> ProcessTapLiveSessionStartResult? {
+        let suspends = lock.withLock { suspendsStartsStorage }
+        guard suspends else {
+            lock.withLock {
+                recordedStartCalls.append((target: target, gain: gain, priorStopSessionCount: recordedStopSessionCalls.count))
+            }
+            return nil
+        }
+
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<ProcessTapLiveSessionStartResult, Never>) in
+            lock.withLock {
+                pendingStartContinuations.append(continuation)
+                recordedStartCalls.append((target: target, gain: gain, priorStopSessionCount: recordedStopSessionCalls.count))
+            }
+        }
+        lock.withLock { capturedOnStopped = onStopped }
+        return result
     }
 }
 
@@ -735,7 +870,18 @@ final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked
         allowsCachedLookup: Bool,
         onProgress: @escaping @Sendable (AppAudioResolutionProgress) -> Void
     ) async -> AppAudioTargetResolutionResult {
-        .cancelled
+        let suspends = lock.withLock { suspendsResolutionStorage }
+        guard suspends else {
+            lock.withLock { recordedResolveRequests.append(request) }
+            return .cancelled
+        }
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<AppAudioTargetResolutionResult, Never>) in
+            lock.withLock {
+                pendingResolutionContinuations.append(continuation)
+                recordedResolveRequests.append(request)
+            }
+        }
     }
 
     func cancelCurrentResolution(reason: ProcessTapCandidateProbeStopReason) {
@@ -746,6 +892,42 @@ final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked
         lock.withLock { recordedInvalidatedTargetCount += 1 }
     }
     func invalidateAllCachedTargets() {}
+
+    // MARK: Suspended-resolution mode (queued start-lane tests)
+    //
+    // Off by default: `resolveTarget` records the request and returns `.cancelled` immediately, as
+    // before. With `suspendsResolution` on, it parks until the test resumes it with `completeNext(_:)`
+    // (FIFO); the continuation is registered in the same lock as the record, so a test that waits on
+    // `resolveRequests`/`pendingResolutionCount` can always complete the resolution it observed. Like
+    // the real resolver's in-flight probe, a cancelled resolution keeps running until completed.
+
+    private var suspendsResolutionStorage = false
+    private var pendingResolutionContinuations: [CheckedContinuation<AppAudioTargetResolutionResult, Never>] = []
+    private var recordedResolveRequests: [AppAudioTargetRequest] = []
+
+    var suspendsResolution: Bool {
+        get { lock.withLock { suspendsResolutionStorage } }
+        set { lock.withLock { suspendsResolutionStorage = newValue } }
+    }
+
+    var resolveRequests: [AppAudioTargetRequest] {
+        lock.withLock { recordedResolveRequests }
+    }
+
+    var pendingResolutionCount: Int {
+        lock.withLock { pendingResolutionContinuations.count }
+    }
+
+    /// Resumes the oldest suspended resolution with `result`. No-op when none is suspended.
+    func completeNext(_ result: AppAudioTargetResolutionResult) {
+        let continuation = lock.withLock { () -> CheckedContinuation<AppAudioTargetResolutionResult, Never>? in
+            guard !pendingResolutionContinuations.isEmpty else {
+                return nil
+            }
+            return pendingResolutionContinuations.removeFirst()
+        }
+        continuation?.resume(returning: result)
+    }
 }
 
 /// Records `registerStop` calls so stop-path tests can assert teardown was tracked with the settle

@@ -90,41 +90,317 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     // Multi-app invariant: confirmed Product sessions have no app-count limit by default (see
     // testThirdProductSessionAllowed / testFourthProductSessionAllowedWithDefaultUnlimitedLimit /
     // testManyProductSessionsRunConcurrentlyThroughRealSessionManagerWithDefaultLimit); an injected
-    // cap is covered in ProductRealControlCoordinatorTests. What this test pins
-    // is the transient *serialization* guard: while one Product start is still in flight (pending,
-    // unconfirmed), a second Product start and an Advanced Manual start are both rejected, and only
-    // the first start reaches the controller. Replaces the former stale single-session test
-    // (testOneActiveLiveSessionBlocksSecondProductAndManualStart), which relied on this in-flight
-    // window non-deterministically and flaked once the first start confirmed.
-    func testPendingProductStartBlocksAnotherProductAndManualStart() async {
+    // cap is covered in ProductRealControlCoordinatorTests. What this test pins is the transient
+    // *serialization* (queued start lane): while one Product start is still in flight (pending,
+    // unconfirmed), a second Product start is QUEUED — not rejected — and only reaches the controller
+    // once the first start finishes, while an Advanced Manual start is still rejected outright.
+    // (Formerly testPendingProductStartBlocksAnotherProductAndManualStart, when the second Product
+    // start was rejected with "Stop active live control first".)
+    func testPendingProductStartQueuesAnotherProductStartButBlocksManualStart() async {
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
-        // Spotify Product start is held in flight (its completion is suspended), so the
-        // serialization guard (isProcessTapTesting) is deterministically active. Wait on real
+        // Spotify Product start is held in flight (its completion is suspended), so the start lane
+        // and the shared "running" flag (isProcessTapTesting) are deterministically busy. Wait on real
         // state signals — the start reached the controller (pendingStartCount) AND the view model
         // marked itself busy (isProcessTapTesting) — not a fixed sleep/yield count.
         harness.viewModel.setAppVolume(40, for: "spotify")
         await waitFor { controller.pendingStartCount == 1 && harness.viewModel.isProcessTapTesting }
 
-        // While the first start is pending, attempt a second Product start and a manual start.
-        // Both are rejected synchronously (no async work is spawned), so no awaiting is needed.
+        // While the first start is pending, attempt a second Product start and a manual start. Both
+        // are handled synchronously: Music is queued (pending row, no warning), manual is rejected.
         harness.viewModel.setAppVolume(60, for: "music")
         harness.viewModel.startProcessTapLiveControl()
 
-        // Only the first Product start reached the controller; the second never started a session,
-        // and the manual path never reached the engine.
         XCTAssertEqual(controller.startedTargets.map(\.appID), ["spotify"])
         XCTAssertEqual(controller.pendingStartCount, 1)
         XCTAssertEqual(controller.legacyManualStartCount, 0)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "music"))
         XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
-        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Stop active live control first")
+        XCTAssertNil(harness.viewModel.statusMessage)
 
-        // Complete the first start so it confirms and the test leaves no in-flight work behind.
+        // Completing the first start drains the queue: Music's start reaches the controller next.
         controller.completeNextStart(success: true)
+        await waitFor {
+            harness.viewModel.isExperimentalControlActive(for: "spotify")
+                && controller.pendingStartCount == 1
+                && controller.startedTargets.count == 2
+        }
+        XCTAssertEqual(controller.startedTargets.map(\.appID), ["spotify", "music"])
+
+        controller.completeNextStart(success: true)
+        await waitFor {
+            harness.viewModel.isExperimentalControlActive(for: "music")
+                && !harness.viewModel.isExperimentalControlPending(for: "music")
+                && !harness.viewModel.isProcessTapTesting
+        }
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertEqual(controller.legacyManualStartCount, 0)
+        XCTAssertNil(harness.viewModel.statusMessage)
+    }
+
+    // MARK: - Queued Product start lane
+
+    // A slider start for a direct-PID app while another app's helper resolution is in flight is queued
+    // (no "Finish resolving app audio first"), then starts — with the slider's latest gain — once the
+    // resolution finishes.
+    func testSliderStartForDirectAppWhileHelperResolvingIsQueuedThenStarts() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(45, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+        XCTAssertTrue(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        harness.viewModel.setAppVolume(60, for: "spotify")
+        harness.viewModel.setAppVolume(65, for: "spotify")
+
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+        XCTAssertNil(harness.viewModel.statusMessage)
+        XCTAssertTrue(harness.liveController.startedTargets.isEmpty)
+
+        resolver.completeNext(.unavailable("No active audio helper found"))
         await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
-        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"))
+
+        XCTAssertEqual(harness.liveController.startedTargets.map(\.appID), ["spotify"])
+        XCTAssertEqual(harness.liveController.startGains.map(\.percentLabel), ["65%"])
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+    }
+
+    // Repeated slider moves (and a toggle) on a row whose start is queued are ignored: one start
+    // drains for it, using the gain current at drain time.
+    func testRepeatedSliderMovesOnQueuedRowAreIgnored() async {
+        let liveController = FakeLiveControlController(waitForStartCompletion: true)
+        let harness = makeHarness(liveController: liveController)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { liveController.startedTargets.count == 1 }
+
+        harness.viewModel.setAppVolume(40, for: "music")
+        harness.viewModel.setAppVolume(55, for: "music")
+        harness.viewModel.toggleExperimentalControl(for: "music")
+        harness.viewModel.setAppVolume(70, for: "music")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "music"))
+        XCTAssertEqual(liveController.startedTargets.map(\.appID), ["spotify"])
+
+        liveController.completeNextStart()
+        await waitFor { liveController.startedTargets.count == 2 }
+        liveController.completeNextStart()
+        await waitFor {
+            harness.viewModel.isExperimentalControlActive(for: "music")
+                && !harness.viewModel.isExperimentalControlPending(for: "music")
+                && !harness.viewModel.isProcessTapTesting
+        }
+
+        XCTAssertEqual(liveController.startedTargets.map(\.appID), ["spotify", "music"])
+        XCTAssertEqual(liveController.startGains.map(\.percentLabel), ["50%", "70%"])
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+    }
+
+    /// Holds Spotify's Product start in flight and queues Music behind it on a controlled harness.
+    private func makeHarnessWithQueuedMusicStart(
+        controller: FakeControlledLiveController,
+        outputDeviceLister: FakeLiveControlOutputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+    ) async -> ControlledHarness {
+        let harness = makeControlledHarness(liveController: controller, outputDeviceLister: outputDeviceLister)
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { controller.pendingStartCount == 1 }
+        harness.viewModel.setAppVolume(50, for: "music")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "music"))
+        return harness
+    }
+
+    /// After a global teardown cleared the queue: completes Spotify's (now stale) in-flight start and
+    /// waits until its orphan is torn down — that runs after the start released the lane and drained —
+    /// then asserts the cleared Music entry never started.
+    private func assertQueuedMusicNeverStartsAfterStaleSpotifyCompletes(
+        _ harness: ControlledHarness,
+        controller: FakeControlledLiveController,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "music"), file: file, line: line)
+        let spotifyID = controller.startedSessionIDs[0]
+
+        controller.completeNextStart(success: true)
+        await waitFor({ controller.stoppedSessionIDs.contains(spotifyID) }, file: file, line: line)
+
+        XCTAssertEqual(controller.startedTargets.map(\.appID), ["spotify"], file: file, line: line)
+        XCTAssertEqual(controller.pendingStartCount, 0, file: file, line: line)
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "music"), file: file, line: line)
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "music"), file: file, line: line)
+    }
+
+    func testQueuedStartIsClearedByStopAll() async {
+        let controller = FakeControlledLiveController()
+        let harness = await makeHarnessWithQueuedMusicStart(controller: controller)
+
+        harness.viewModel.stopProcessTapLiveControl()
+
+        await assertQueuedMusicNeverStartsAfterStaleSpotifyCompletes(harness, controller: controller)
+    }
+
+    func testQueuedStartIsClearedByGlobalRealControlOff() async {
+        let controller = FakeControlledLiveController()
+        let harness = await makeHarnessWithQueuedMusicStart(controller: controller)
+
+        harness.viewModel.setExperimentalRealAppControlEnabled(false)
+
+        await assertQueuedMusicNeverStartsAfterStaleSpotifyCompletes(harness, controller: controller)
+    }
+
+    func testQueuedStartIsClearedByOutputDeviceChange() async {
+        let outputDeviceLister = FakeLiveControlOutputDeviceLister(devices: [
+            makeLiveControlOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let controller = FakeControlledLiveController()
+        let harness = await makeHarnessWithQueuedMusicStart(controller: controller, outputDeviceLister: outputDeviceLister)
+
+        outputDeviceLister.devices = [makeLiveControlOutputDevice(id: "airpods", isDefault: true)]
+        harness.viewModel.refreshOutputDevices()
+
+        await assertQueuedMusicNeverStartsAfterStaleSpotifyCompletes(harness, controller: controller)
+    }
+
+    func testSystemSleepClearsQueuedStartAndWakeRunsNothing() async {
+        let controller = FakeControlledLiveController()
+        let harness = await makeHarnessWithQueuedMusicStart(controller: controller)
+
+        harness.viewModel.handleSystemWillSleep()
+        harness.viewModel.handleSystemDidWake()
+
+        await assertQueuedMusicNeverStartsAfterStaleSpotifyCompletes(harness, controller: controller)
+        XCTAssertNil(harness.viewModel.realControlBannerPresentation)
+    }
+
+    func testTerminationClearsQueuedStart() async {
+        let controller = FakeControlledLiveController()
+        let harness = await makeHarnessWithQueuedMusicStart(controller: controller)
+
+        harness.viewModel.stopProcessTapLiveControlForTermination()
+
+        await assertQueuedMusicNeverStartsAfterStaleSpotifyCompletes(harness, controller: controller)
+    }
+
+    // A queued start whose app exits is dropped, while the other apps' sessions/starts carry on.
+    func testQueuedStartDroppedWhenItsAppExitsWhileOthersRun() async {
+        let controller = FakeControlledLiveController()
+        let harness = makeControlledHarness(liveController: controller)
+        // Pin the Advanced diagnostic selection to a surviving app so removing YouTube only exercises
+        // the per-app exit path (not the selection-driven global stop).
+        harness.viewModel.selectProcessTapApp("spotify")
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        _ = await startConfirmedProductSession(for: "spotify", harness: harness, controller: controller)
+        harness.viewModel.setAppVolume(50, for: "music")
+        await waitFor { controller.pendingStartCount == 1 }
+        harness.viewModel.setAppVolume(50, for: "youtube")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "youtube"))
+
+        harness.appLister.apps = makeLiveControlApps().filter { $0.id != "youtube" }
+        harness.viewModel.refreshApplications()
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "youtube"))
+
+        controller.completeNextStart(success: true)
+        await waitFor {
+            harness.viewModel.isExperimentalControlActive(for: "music")
+                && !harness.viewModel.isProcessTapTesting
+        }
+
+        XCTAssertEqual(controller.startedTargets.map(\.appID), ["spotify", "music"])
+        XCTAssertEqual(controller.pendingStartCount, 0)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(controller.stoppedSessionIDs.isEmpty)
+    }
+
+    // Closing the panel drops queued starts (they must not drain into background helper probing) and
+    // cancels the in-flight resolution, whose late result is then ignored.
+    func testPanelCloseClearsQueuedStartsAndCancelsResolution() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(45, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+        harness.viewModel.setAppVolume(60, for: "spotify")
+        XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+
+        harness.viewModel.stopTwoAppReadinessForPanelClose()
+
+        XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+        XCTAssertEqual(resolver.cancelledReasons, [.userStopped])
+
+        resolver.completeNext(
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        )
+
+        // A fresh start only runs once the cancelled resolution task has finished (it holds the lane),
+        // so once Spotify is active the late YouTube result has been handled — and ignored.
+        harness.viewModel.setAppVolume(65, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        XCTAssertEqual(harness.liveController.startedTargets.map(\.appID), ["spotify"])
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+    }
+
+    // Stop All cancels an in-flight helper resolution, so its late result cannot start a session after
+    // the user stopped everything.
+    func testStopAllCancelsInFlightHelperResolutionAndIgnoresLateResult() async {
+        let resolver = FakeAppAudioTargetResolver(suspendsWhenNoResultIsAvailable: true)
+        let harness = makeHarness(
+            appAudioTargetResolver: resolver,
+            eligibilityByPID: [200: .unavailable("Core Audio process unavailable"), 201: .eligible]
+        )
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+
+        harness.viewModel.setAppVolume(45, for: "youtube")
+        await waitFor { resolver.resolveRequests.count == 1 }
+        XCTAssertTrue(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        harness.viewModel.stopProcessTapLiveControl()
+
+        XCTAssertEqual(resolver.cancelledReasons, [.userStopped])
+        XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
+
+        resolver.completeNext(
+            .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: "youtube",
+                    visibleAppName: "YouTube",
+                    target: ProcessTapTarget(appID: "helper:youtube:201", appName: "YouTube", processIdentifier: 201),
+                    kind: .helper,
+                    source: .discoveredHelper
+                )
+            )
+        )
+
+        // As above: Spotify's start can only run after the cancelled resolution task finished, so the
+        // late YouTube result has been handled (and ignored) by the time Spotify is active.
+        harness.viewModel.setAppVolume(60, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+        XCTAssertEqual(harness.liveController.startedTargets.map(\.appID), ["spotify"])
+        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "youtube"))
     }
 
     func testStopActiveSessionForwardsUserStoppedReason() async {
@@ -1578,7 +1854,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     }
 
     // Note: a same-app A1/A2 both-pending race is not reachable through the public API —
-    // the isProcessTapTesting guard serialises Product starts, so a second start cannot begin
+    // the queued start lane serialises Product starts, so a second start cannot begin
     // while the first is still in flight. The per-app token's same-app supersession is covered
     // by ProductRealControlStateTests.testNewStartRequestForSameAppSupersedesPrevious.
 
@@ -1913,7 +2189,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
 
     func testGlobalStopWithConfirmedAndPendingSessionStopsConfirmedRejectsPendingLateSuccess() async {
         // Two simultaneous optimistic/pending Product starts are NOT reachable through the public
-        // API: the isProcessTapTesting guard serialises Product starts, so a second start cannot
+        // API: the queued start lane serialises Product starts, so a second start cannot
         // begin while the first is still pending (same-app or cross-app). The strongest reachable
         // mix is therefore one confirmed session plus one pending optimistic start.
         let controller = FakeControlledLiveController()

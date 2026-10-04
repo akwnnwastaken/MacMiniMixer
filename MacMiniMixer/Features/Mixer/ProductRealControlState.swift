@@ -86,8 +86,25 @@ enum ProductRealControlStartSource: Equatable, Sendable {
 /// start completions/callbacks per app, so a late result from a superseded or cancelled
 /// start cannot reactivate or disturb current state. Uniqueness is global (monotonic raw
 /// value); validity is tracked per visible app id (see `pendingStartRequestByAppID`).
-struct ProductRealControlStartRequestID: Equatable, Sendable {
+/// `Hashable` so the start coordinator can track the physically in-flight starts in a set.
+struct ProductRealControlStartRequestID: Hashable, Sendable {
     let rawValue: UInt64
+}
+
+/// Which entry point queued a Product Real start behind the single start lane, so the drain re-runs
+/// that same entry point (with its full preflight) when the lane frees up.
+enum ProductRealQueuedStartOrigin: Equatable, Sendable {
+    /// Slider / mute driven automatic start (`ProductRealStartCoordinator.requestAutomaticStart`).
+    case automatic
+    /// Row toggle start (`ProductRealStartCoordinator.startExperimentalControl(for:)`).
+    case toggle
+}
+
+/// One Product Real start waiting for the start lane. Only the app id and origin are stored: the
+/// app item, gain, and every preflight check are re-read from current state when it drains.
+struct ProductRealQueuedStart: Equatable, Sendable {
+    let appID: MixerAppItem.ID
+    let origin: ProductRealQueuedStartOrigin
 }
 
 struct ProductRealControlActiveSession: Equatable, Sendable {
@@ -118,6 +135,12 @@ struct ProductRealControlState: Equatable, Sendable {
     /// own terminal handler (start completion or stop callback), and all are cleared on global
     /// teardown. This is orchestration state only; it does not affect session identity or the cap.
     private(set) var pendingOperationAppIDs: Set<MixerAppItem.ID> = []
+    /// Product Real starts waiting, in FIFO order, for the single start lane (at most one helper
+    /// resolution or product start is physically in flight at a time). At most one entry per app.
+    /// A queued app reports `isOperationPending`, so its row shows the pending state and further
+    /// toggle/slider start attempts for it are deduped. Cleared by every cancellation path that
+    /// clears start requests or pending operations.
+    private(set) var queuedStarts: [ProductRealQueuedStart] = []
 
     var activeSessions: [ProductRealControlActiveSession] {
         Array(activeSessionsByAppID.values)
@@ -215,19 +238,24 @@ struct ProductRealControlState: Equatable, Sendable {
         return session.startRequestID == requestID && session.liveSessionID != nil
     }
 
-    /// Clears the pending start request for a single app only.
+    /// Clears the pending start request for a single app only. Also drops that app's queued start
+    /// (if any), so a per-app stop / exit cancels a start still waiting for the start lane.
     mutating func clearStartRequest(for appID: MixerAppItem.ID) {
         pendingStartRequestByAppID.removeValue(forKey: appID)
+        removeQueuedStart(for: appID)
     }
 
-    /// Clears every pending start request (e.g. global toggle off, output change, termination).
+    /// Clears every pending start request (e.g. global toggle off, output change, termination), and
+    /// every queued start with them.
     mutating func clearAllStartRequests() {
         pendingStartRequestByAppID = [:]
+        clearAllQueuedStarts()
     }
 
-    /// Whether a Product Real start or stop transition is in flight for `appID` (rapid-toggle guard).
+    /// Whether a Product Real start or stop transition is in flight for `appID` (rapid-toggle guard),
+    /// or a start for it is queued behind the start lane.
     func isOperationPending(for appID: MixerAppItem.ID) -> Bool {
-        pendingOperationAppIDs.contains(appID)
+        pendingOperationAppIDs.contains(appID) || isStartQueued(for: appID)
     }
 
     /// Marks a Product Real start/stop transition as in flight for `appID`.
@@ -241,9 +269,59 @@ struct ProductRealControlState: Equatable, Sendable {
     }
 
     /// Clears every in-flight transition flag (global teardown: toggle off, output change,
-    /// termination/sleep, Stop All), so no row is left visually stuck in a pending state.
+    /// termination/sleep, Stop All), so no row is left visually stuck in a pending state. Queued
+    /// starts are cleared too, so none drains after a global teardown.
     mutating func clearAllOperations() {
         pendingOperationAppIDs.removeAll()
+        clearAllQueuedStarts()
+    }
+
+    // MARK: Queued start lane
+
+    /// App ids with a start queued behind the start lane, in FIFO order.
+    var queuedStartAppIDs: [MixerAppItem.ID] {
+        queuedStarts.map(\.appID)
+    }
+
+    /// Whether a start for `appID` is queued behind the start lane.
+    func isStartQueued(for appID: MixerAppItem.ID) -> Bool {
+        queuedStarts.contains { $0.appID == appID }
+    }
+
+    /// Appends a queued start for `appID` (FIFO). No-op, returning false, when that app already has a
+    /// queued start (the earlier entry keeps its place and origin).
+    @discardableResult
+    mutating func enqueueStart(for appID: MixerAppItem.ID, origin: ProductRealQueuedStartOrigin) -> Bool {
+        guard !isStartQueued(for: appID) else {
+            return false
+        }
+
+        queuedStarts.append(ProductRealQueuedStart(appID: appID, origin: origin))
+        return true
+    }
+
+    /// Removes and returns the oldest queued start, or nil when the queue is empty.
+    mutating func dequeueNextStart() -> ProductRealQueuedStart? {
+        guard !queuedStarts.isEmpty else {
+            return nil
+        }
+
+        return queuedStarts.removeFirst()
+    }
+
+    /// Drops the queued start for `appID` only (other apps keep their place).
+    mutating func removeQueuedStart(for appID: MixerAppItem.ID) {
+        queuedStarts.removeAll { $0.appID == appID }
+    }
+
+    /// Drops every queued start whose app is not in `appIDs` (e.g. apps that exited).
+    mutating func removeQueuedStarts(notIn appIDs: Set<MixerAppItem.ID>) {
+        queuedStarts.removeAll { !appIDs.contains($0.appID) }
+    }
+
+    /// Drops every queued start.
+    mutating func clearAllQueuedStarts() {
+        queuedStarts.removeAll()
     }
 
     mutating func beginResolution(for appID: MixerAppItem.ID) {

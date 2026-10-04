@@ -121,6 +121,17 @@ final class ProductRealControlCoordinator {
         startCoordinator.startResolvedExperimentalControl(for: app, allowsCachedLookup: allowsCachedLookup)
     }
 
+    /// Slider / mute driven automatic Product Real start (queued behind any in-flight resolution or
+    /// start). Forwards to the start coordinator.
+    func requestAutomaticStart(for appID: MixerAppItem.ID) {
+        startCoordinator.requestAutomaticStart(for: appID)
+    }
+
+    /// Drops every queued (not yet started) Product Real start. Forwards to the start coordinator.
+    func clearQueuedStarts() {
+        startCoordinator.clearQueuedStarts()
+    }
+
     /// Cancels an in-flight app-audio resolution and clears resolving state. Forwards to the start coordinator.
     func cancelAppAudioTargetResolution(reason: ProcessTapCandidateProbeStopReason) {
         startCoordinator.cancelAppAudioTargetResolution(reason: reason)

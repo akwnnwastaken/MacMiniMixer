@@ -385,7 +385,10 @@ final class MixerViewModel: ObservableObject {
             apps: apps,
             showAllApps: showAllApps,
             activeVisibleAppIDs: Set(productRealControlState.activeVisibleAppIDs),
-            resolvingAppIDs: Set(productRealControlState.resolvingAppIDs),
+            // A row whose Product start is queued behind the start lane stays visible like a
+            // resolving row, so its pending state cannot be filtered out.
+            resolvingAppIDs: Set(productRealControlState.resolvingAppIDs)
+                .union(productRealControlState.queuedStartAppIDs),
             selectedProcessTapAppID: selectedProcessTapAppID,
             isLiveControlActive: isProcessTapLiveControlActive
         )
@@ -654,6 +657,9 @@ final class MixerViewModel: ObservableObject {
 
     func stopProcessTapLiveControl() {
         stopProcessTapLiveControl(reason: .userStopped)
+        // Stop All also cancels an in-flight helper resolution, so its late result cannot start a
+        // session after the user stopped everything (no-op when nothing is resolving).
+        productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
     }
 
     private func stopProcessTapLiveControl(reason: ProcessTapLiveStopReason) {
@@ -744,6 +750,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     func stopTwoAppReadinessForPanelClose() {
+        // Queued Product starts must not drain into background helper probing once the panel is
+        // closed: drop them before cancelling the in-flight resolution below.
+        productRealControlCoordinator.clearQueuedStarts()
+
         guard isTwoAppReadinessRunning else {
             stopHelperProcessAutoDetect(reason: .userStopped)
             productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
@@ -855,7 +865,7 @@ final class MixerViewModel: ObservableObject {
         apps[index].volume = clampedVolume
         audioController.setVolume(clampedVolume, for: appID)
 
-        startAutomaticRealControlIfNeeded(for: apps[index])
+        productRealControlCoordinator.requestAutomaticStart(for: appID)
         updateExperimentalGainIfActive(for: apps[index])
     }
 
@@ -866,57 +876,9 @@ final class MixerViewModel: ObservableObject {
 
         apps[index].isMuted = isMuted
         audioController.setMuted(isMuted, for: appID)
-        startAutomaticRealControlIfNeeded(for: apps[index])
+        productRealControlCoordinator.requestAutomaticStart(for: appID)
         updateExperimentalGainIfActive(for: apps[index])
     }
-
-    private func startAutomaticRealControlIfNeeded(for app: MixerAppItem) {
-        guard productRealContext.isExperimentalRealAppControlEnabled else {
-            return
-        }
-
-        guard !productRealContext.isTwoAppReadinessRunning else {
-            productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
-            return
-        }
-
-        guard app.isEligibleForExperimentalLiveControl else {
-            productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
-            return
-        }
-
-        if isResolvingExperimentalControl(for: app.id) {
-            return
-        }
-
-        // Rapid-toggle guard also covers the slider-driven auto-start path: do not kick off a new
-        // start while a start/stop for this row is already in flight.
-        if productRealControlState.isOperationPending(for: app.id) {
-            return
-        }
-
-        if productRealContext.isAppAudioTargetResolving {
-            productRealSideEffects.showProductRealStatus("Finish resolving app audio first", style: .warning, action: nil)
-            return
-        }
-
-        if productRealContext.isHelperBusy {
-            productRealSideEffects.showProductRealStatus("Stop helper probe first", style: .warning, action: nil)
-            return
-        }
-
-        if isExperimentalControlActive(for: app.id) {
-            return
-        }
-
-        if let blockReason = productRealControlCoordinator.productSessionStartBlockReason(for: app.id) {
-            productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
-            return
-        }
-
-        productRealControlCoordinator.startResolvedExperimentalControl(for: app)
-    }
-
 
     // Witnesses `ProductRealControlSideEffects.applyLiveControlStoppedDisplay`, letting the coordinator
     // (which now owns `handleProductLiveControlStopped`) run the shared stop/display cleanup that stays
@@ -1044,13 +1006,6 @@ final class MixerViewModel: ObservableObject {
             currentMessageID: { [weak self] in self?.statusMessage?.id }
         )
     }
-
-    /// The Product Real write/read seam, typed as the narrow protocols (see
-    /// `ProductRealControlSideEffects`). Product Real code goes through these so a future
-    /// `ProductRealControlCoordinator` can receive them as injected collaborators instead of the
-    /// whole view model. Both are `self` today; no behavior change.
-    private var productRealSideEffects: ProductRealControlSideEffects { self }
-    private var productRealContext: ProductRealControlContext { self }
 
 }
 

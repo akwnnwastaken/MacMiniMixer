@@ -476,4 +476,90 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertEqual(ProductRealControlState.gainOption(for: mutedApp).scalar, 0)
         XCTAssertEqual(ProductRealControlState.gainOption(for: mutedApp).percentLabel, "0%")
     }
+
+    // MARK: - Queued start lane
+
+    func testEnqueueStartIsFIFOAndDedupesPerApp() {
+        var state = ProductRealControlState()
+
+        XCTAssertTrue(state.enqueueStart(for: "spotify", origin: .automatic))
+        XCTAssertTrue(state.enqueueStart(for: "music", origin: .toggle))
+        XCTAssertTrue(state.enqueueStart(for: "youtube", origin: .automatic))
+        // A second request for an already-queued app is a no-op: it keeps its place and origin.
+        XCTAssertFalse(state.enqueueStart(for: "spotify", origin: .toggle))
+
+        XCTAssertEqual(state.queuedStartAppIDs, ["spotify", "music", "youtube"])
+        XCTAssertEqual(state.dequeueNextStart(), ProductRealQueuedStart(appID: "spotify", origin: .automatic))
+        XCTAssertEqual(state.dequeueNextStart(), ProductRealQueuedStart(appID: "music", origin: .toggle))
+        XCTAssertEqual(state.dequeueNextStart(), ProductRealQueuedStart(appID: "youtube", origin: .automatic))
+        XCTAssertNil(state.dequeueNextStart())
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+    }
+
+    func testQueuedAppReportsOperationPendingUntilDequeued() {
+        var state = ProductRealControlState()
+        state.enqueueStart(for: "music", origin: .automatic)
+
+        XCTAssertTrue(state.isStartQueued(for: "music"))
+        XCTAssertTrue(state.isOperationPending(for: "music"))
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+
+        _ = state.dequeueNextStart()
+
+        XCTAssertFalse(state.isStartQueued(for: "music"))
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+    }
+
+    func testClearStartRequestRemovesOnlyThatAppsQueuedStart() {
+        var state = ProductRealControlState()
+        let spotifyRequest = state.beginStartRequest(for: "spotify")
+        state.enqueueStart(for: "music", origin: .automatic)
+        state.enqueueStart(for: "youtube", origin: .toggle)
+
+        state.clearStartRequest(for: "music")
+
+        XCTAssertEqual(state.queuedStartAppIDs, ["youtube"])
+        // Other apps' pending start requests are untouched.
+        XCTAssertTrue(state.isCurrentStartRequest(spotifyRequest, for: "spotify"))
+    }
+
+    func testClearAllStartRequestsEmptiesTheQueue() {
+        var state = ProductRealControlState()
+        state.enqueueStart(for: "music", origin: .automatic)
+        state.enqueueStart(for: "youtube", origin: .toggle)
+
+        state.clearAllStartRequests()
+
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+    }
+
+    func testClearAllOperationsEmptiesTheQueue() {
+        var state = ProductRealControlState()
+        state.beginOperation(for: "spotify")
+        state.enqueueStart(for: "music", origin: .automatic)
+
+        state.clearAllOperations()
+
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+    }
+
+    func testRemoveQueuedStartsNotInDropsExitedAppsAndKeepsOrder() {
+        var state = ProductRealControlState()
+        state.enqueueStart(for: "spotify", origin: .automatic)
+        state.enqueueStart(for: "music", origin: .toggle)
+        state.enqueueStart(for: "youtube", origin: .automatic)
+
+        state.removeQueuedStarts(notIn: ["spotify", "youtube"])
+
+        XCTAssertEqual(state.queuedStartAppIDs, ["spotify", "youtube"])
+
+        state.removeQueuedStart(for: "spotify")
+        XCTAssertEqual(state.queuedStartAppIDs, ["youtube"])
+
+        state.clearAllQueuedStarts()
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+    }
 }

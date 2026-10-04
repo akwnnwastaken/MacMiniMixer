@@ -29,6 +29,26 @@ final class ProductRealStartCoordinator {
     private weak var context: ProductRealControlContext?
     private var appAudioResolutionTask: Task<Void, Never>?
 
+    /// Queued start lane: at most one Product Real helper resolution or product start is physically
+    /// in flight at a time; a start requested while one is in flight is queued (FIFO, see
+    /// `ProductRealControlState.queuedStarts`) instead of rejected, and drained when the lane frees.
+    /// Direct-PID starts queue too: a helper probe creates/destroys its own tap + aggregate outside
+    /// the lifecycle and settle gates, and the shared Advanced "running" flag assumes one start at a
+    /// time. This physical in-flight tracking is deliberately kept here and NOT in the shared state,
+    /// so global state resets (Stop All, Real off, sleep) cannot free the lane while a cancelled
+    /// start or probe is still running.
+    ///
+    /// Start requests whose async start body has not yet run its post-await block.
+    private var inFlightStartRequestIDs: Set<ProductRealControlStartRequestID> = []
+    /// Resolution tasks that have not yet finished (a cancelled task still counts until it returns).
+    private var inFlightResolutionTaskCount = 0
+
+    /// Whether a Product Real resolution or start is in flight, so a new start must queue. Internal
+    /// (not private) for tests.
+    var isStartLaneBusy: Bool {
+        inFlightResolutionTaskCount > 0 || !inFlightStartRequestIDs.isEmpty || productRealControlState.isResolving
+    }
+
     /// Diagnostics-only, per-live-session bookkeeping for starvation-escalation attribution logging.
     /// **Not** a source of truth: it never drives audio, UI, `ProductRealControlState`, or any published
     /// value — it only decides whether a session's `outputStarvationCount` has risen enough to warrant
@@ -157,6 +177,9 @@ final class ProductRealStartCoordinator {
 
         productRealControlState.beginResolution(for: app.id)
         appAudioResolutionTask?.cancel()
+        // The resolution holds the start lane until this task physically finishes (even when it was
+        // cancelled), so no queued start runs while a helper probe may still own Core Audio objects.
+        inFlightResolutionTaskCount += 1
         appAudioResolutionTask = Task { [weak self] in
             let result = await self?.appAudioTargetResolver.resolveTarget(
                 for: request,
@@ -165,8 +188,16 @@ final class ProductRealStartCoordinator {
 
             await MainActor.run {
                 self?.handleAppAudioTargetResolution(result, for: app.id)
+                self?.finishResolutionTask()
             }
         }
+    }
+
+    /// Releases the start lane held by a finished resolution task, then drains the queue. Runs after
+    /// `handleAppAudioTargetResolution`, so a resolved target's start has already taken the lane.
+    private func finishResolutionTask() {
+        inFlightResolutionTaskCount = max(0, inFlightResolutionTaskCount - 1)
+        drainStartQueueIfIdle()
     }
 
     /// Handles the async resolution result: accepts it only while still resolving for `appID`, clears
@@ -216,7 +247,9 @@ final class ProductRealStartCoordinator {
     }
 
     /// Cancels an in-flight resolution and clears resolving state (guarded on actually resolving), the
-    /// same as the view model's previous `cancelAppAudioTargetResolution`.
+    /// same as the view model's previous `cancelAppAudioTargetResolution`. Deliberately does not drain
+    /// the start queue: a cancelled probe keeps running briefly (plus its Core Audio cleanup), so only
+    /// the resolution task's own completion (`finishResolutionTask`) frees the lane and drains.
     func cancelAppAudioTargetResolution(reason: ProcessTapCandidateProbeStopReason) {
         guard productRealControlState.isResolving else {
             return
@@ -230,6 +263,7 @@ final class ProductRealStartCoordinator {
 
     /// Cancels only the resolution task, for the synchronous sleep/termination teardown path where the
     /// view model already performs the resolver cancel and state clears alongside its other teardown.
+    /// Like `cancelAppAudioTargetResolution`, it does not drain the start queue.
     func cancelResolutionTask() {
         appAudioResolutionTask?.cancel()
         appAudioResolutionTask = nil
@@ -258,6 +292,105 @@ final class ProductRealStartCoordinator {
         return nil
     }
 
+    // MARK: - Queued start lane
+    //
+    // Ordering for a start request: (1) dedupe — already queued / resolving / pending / active is a
+    // no-op; (2) hard blocks reject immediately (and are re-checked at drain); (3) lane busy → enqueue
+    // FIFO; (4) `productSessionStartBlockReason` is evaluated only once the lane is free. The lane is
+    // drained only when it physically frees: at the end of a start's post-await block (after any
+    // cached-helper retry took the lane) and at the end of a resolution task.
+
+    /// Slider / mute driven automatic Product Real start for `appID` (moved from the view model's
+    /// `startAutomaticRealControlIfNeeded`; same checks and status messages, except that a start
+    /// requested while another resolution/start is in flight is now queued instead of rejected with
+    /// "Finish resolving app audio first" / "Stop active live control first"). Reads the app — and so
+    /// the gain — from current `context.apps`, so a drained entry uses the slider value at drain time.
+    func requestAutomaticStart(for appID: MixerAppItem.ID) {
+        guard context?.isExperimentalRealAppControlEnabled == true else {
+            return
+        }
+
+        guard context?.isTwoAppReadinessRunning != true else {
+            sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
+            return
+        }
+
+        // The app disappeared (e.g. a queued entry whose app exited before it drained): nothing to start.
+        guard let app = context?.apps.first(where: { $0.id == appID }) else {
+            return
+        }
+
+        guard app.isEligibleForExperimentalLiveControl else {
+            sideEffects?.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
+            return
+        }
+
+        if productRealControlState.isResolving(appID: app.id) {
+            return
+        }
+
+        // Rapid-toggle guard also covers the slider-driven auto-start path: do not kick off a new
+        // start while a start/stop for this row is already in flight, or while one is queued for it.
+        if productRealControlState.isOperationPending(for: app.id) {
+            return
+        }
+
+        if context?.isHelperBusy == true {
+            sideEffects?.showProductRealStatus("Stop helper probe first", style: .warning, action: nil)
+            return
+        }
+
+        if productRealControlState.isActive(appID: app.id, isLiveControlActive: context?.isProcessTapLiveControlActive == true) {
+            return
+        }
+
+        if isStartLaneBusy {
+            productRealControlState.enqueueStart(for: app.id, origin: .automatic)
+            return
+        }
+
+        if let blockReason = productSessionStartBlockReason(for: app.id) {
+            sideEffects?.showProductRealStatus(blockReason, style: .warning, action: nil)
+            return
+        }
+
+        startResolvedExperimentalControl(for: app)
+    }
+
+    /// Runs queued starts, oldest first, while the lane is free. Each entry re-enters its original
+    /// entry point, so it re-runs the full preflight against current state (a now-blocked entry shows
+    /// its message and is dropped; a vanished app is skipped) and the loop moves on; it stops as soon
+    /// as an entry takes the lane.
+    private func drainStartQueueIfIdle() {
+        while !isStartLaneBusy,
+              !productRealControlState.queuedStarts.isEmpty,
+              let next = productRealControlState.dequeueNextStart() {
+            switch next.origin {
+            case .automatic:
+                requestAutomaticStart(for: next.appID)
+            case .toggle:
+                startExperimentalControl(for: next.appID)
+            }
+        }
+    }
+
+    /// Releases the start lane held by `startRequestID`'s start body, then drains the queue.
+    private func finishInFlightStart(_ startRequestID: ProductRealControlStartRequestID) {
+        inFlightStartRequestIDs.remove(startRequestID)
+        drainStartQueueIfIdle()
+    }
+
+    /// Drops every queued (not yet started) Product Real start, e.g. when the panel closes so queued
+    /// entries never drain into background helper probing. In-flight work is unaffected. No-op (and
+    /// no state-change notification) when nothing is queued.
+    func clearQueuedStarts() {
+        guard !productRealControlState.queuedStarts.isEmpty else {
+            return
+        }
+
+        productRealControlState.clearAllQueuedStarts()
+    }
+
     // MARK: - Async start body
     //
     // Conditions, ordering, strings, stop reason, timeout policy, settle-gate ordering,
@@ -266,13 +399,25 @@ final class ProductRealStartCoordinator {
     // refreshes via `refreshActiveName`.
 
     /// Synchronous start preflight for the row toggle: validates busy/cap/eligibility and builds the
-    /// direct-PID target, then hands off to the async start body.
+    /// direct-PID target, then hands off to the async start body. While another Product Real
+    /// resolution/start is in flight the toggle is queued (see "Queued start lane") and re-runs this
+    /// preflight when it drains.
     func startExperimentalControl(for appID: MixerAppItem.ID) {
         guard context?.isTwoAppReadinessRunning != true else {
             sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
             return
         }
 
+        if isStartLaneBusy {
+            if !productRealControlState.isOperationPending(for: appID),
+               !productRealControlState.isResolving(appID: appID) {
+                productRealControlState.enqueueStart(for: appID, origin: .toggle)
+            }
+            return
+        }
+
+        // With the lane free, this only fires for Advanced work (a diagnostic or a manual live start):
+        // a product start's own "running" flag and a resolution both mean the lane is busy, handled above.
         guard context?.isProcessTapTesting != true,
               context?.isAppAudioTargetResolving != true else {
             sideEffects?.showProductRealStatus("Process Tap is already busy", style: .warning, action: nil)
@@ -362,6 +507,10 @@ final class ProductRealStartCoordinator {
         // start below resolves (cleared at the top of the post-await block, for every outcome).
         productRealControlState.beginOperation(for: app.id)
 
+        // This start now owns the queued start lane until its post-await block releases it
+        // (`finishInFlightStart`), whatever the outcome — even if a global reset cancels it meanwhile.
+        inFlightStartRequestIDs.insert(startRequestID)
+
         Task {
             // Teardown-settle gate: wait for any in-flight Product Real teardown to finish and for
             // coreaudiod to settle the shared output route before creating this session's Core
@@ -424,7 +573,7 @@ final class ProductRealStartCoordinator {
                         refreshActiveName()
                     }
                     // This start owned the "running" diagnostics flag (starts are serialised by
-                    // the isProcessTapTesting guard), so clear it now that it is rejected.
+                    // the queued start lane), so clear it now that it is rejected.
                     sideEffects?.setLiveControlDiagnosticRunning(false)
                     sideEffects?.setLiveControlDiagnosticProgress(nil)
                     return false
@@ -476,6 +625,9 @@ final class ProductRealStartCoordinator {
                     }
                 }
 
+                // Release the start lane and drain the queue. Done last, so a cached-helper retry
+                // above has already taken the lane (its resolution) and the queue keeps waiting.
+                finishInFlightStart(startRequestID)
                 return true
             }
 
@@ -486,6 +638,11 @@ final class ProductRealStartCoordinator {
                 // (and the settle window) before creating its own Core Audio objects.
                 let orphanCleanupTask = Task { await self.cleanupStaleProductLiveStart(startResult) }
                 self.startSettleGate.registerStop(orphanCleanupTask)
+                // Release the start lane only now that the orphan teardown is registered, so a queued
+                // start drained here sees it in `waitForReadyToStart` (settle after teardown).
+                await MainActor.run {
+                    self.finishInFlightStart(startRequestID)
+                }
                 await orphanCleanupTask.value
             }
         }
