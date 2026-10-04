@@ -1,0 +1,156 @@
+name: Release
+
+# Builds, tests and packages MacMiniMixer as an ad-hoc signed .zip.
+# - Tag push (v*): the tag must equal "v" + the app's marketing version, and a
+#   DRAFT GitHub Release is created (or its assets updated). A maintainer
+#   reviews and publishes the draft by hand — nothing is published here.
+# - Manual run (workflow_dispatch): build + artifact only, no GitHub Release.
+# See docs/RELEASING.md.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a release run halfway; a second run for the same ref waits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write # create/update the draft GitHub Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Test MacMiniMixer
+        run: xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS' -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Package MacMiniMixer (Release, ad-hoc signed)
+        id: package
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            scripts/package-app.sh
+          else
+            # Manual run from a branch: label the zip with the commit so it is
+            # never mistaken for a tagged release build.
+            scripts/package-app.sh --label "${GITHUB_SHA::7}"
+          fi
+
+      - name: Verify tag matches app version
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          expected="v${VERSION}"
+          if [ -z "$VERSION" ] || [ "$TAG" != "$expected" ]; then
+            echo "Tag '${TAG}' does not match the app's marketing version '${VERSION}' (CFBundleShortVersionString)."
+            echo "Release tags must be exactly 'v' + MARKETING_VERSION; for this commit that is '${expected}'."
+            echo "To release ${TAG}: bump MARKETING_VERSION in MacMiniMixer.xcodeproj/project.pbxproj first"
+            echo "(all 4 build configurations), commit and push it, then delete this tag and re-create it on"
+            echo "the bump commit:"
+            echo "  git push --delete origin ${TAG} && git tag -d ${TAG}"
+            echo "See docs/RELEASING.md."
+            echo "::error title=Tag does not match app version::Tag '${TAG}' != 'v${VERSION}'. Bump MARKETING_VERSION in project.pbxproj (all 4 build configurations) before tagging. See docs/RELEASING.md."
+            exit 1
+          fi
+          echo "Tag ${TAG} matches CFBundleShortVersionString ${VERSION}."
+
+      - name: Upload app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacMiniMixer-${{ steps.package.outputs.version }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Create or update draft GitHub Release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/@TAG@/${TAG}/g" > "$notes" <<'EOF'
+          MacMiniMixer @TAG@ — a native macOS menu bar audio mixer (Swift + SwiftUI).
+
+          ## Download
+
+          - `MacMiniMixer-@VERSION@.zip` — unzip it and move `MacMiniMixer.app` to `/Applications`.
+          - `MacMiniMixer-@VERSION@.zip.sha256` — SHA-256 checksum. To verify, run
+            `shasum -a 256 -c MacMiniMixer-@VERSION@.zip.sha256` in the download folder.
+
+          MacMiniMixer is a menu bar app: it has no Dock icon and no main window. After launching it,
+          look for its icon in the menu bar.
+
+          ## Before you install
+
+          - **Ad-hoc signed, not notarized.** This build is not signed with an Apple Developer ID and
+            has not been notarized by Apple, so Gatekeeper blocks the first launch:
+            - macOS 13–14: Control-click (right-click) `MacMiniMixer.app` → **Open** → **Open**.
+            - macOS 15 or later: try to open the app once, then go to **System Settings → Privacy &
+              Security** and click **Open Anyway**.
+            - Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/MacMiniMixer.app`
+          - **Requirements:** the app runs on **macOS 13.0 or later**. Per-app audio features (Product
+            Real Control and other Process Tap features) require **macOS 14.2 or later**.
+          - **Product Real Control is experimental** (up to three concurrent per-app sessions). Normal
+            app-row sliders are a UI preview only unless Real Control is active for that row.
+          - macOS asks for **System Audio Recording** permission the first time you use a Process Tap
+            feature. Because this build is ad-hoc signed, macOS may ask again (or the permission may
+            need to be re-enabled in System Settings) after updating to a newer build.
+          EOF
+
+          # Append this version's CHANGELOG.md section ("## [vX.Y] ...") if there is one.
+          changes="$(awk -v hdr="## [v${VERSION}]" '
+            index($0, hdr) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          {
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$changes" ]; then
+              printf '%s\n' "$changes"
+            else
+              echo "See [CHANGELOG.md](https://github.com/${GH_REPO}/blob/${TAG}/CHANGELOG.md)."
+            fi
+          } >> "$notes"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Re-run for an existing tag: replace the assets, keep the (possibly edited) notes.
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::warning title=Release already published::Release ${TAG} is already published; its assets are being replaced."
+            fi
+            echo "Release ${TAG} already exists; uploading assets with --clobber."
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --draft \
+              --verify-tag \
+              --title "MacMiniMixer ${TAG}" \
+              --notes-file "$notes"
+          fi
+
+          url="$(gh release view "$TAG" --json url --jq .url)"
+          echo "GitHub Release for ${TAG}: ${url}"
+          echo "GitHub Release for \`${TAG}\`: ${url} — drafts must be reviewed and published manually." >> "$GITHUB_STEP_SUMMARY"

@@ -13,6 +13,9 @@ Build/
 *.xccheckout
 *.moved-aside
 
+# Release packaging output (scripts/package-app.sh)
+dist/
+
 # Xcode user-specific data
 xcuserdata/
 *.xcuserstate
