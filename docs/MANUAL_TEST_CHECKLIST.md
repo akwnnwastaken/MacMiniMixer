@@ -6,7 +6,8 @@ output device handling, or helper resolution logic.
 Each section describes setup, the action to take, and the expected outcome.
 Mark pass (P), fail (F), or not applicable (N/A).
 
-Requirements: macOS 14.2+, Xcode build, System Audio Recording permission granted.
+Requirements: macOS 14.2+, an Xcode build or the packaged zip (§20), System Audio Recording
+permission granted. Use a **Release** build for anything that records CPU or audio-quality numbers.
 
 ---
 
@@ -46,6 +47,19 @@ Requirements: macOS 14.2+, Xcode build, System Audio Recording permission grante
 - Open panel.
 - Change system volume using macOS keyboard keys or menulet.
 - **Expected**: The slider in MacMiniMixer updates within ~1 second (live sync loop).
+
+### 1.7 Read-only badge appears before the first drag
+- Switch the default output to a device without a writable volume (e.g. an HDMI display or
+  optical output) — once from the MacMiniMixer device list, once from System Settings / by
+  plugging the device in while the panel is open. Also quit and relaunch MacMiniMixer while that
+  device is the default.
+- **Do not** touch the System Output slider. Open the panel and look at the System Output section.
+- **Expected**: the "Read-only" badge is already visible (probed at launch, on the output-device
+  change, and after a successful selection), and VoiceOver reads it as one element with its hint.
+  Switching back to a writable device (built-in speakers, headphones) removes the badge without any
+  slider interaction.
+- **Red flags**: the badge only appears after dragging; the badge shows on a writable device; the
+  badge stays after switching to a writable device.
 
 ---
 
@@ -129,11 +143,20 @@ Setup: Global "Real app control" ON. Spotify playing audio.
 - **Expected**: Live control stops. Banner disappears. Spotify audio resumes at its
   normal volume (original output is no longer suppressed).
 
-### 4.5 Interacting with a second app while one is active shows a warning
+### 4.5 Interacting with a second app starts a second session
 - Live control active for Spotify.
 - Move Music's slider.
-- **Expected**: Status warning "Stop active live control first". Music live control does
-  not start.
+- **Expected**: Music starts its own Real session (no app-count limit); the banner shows both
+  names with **Stop All**; Spotify keeps playing undisturbed. No "Stop active live control first"
+  warning.
+
+### 4.5a A start requested during another start is queued, not rejected
+- Global "Real app control" ON, nothing Real yet. Move Spotify's slider and, immediately after,
+  Music's slider (or click Music's Real toggle) while Spotify is still starting.
+- **Expected**: Music's row shows the pending ("working") badge while Spotify starts, then Music
+  starts on its own. No "Finish resolving app audio first", "Stop active live control first", or
+  "Process Tap is already busy" warning. Moving the queued row's slider again does not queue a
+  second start; when the row starts, it uses the slider position at that moment.
 
 ### 4.6 Product live control persists past 60 seconds
 - Start product live control. Wait longer than 60 seconds.
@@ -375,7 +398,8 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
 
 ### 14.6 Three-session sleep/wake smoke (cap=3 evidence gate)
 The sleep/wake teardown is collection-based and expected to be N-safe; this confirms it on real
-hardware with three concurrent sessions (v0.14 stability evidence). It does **not** enable N > 3.
+hardware with three concurrent sessions (v0.14 stability evidence). The cap has since been removed;
+sleep/wake with more sessions is covered by §19.
 
 Procedure:
 1. Launch the app from a **Release** build.
@@ -394,10 +418,10 @@ Procedure:
   failure; CPU does not drop after stop; crash.
 
 Notes:
-- This test is for the Product cap=3 path.
+- This test was written for the Product cap=3 path (three sessions).
 - The Advanced Two-App Readiness diagnostic is a separate two-session measurement tool and must
   not be conflated with this.
-- N > 3 requires its own gate; passing this only strengthens cap=3 stability evidence.
+- More than three sessions need their own evidence (§19); passing this only covers three.
 
 ---
 
@@ -415,13 +439,15 @@ Notes:
 
 ### 15.3 GitHub Actions build passes
 - Push to main or open a PR.
-- **Expected**: CI build/test workflow passes. Check Actions tab.
+- **Expected**: CI build/test workflow passes and its `package` job uploads the `MacMiniMixer-app`
+  artifact (zip + `.sha256`). Check Actions tab. For a launch check of that zip, see §20.
 
 ---
 
 ## 16. Release CPU / Resource Profiling (cap=3 baseline)
 
-Use this when re-checking two- or three-session resource cost or before considering N > 3.
+Use this when re-checking two- or three-session resource cost, and as the setup for the many-app
+run in §19 (the three-session numbers below are the only real-hardware baseline so far).
 **Always profile a Release build** — Debug (`-Onone`) inflates the per-sample audio loops and is
 not representative.
 
@@ -474,12 +500,15 @@ Use this to check for glitches that the drop/failure counters miss.
 > Reference (one real Mac, three sessions, Release): observed `Starv 0`, `Drops 0`, `Fail 0`,
 > `Late 1`, `maxGap` ~70–133 ms, no audible glitch — PASS. Panel-open Advanced diagnostics is
 > CPU-heavy (panel closed ≈ 25%, panel open / Advanced closed ≈ 39%, panel open / Advanced open
-> ≈ 55%); judge the cap=3 gate on the panel-closed number.
+> ≈ 55%); judge the cap=3 gate on the panel-closed number. These panel-open numbers predate the
+> per-session ~4 Hz publish gate and the focused-session / Advanced-visible gating; they have not
+> been re-measured.
 
 ### 16.5 Long-run three-session characterization (30–60 min, v0.14 stability gate)
 The short smokes (14.6, 16.3, 16.4) only cover minutes of runtime. This run looks for what they
 cannot see: slow resource leaks (memory/threads), accumulating `late`/`starv`, and audio-path
-degradation over time. It does **not** enable N > 3.
+degradation over time. It covers three sessions only; a long run with more sessions is an
+optional extension of §19.
 
 Setup:
 - Release build, single process, as in 16.1 (Instruments is optional here; Activity Monitor
@@ -517,7 +546,7 @@ Record per sample: elapsed time, CPU (panel closed), memory, threads, `maxGap`, 
 
 Notes:
 - Record the results as a `> Reference (…)` block under this section once run, as in 16.3/16.4.
-- Passing strengthens the cap=3 stability evidence for v0.14; N > 3 still requires its own gate.
+- Passing strengthens the three-session stability evidence for v0.14; more sessions need §19.
 
 > **Reference (one real Mac, normal use) — PASS (with caveat).** Three Product Real sessions ran
 > cleanly during normal use; ordinary per-app stop/start during use was clean; `Drops`/`Fail`/`Starv`
@@ -527,9 +556,11 @@ Notes:
 >
 > **Caveat (not a v0.14 blocker):** *extremely* rapid repeated Real on/off spam eventually produced
 > severe crackle and `Starv`. The intended flow is Real Control staying enabled during use, not rapid
-> manual toggling, so this is outside the normal-use envelope. Tracked as a v0.15 candidate
-> (UI-level toggle debounce / disabled pending-operation state — see ROADMAP "Rapid Real-toggle
-> protection" and `docs/DECISIONS.md`). N > 3 stays deferred; cap remains 3.
+> manual toggling, so this is outside the normal-use envelope. **Since then a per-app
+> pending-operation guard has been implemented** (repeated toggles / slider starts are ignored while
+> a row's start or stop is in flight, with a "working" badge — see ROADMAP "Rapid Real-toggle
+> protection" and `docs/DECISIONS.md`); its real-hardware effect is checked by §18. (This run used
+> the cap of 3 that existed at the time; the cap has since been removed.)
 
 ---
 
@@ -590,24 +621,127 @@ Concurrent rows:
    across rows.
    - **Expected**: each row guards independently; other active rows keep playing; no crackle/Starv.
 
-Aggressive normal clicking + cap:
+Aggressive normal clicking + no app-count limit:
 5. Do a burst of aggressive (but human-speed) on/off clicking across rows.
-   - **Expected**: `Starv`/`Drops`/`Fail` stay 0 or non-alarming; no audible crackle.
-6. With 3 apps already Real, try to make a **4th** app Real.
-   - **Expected**: the "Real app control supports 3 apps at a time" warning still appears; cap=3
-     holds.
+   - **Expected**: `Starv`/`Drops`/`Fail` stay 0 or non-alarming; no audible crackle. Rows clicked
+     while another row is starting show the working badge (queued) and start one after another.
+6. With 3 apps already Real, make a **4th** app Real.
+   - **Expected**: the 4th app starts its own session (no app-count limit); **no** "Real app control
+     supports 3 apps at a time" warning; the banner reads "first two names +2 more" with Stop All.
+     For more apps, continue with §19.
 
 For each step record: whether the "working" badge appears, audible **clicks/crackle** (yes/no),
 `Starv`/`Drops`/`Fail`, and whether audio ever required `sudo killall coreaudiod`.
 
-**Expected result**: the working badge appears during transitions; repeated toggles are ignored
-until the operation completes; no duplicate-start churn; no crackle/Starv under normal aggressive
-clicking; cap=3 warning intact. A deliberate behavior: a toggle **cannot cancel an in-flight start
-mid-flight** — the start finishes first, then the row can be stopped.
+**Expected result**: the working badge appears during transitions and on queued rows; repeated
+toggles are ignored until the operation completes; no duplicate-start churn; no crackle/Starv under
+normal aggressive clicking; no app-count warning. A deliberate behavior: a toggle **cannot cancel an
+in-flight start mid-flight** — the start finishes first, then the row can be stopped. A *queued*
+row's own toggle is ignored too (it counts as pending), but Stop All, turning Real App Control off,
+closing the panel, or quitting that app drops it before it starts.
 
 **If severe audio loss occurs** (an app silent until the app is quit): quit MacMiniMixer, and only
 if audio is still broken, `sudo killall coreaudiod`. This should **not** be expected in the normal
 guarded flow — record it as a regression if it happens.
+
+---
+
+## 19. Many-app Product Real Control (no app-count limit — N-session characterization)
+
+Product Real Control has **no app-count limit** (owner decision). Real-hardware evidence so far
+stops at three sessions (§14.6, §16, §16.5); this section is the gate for more. Nothing here has
+been run yet — record only what you measure.
+
+Setup:
+- **Release** build, single MacMiniMixer process (as in §16.1). Activity Monitor open on the
+  MacMiniMixer row; Console.app filtered to `MacMiniMixer` (category `processTap` shows the
+  per-session starvation attribution debug lines, `cleanup` the teardown).
+- **5–8 apps playing audio continuously**: e.g. Music, Spotify, a browser/YouTube helper row, plus
+  other tap-eligible players (VLC, IINA, a second browser, a game or meeting app, …). Include at
+  least one browser/helper row so the queue has a slow resolution in it.
+- Global "Real app control" ON, nothing Real yet. Note idle CPU with the panel closed.
+
+Steps:
+1. **Fast start via sliders.** Within a few seconds, move the slider of every app, one after
+   another.
+   - **Expected**: the first row starts; rows touched while another row is resolving/starting show
+     the pending ("working") badge, then start one after another (a browser/helper row may take a
+     second or more to resolve and the rows behind it wait). **No** "Finish resolving app audio
+     first" / "Stop active live control first" / "Process Tap is already busy" / "supports N apps at
+     a time" warnings. Each row ends Real; the banner reads "first two names +N more" with Stop All;
+     each queued row's gain matches its slider when it started.
+   - Record: number of Real apps, time from first slider move until the last row is Real.
+2. **Steady state (panel closed, 5–10 min).** Close the panel.
+   - Record: CPU (avg over ~1 min, panel closed), memory, threads, audible glitches yes/no; then
+     briefly open the panel → Advanced and read Drops/Fail/Starv/Gap for the focused (most recently
+     started) session; close it again. Also note panel-open CPU with Advanced collapsed vs expanded.
+   - **Expected**: every app audible at its own gain; Drops/Fail stay 0; no audible glitch; CPU stable
+     (no drift). Compare against the three-session baseline in §16.3 — do **not** assume linear
+     scaling; write down what you see.
+3. **Per-app stop.** Stop two different rows (row toggle).
+   - **Expected**: only those apps return to normal volume; every other Real app keeps playing
+     without a click or dropout.
+4. **Quit one controlled app** (e.g. quit Music) — also try quitting the app that is selected in the
+   Advanced picker (by default the first eligible app).
+   - **Expected**: only that app's session ends; all other Real apps keep running.
+5. **Output-device change** with all sessions active (speakers ↔ headphones, or connect AirPods).
+   - **Expected**: all Real sessions stop ("output device changed"), every app's audio returns to
+     normal on the new device without quitting anything; no orphaned mute; CPU returns to ~0%.
+   - Record: time until all audio is back; any Drops/Fail/cleanup warnings in Console.
+6. **Stop All.** Make the apps Real again, then press Stop All in the banner.
+   - **Expected**: every session stops and every app's audio returns. Stop All tears sessions down
+     one after another, so note how long it takes until the last app is back and CPU is ~0%.
+7. **Queue cancellation.** While several rows are queued (repeat step 1), press Stop All / turn
+   "Real app control" off / close the panel (one per run).
+   - **Expected**: queued rows never start afterwards (no background helper probing after the panel
+     closes); an in-flight helper resolution is cancelled by Stop All and does not start a session
+     late.
+8. **Sleep/wake.** Make the apps Real, close the panel, sleep the Mac briefly, wake, reopen.
+   - **Expected**: as §14.6 — nothing Real after wake, all apps' audio normal, no resurrection. Note
+     whether the Mac took noticeably long to go to sleep (the teardown is synchronous on the main
+     thread and grows with the number of sessions).
+9. **Quit MacMiniMixer** with all sessions active.
+   - **Expected**: quits cleanly; all apps' audio normal afterwards; no `sudo killall coreaudiod`.
+     Note whether quitting took noticeably long.
+
+Record per step: number of sessions, CPU (panel closed), memory, threads, Drops/Fail/Starv/Gap,
+audible glitch yes/no, timings asked for above, Console cleanup warnings, and whether audio ever
+required `sudo killall coreaudiod`.
+
+**Red flags** (record as regressions, with the Console log): an app silent/muted until MacMiniMixer
+quits (orphan tap); a queued row that never starts or starts after Stop All / Real off / panel close;
+other sessions stopping when one app quits; Drops/Fail > 0 or Starv rising together with an audible
+glitch; CPU drifting up over time or not returning to ~0% after stops; sleep or quit hanging for
+several seconds; any crash.
+
+Notes:
+- Known open items this run is meant to size: engine-initiated stops (output change / app exit /
+  timeout) bypass the lifecycle and settle gates; the sleep/quit teardown blocks the main thread
+  longer with every session; Stop All is sequential. See `docs/ROADMAP.md` "Many-session
+  hardening".
+- Record results as `> Reference (…)` blocks under this section, as in §16.3/§16.4.
+
+---
+
+## 20. Packaged build (zip) launch check
+
+Use the ad-hoc signed zip from `scripts/package-app.sh`, the `MacMiniMixer-app` CI artifact, or a
+draft release — downloaded **in a browser** so it carries the quarantine flag like a user download.
+
+1. Verify the checksum in the folder that holds both files:
+   `shasum -a 256 -c MacMiniMixer-<version>….zip.sha256`.
+   - **Expected**: `OK`.
+2. Unzip, move `MacMiniMixer.app` to `/Applications`, double-click it.
+   - **Expected**: Gatekeeper blocks the first launch (ad-hoc signed, not notarized). Open it via
+     Control-click → Open (macOS 13–14) or System Settings → Privacy & Security → **Open Anyway**
+     (macOS 15+), as in `docs/RELEASING.md` §5.
+3. After it opens:
+   - **Expected**: the icon appears in the **menu bar**; there is no Dock icon or window; the panel
+     opens; Finder → Get Info shows version `0.13` (unless a release bumped it) and "Copyright © 2026
+     Ahmed Tuğra Kasem. MIT License."
+4. Run a short smoke on the packaged app: §1.1, §2.3, §4.1 (macOS asks for System Audio Recording
+   permission on the first Process Tap action — a new ad-hoc build may ask again), §4.4, §11.5.
+   - **Expected**: same behavior as an Xcode build; after quitting, all audio is normal.
 
 ---
 

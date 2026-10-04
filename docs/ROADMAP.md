@@ -1,11 +1,15 @@
 # MacMiniMixer Roadmap
 
-Current repository state: the internal **v0.14 Product Real stability checkpoint** is complete —
-Product Real App Control (cap=3), the P177–P182 teardown/starvation hardening baseline, Advanced
-diagnostics, fake-backed tests, and incremental coordinator extraction are all in place. This is an
-unreleased internal checkpoint, **not** a public v0.14 release: `MARKETING_VERSION` is unchanged, no
-tag is cut, and the README may still describe the earlier v0.12/one-session state. See
-`CHANGELOG.md` (`[v0.14] - Unreleased`) for the checkpoint notes.
+Current repository state: the internal **v0.14 Product Real stability checkpoint** is complete
+(the P177–P182 teardown/starvation hardening baseline, Advanced diagnostics, fake-backed tests, and
+the Product Real facade/store/start/stop split), and the `[Unreleased]` work on top of it has
+landed: **Product Real App Control has no app-count limit** (owner decision), starts are serialized
+through a **queued start lane**, live diagnostics are published only for the focused session while
+the Advanced section is visible, the system-output "Read-only" badge is probed proactively,
+accessibility coverage is complete, and release packaging (ad-hoc zip, CI artifact, draft-release
+workflow) exists. What is **not** done is real-hardware evidence beyond three concurrent sessions.
+This is still unreleased, **not** a public v0.14 release: `MARKETING_VERSION` is unchanged (`0.13`)
+and no tag is cut. See `CHANGELOG.md` (`[v0.14] - Unreleased` and `[Unreleased]`).
 
 This roadmap separates stable foundation, near-term low-risk work, later research, and
 explicitly deferred large-scope ideas. It is intentionally conservative: MacMiniMixer is
@@ -25,7 +29,9 @@ not yet a finished Windows Volume Mixer replacement.
   Control is enabled and the user interacts with a row.
 - Validation-first in-memory helper cache and early-accept fast path.
 - Persistent Product Real App Control sessions while healthy.
-- One-active-real-session Product limitation.
+- Product Real App Control for any number of apps at once (no app-count limit, owner decision),
+  with a queued start lane, per-app stop / Stop All, and per-app exit handling. Real-hardware
+  evidence covers up to three sessions.
 - Product Real Control lifecycle characterization tests.
 - Product Real Control state/model helper extraction.
 - Advanced Helper Process Discovery, manual helper Probe, Find audio helper, and
@@ -45,7 +51,7 @@ not yet a finished Windows Volume Mixer replacement.
   - `AdvancedProcessTapDiagnosticsCoordinator`
   - `AdvancedLiveControlCoordinator`
   - `TwoAppReadinessCoordinator`
-  - `ProductRealControlCoordinator` (the Product Real **thin facade**, ~170 lines, no start/stop
+  - `ProductRealControlCoordinator` (the Product Real **thin facade**, ~180 lines, no start/stop
     implementation — composes three internal sub-objects: `ProductRealControlStateStore`,
     `ProductRealStartCoordinator`, `ProductRealStopCoordinator`; the cross-subsystem router, lifecycle
     entry points, and multi-subsystem fan-out intentionally remain in `MixerViewModel`)
@@ -53,15 +59,21 @@ not yet a finished Windows Volume Mixer replacement.
     notification storage, shared by reference among the facade and both sub-coordinators)
   - `ProductRealStartCoordinator` (product-only start + resolution path behind the facade — app-audio
     resolution + task ownership/`deinit`, start preflight, both `startExperimentalControl` overloads,
-    async start body, cached-helper retry, stale-start rejection/cleanup, settle-gate start ordering)
+    async start body, cached-helper retry, stale-start rejection/cleanup, settle-gate start ordering,
+    and since the `[Unreleased]` work the queued start lane, `requestAutomaticStart`, live-diagnostics
+    focus, and per-session starvation attribution logging)
   - `ProductRealStopCoordinator` (product-only stop path behind the facade — per-app stop, Stop All,
     stop callback, app-exit cleanup, hard-teardown reset, active-name helper)
 - Extracted `MixerViewModel` helpers: `RealControlBannerPresenter`, `MixerVisibleAppsFilter`,
   `MixerStatusMessageController`.
 - `CHANGELOG.md` with milestone history.
-- Persistent read-only output-volume indicator for devices without a writable volume API.
-- Accessibility labels/values/hints for app rows, system output controls, and output-device
-  selection.
+- Persistent read-only output-volume indicator for devices without a writable volume API, probed
+  proactively at launch / device change / successful selection.
+- Accessibility labels/values/hints across the whole menu bar UI (app rows, system output, device
+  list, panel toggles/disclosure/status banner, and every Advanced diagnostic view).
+- Release packaging scaffolding: `scripts/package-app.sh` (ad-hoc signed zip + sha256), the `Build`
+  workflow's `package` artifact, and a tag-triggered draft-release workflow (`docs/RELEASING.md`).
+- `PreviewAudioStateController` (renamed from `MockAudioController`); unused production mocks removed.
 - Consolidated output-device-change teardown in `MixerViewModel`
   (`stopActiveAudioWorkForOutputDeviceChange`).
 - System sleep/wake lifecycle handling: app-lifetime observers in `MixerViewModel`
@@ -72,12 +84,14 @@ not yet a finished Windows Volume Mixer replacement.
 
 ## Current Architecture and Hardening Status
 
-- `MixerViewModel` remains the central traffic controller for app list/mock row state,
+- `MixerViewModel` remains the central traffic controller for app list/preview row state,
   cross-feature coordination, lifecycle cleanup, and status messages.
 - Product Real Control is now **split across a coordinator (a facade with internal sub-objects) and
   the view model**:
-  - `ProductRealControlCoordinator` is the **thin facade** `MixerViewModel` knows (public API and
-    initializer signature unchanged, ~170 lines, no start/stop implementation). It owns one shared
+  - `ProductRealControlCoordinator` is the **thin facade** `MixerViewModel` knows (~180 lines, no
+    start/stop implementation; later commits added two forwards for the start lane and a defaulted
+    `maxConcurrentSessions` initializer parameter for the cap removal, so the view model's call site
+    is unchanged). It owns one shared
     state store and composes three internal sub-objects, constructs + wires them, and forwards:
     - `ProductRealControlStateStore` — the **single** production source of `ProductRealControlState`
       and `onWillChange` storage (one instance, shared by reference; a write notifies exactly once
@@ -85,7 +99,8 @@ not yet a finished Windows Volume Mixer replacement.
     - `ProductRealStartCoordinator` — the full Product Real **start + resolution** path (app-audio
       resolution + `appAudioResolutionTask` ownership/`deinit`, `productSessionStartBlockReason`
       preflight, both `startExperimentalControl` overloads, the async start body, diagnostics-callback
-      acceptance, cached-helper retry, stale-start rejection/cleanup, settle-gate start ordering).
+      acceptance, cached-helper retry, stale-start rejection/cleanup, settle-gate start ordering),
+      plus the queued start lane, `requestAutomaticStart`, and the live-diagnostics focus.
     - `ProductRealStopCoordinator` — the full Product Real **stop** path: per-app stop
       (`stopExperimentalControl`), Stop All core (`stopProductLiveSessions`), the engine stop callback
       (`handleProductLiveControlStopped`), the app-exit slice (`stopRealControlForExitedTargetApps`),
@@ -107,6 +122,11 @@ not yet a finished Windows Volume Mixer replacement.
   - Rationale for the staged extraction (both start and stop paths) is in `docs/DECISIONS.md`.
 - Product sessions use an indefinite timeout policy while healthy. Manual Advanced Live
   and diagnostic/readiness paths remain limited/short-lived.
+- Product sessions have **no app-count limit** (`maxConcurrentLiveSessions = nil`, owner decision).
+  Product starts are serialized through the **queued start lane** (one helper resolution or start
+  in flight, the rest FIFO with the pending badge, re-preflighted at drain). Live diagnostics are
+  published only for the focused (newest) session and only while the Advanced section is visible.
+  Rationale for all three in `docs/DECISIONS.md`.
 - Helper mappings are validation-first, in-memory only, and not persisted across
   launches.
 - No background helper scanning runs just because an app appears.
@@ -123,11 +143,15 @@ not yet a finished Windows Volume Mixer replacement.
   - No private APIs.
   - No third-party dependencies.
   - No disk audio saving.
-  - Product sessions remain one active real session at a time for now.
+  - Real control stays opt-in (global toggle OFF by default; sessions start only on interaction).
 
 ---
 
 ## Next Recommended Low-Risk Work
+
+> **First priority now:** the real-hardware N-session characterization (measurement only — see
+> "Real-hardware N-session characterization — next gate" under Later Research), then the deferred
+> many-session hardening it informs. Most items in this section are done.
 
 ### Extract Product Real Control coordinator — DONE (facade + 3 sub-objects)
 
@@ -139,7 +163,8 @@ references and four shared `@Published` properties). That was later superseded: 
 and the **stop** paths were extracted into `ProductRealControlCoordinator` in small,
 independently-tested steps, and the coordinator was then **split internally into cohesive sub-objects
 behind the unchanged facade**. Each step stayed behind the unchanged `MixerViewModelLiveControlTests`
-plus focused new tests; the full suite is green (**414 passed / 0 failed / 0 skipped**).
+plus focused new tests; the full suite was green at the end of the split (**414 passed / 0 failed
+/ 0 skipped**; it has grown since — see `docs/HANDOFF.md` §6).
 
 **Internal split — completed (Prompts 223–228):**
 - `ProductRealControlStateStore` — the single `ProductRealControlState` source + `onWillChange`
@@ -166,7 +191,8 @@ plus focused new tests; the full suite is green (**414 passed / 0 failed / 0 ski
 lifecycle / sleep / wake / termination entry points, the output-device-change fan-out, and the
 `tearDownAllProcessTapWork` multi-subsystem teardown fan-out. These are not product-only, so keeping
 them in the view model is deliberate — moving them into a product coordinator would increase
-coupling. `N > 3` remains deferred. Full staged rationale in `docs/DECISIONS.md`.
+coupling. (The app-count limit was later removed by owner decision — see "N-app Product Real
+Control" below.) Full staged rationale in `docs/DECISIONS.md`.
 
 **Optional future decomposition (outside Product Real, only if a clean boundary emerges):** a
 read-only reassessment of the remaining `MixerViewModel` responsibilities — lifecycle / global
@@ -176,7 +202,7 @@ Resume feature or real-hardware stability work if no clean boundary emerges.
 
 ---
 
-### Non-writable output-volume UX — done (follow-up optional)
+### Non-writable output-volume UX — done (incl. proactive probe)
 
 **Priority**: High | **Risk**: Low | **Status**: Implemented
 
@@ -185,8 +211,12 @@ Resume feature or real-hardware stability work if no clean boundary emerges.
 "Read-only" badge plus tooltip when the selected device rejects volume writes. Writability
 resets when the selected device changes.
 
-**Optional follow-up**: probe writability proactively on device refresh (instead of only
-after a rejected write) so the badge appears before the user first drags the slider.
+**Follow-up — done (`3c2f4e8`)**: writability is probed proactively with the read-only
+`SystemVolumeControlling.isCurrentOutputVolumeSettable()` (`AudioObjectIsPropertySettable` on
+the same addresses the write path uses) at init, on an output-device change, and after a
+successful device selection, so the badge appears before the first slider drag. An unknown result
+assumes writable; rejected/successful writes still flip the flag. 20 new
+`SystemOutputCoordinatorTests` cover the probe and the coordinator failure paths.
 
 ---
 
@@ -197,8 +227,14 @@ after a rejected write) so the badge appears before the user first drags the sli
 Explicit labels/values/hints added for app rows (volume slider, mute, Real/Resolving
 state), the system output slider and mute button, and output-device selection rows.
 
-**Optional follow-up**: SwiftUI accessibility/snapshot tests once a view-test harness
-exists (see "UI-layer test coverage" below).
+**Follow-up — done (`3a84483`)**: the rest of the UI is covered too — panel header/section
+captions, the Output devices button, the "Real app control" / "Show all" toggles, the Advanced
+disclosure, the severity-prefixed status banner, the read-only badge, the device list, and the
+Advanced Process Tap test, helper discovery, and Two-App Readiness views (macOS 13-compatible
+modifiers only, no layout change).
+
+**Still optional**: SwiftUI accessibility/snapshot tests once a view-test harness exists (see
+"UI-layer test coverage" below).
 
 ---
 
@@ -219,13 +255,16 @@ rather than a version-specific anchor for robustness across macOS versions.
 
 ---
 
-### CHANGELOG and release-readiness cleanup — partially done
+### CHANGELOG and release-readiness cleanup — mostly done
 
-**Priority**: Low | **Risk**: Low | **Status**: `CHANGELOG.md` added
+**Priority**: Low | **Risk**: Low | **Status**: `CHANGELOG.md`, packaging, and `docs/RELEASING.md`
+in place; no release cut
 
-`CHANGELOG.md` now exists with milestone history and an `[Unreleased]` section. Remaining
-work: keep it synchronized with each change and prepare conservative release notes without
-implying production-grade multi-app mixer support.
+`CHANGELOG.md` exists with milestone history and an `[Unreleased]` section, `Info.plist` carries
+`NSHumanReadableCopyright`, and the release path is scripted (see "Release packaging and
+distribution" below). Remaining work: keep the changelog synchronized with each change and, when
+the owner decides to release, prepare conservative release notes without implying production-grade
+multi-app mixer support (real-hardware evidence stops at three sessions).
 
 **Likely files**: `CHANGELOG.md`, `README.md`, `docs/*`.
 
@@ -244,9 +283,10 @@ no behavior change, verified by the existing characterization tests.
 
 **Likely files**: `MixerViewModel.swift`.
 
-**Note**: The duplicated `beginSession` call in `startExperimentalControl` is intentional
-(early optimistic set + post-`await` re-assertion) and is now documented inline. Do not
-"simplify" it away without re-checking the suspension-point behavior.
+**Note**: The duplicated `beginSession` call in `startExperimentalControl` (now in
+`ProductRealStartCoordinator`) is intentional (early optimistic set + post-`await`
+re-assertion) and is documented inline. Do not "simplify" it away without re-checking the
+suspension-point behavior.
 
 ---
 
@@ -268,7 +308,7 @@ stays, since the product depends on it).
 
 **Priority**: Low | **Risk**: Low
 
-All 164 tests target view models, coordinators, and services. SwiftUI views
+All tests target view models, coordinators, and services. SwiftUI views
 (`MixerPanelView`, `ProcessTapTestView`, etc.) have no automated coverage. Investigate a
 lightweight accessibility/snapshot harness so view regressions (including the new
 accessibility labels) are caught.
@@ -278,6 +318,44 @@ accessibility labels) are caught.
 ---
 
 ## Later Research / Experimental Work
+
+### Real-hardware N-session characterization — next gate
+
+**Priority**: High | **Risk**: Low (measurement only) | **Status**: Not started
+
+The app-count limit is gone, but nothing has been measured on real hardware with more than three
+concurrent sessions. Before claiming anything about many-app control, run a Release build on a
+real Mac with e.g. **5–8** Real apps (direct apps plus at least one browser/helper row) and record
+panel-closed CPU, memory, threads, Drops/Fail/Starv/Gap, and audible glitches; then per-app stop,
+Stop All (time until audio is normal and CPU ~0%), an output-device change with all sessions
+active, quitting one controlled app, and sleep/wake. Watch for orphaned mutes and for
+`sudo killall coreaudiod` being needed. Procedure: `docs/MANUAL_TEST_CHECKLIST.md` §19. Record
+only measured values; the results decide what in the next section is urgent.
+
+---
+
+### Many-session hardening — deferred (audio-adjacent, needs hardware evidence)
+
+**Priority**: High | **Risk**: Medium | **Status**: Known, deliberately not changed yet
+
+Found while planning the multi-app work; each touches the teardown path, so each should follow the
+characterization above and get its own small, test-first change plus a hardware retest:
+
+- **Engine self-stops bypass the gates.** Stops a live controller initiates itself (output-device
+  change or target-app exit detected by its diagnostics timer, timeout) go around the Core Audio
+  lifecycle gate (P181) and the stop→start settle gate (P179), so N sessions can tear down
+  concurrently — exactly the route churn those gates exist to prevent.
+- **Hard teardown blocks the main thread at sleep/quit.** `stopLiveControlNow` runs synchronously,
+  one fade + destroy per session; estimated from the code path at roughly 0.4–3.4 s with many
+  sessions (not measured).
+- **Stop All is sequential** (N × fade + destroy in one settle-gate task).
+- **The menu bar label / scene observes the whole view model**, so every `objectWillChange`
+  re-evaluates it.
+- Smaller: the shared active-name display picks `activeSessions.first` in dictionary order (not
+  deterministic); slider moves during a start's optimistic window are dropped until the next move
+  after confirmation; optionally add a settle after a `.discoveredHelper` resolution.
+
+---
 
 ### Helper PID-change hardening
 
@@ -301,8 +379,8 @@ recovery is still manual/user-triggered.
 Continue measuring callbacks, peak/RMS, queued buffers, drops, failures, cleanup behavior,
 and latency across more eligible app combinations and repeated runs.
 
-**Goal**: Use this only as Advanced diagnostic evidence, not as a shortcut to main UI
-multi-app control.
+**Goal**: Use this only as Advanced diagnostic evidence. Main-UI multi-app control now goes
+through Product Real Control itself.
 
 ---
 
@@ -322,7 +400,7 @@ Constraints:
 - Public Process Tap/Core Audio APIs only.
 - No HAL driver, persistent virtual audio device, private APIs, third-party dependencies,
   or disk audio saving.
-- Preserve the one-active-real-session limitation initially.
+- Start with one boosted app at a time, even though normal control has no app-count limit.
 - Affect only the selected application.
 - Do not boost system output volume.
 - Do not affect unrelated applications.
@@ -354,17 +432,18 @@ behavior.
 
 **Still open**: automatic post-wake restart/recovery research (deferred — see DECISIONS);
 longer-duration and repeated sleep/wake characterization; varied output-device and
-helper-PID-replacement combinations; behavior under N > 2 sessions; and the broader long-idle
+helper-PID-replacement combinations; behavior with many (more than three) sessions; and the broader long-idle
 / app-exit / helper-exit / Core Audio failure resource characterization. Short-run Release CPU
 for one and two sessions has now been profiled (see below), but sustained (hours-long)
 CPU/latency/resource behavior is still unmeasured.
 
 **v0.14 stability evidence (next gate)**: a three-session sleep/wake smoke is the next evidence
 gate (procedure in `docs/MANUAL_TEST_CHECKLIST.md` §14.6). The existing sleep/wake code is
-collection-based and is expected to be N-safe, but cap=3 needs one real-hardware confirmation.
-Passing it does **not** enable N > 3 — it only strengthens cap=3 stability evidence; alongside a
-30–60 min three-session long-run and callback-jitter/output-starvation measurement, these form
-the v0.14 "stability polish" track.
+collection-based and is expected to be N-safe, but three sessions needed one real-hardware
+confirmation. Alongside a 30–60 min three-session long-run and callback-jitter/output-starvation
+measurement, these formed the v0.14 "stability polish" track. With the app-count limit removed,
+sleep/wake with many sessions is part of the N-session characterization above (the synchronous
+hard teardown is the known risk).
 
 **Three-session jitter/starvation short smoke — passed (one real Mac).** The Phase 6c
 diagnostic-only counters (callback jitter / output starvation) are now visible in the live
@@ -375,9 +454,11 @@ treated as PASS. A single late callback / a 70–133 ms max gap is not on its ow
 brief spike, panel open, around stop, or a helper input pause can produce it); the gate is "no
 audible glitch and clean stop". Panel-open Advanced diagnostics is a known CPU-heavy view
 (panel closed ≈ 25%, panel open / Advanced closed ≈ 39%, panel open / Advanced open ≈ 55% in
-Release) — a future diagnostics/UI publication-throttle candidate, **not** a release blocker and
-not an audio-path red flag. A 30–60 min three-session long-run remains a future gate; N > 3
-stays deferred.
+Release) — a diagnostics/UI publication cost, **not** a release blocker and not an audio-path red
+flag. (Since then, `e95bcd0` limited each session's diagnostics publishes to ~4 Hz, and
+`5a78656` publishes only the focused session and only while the Advanced section is visible. The
+panel numbers above predate both changes and have not been re-measured.) The 30–60 min three-session long-run has since
+passed (see below).
 
 ---
 
@@ -410,8 +491,9 @@ by real-hardware feedback. The sequence:
 - Three-session testing was clean in repeated manual retest.
 - No `sudo killall coreaudiod` was needed in the final retest.
 
-**Scope guardrails**: cap remains **3** (`maxConcurrentLiveSessions = 3`); no N > 3 support; the
-unsafe default-output observer was **not** reintroduced. Decision rationale is in
+**Scope guardrails (at the time)**: the cap stayed **3** (`maxConcurrentLiveSessions = 3`; later
+removed by owner decision, see "N-app Product Real Control"); the unsafe default-output observer
+was **not** reintroduced (still true). Decision rationale is in
 `docs/DECISIONS.md`; the manual smoke procedure is in `docs/MANUAL_TEST_CHECKLIST.md` §17.
 
 **Long-run smoke result — PASS (with caveat)** (one real Mac, checklist §16.5): three Product
@@ -442,9 +524,10 @@ transition in flight (`pendingOperationAppIDs`), `MixerViewModel` ignores toggle
 auto-start attempts for a row while its operation is pending (clearing the flag in each terminal
 handler and on global teardown), and the row shows a non-interactive "working" badge. It is
 layered **above** the settle (P179) and lifecycle-serialization (P181) gates so a burst of clicks
-cannot queue create/destroy churn faster than coreaudiod settles. It does **not** change cap=3,
-the audio callback, or the teardown gates, and it keeps N > 3 deferred. Rationale in
-`docs/DECISIONS.md`; manual smoke in `docs/MANUAL_TEST_CHECKLIST.md` §18.
+cannot queue create/destroy churn faster than coreaudiod settles. It does **not** change the
+audio callback or the teardown gates. Since the queued start lane (`774268a`), a row whose start
+is queued also counts as pending. Rationale in `docs/DECISIONS.md`; manual smoke in
+`docs/MANUAL_TEST_CHECKLIST.md` §18.
 
 **Still useful**: real-device stress testing (aggressive rapid toggling on one and on 2–3
 concurrent rows) to confirm the guard removes the crackle/`Starv` in practice — its real-world
@@ -481,10 +564,11 @@ proof for all hardware, longer runs, or N > 2.
 
 ---
 
-### Three-app cap (cap=3) enabled — done (real-hardware smoke passed)
+### Three-app cap (cap=3) enabled — done (real-hardware smoke passed; cap later removed)
 
-**Priority**: High | **Risk**: Low | **Status**: `maxConcurrentLiveSessions = 3`; three-session
-smoke passed on one real Mac
+**Priority**: High | **Risk**: Low | **Status**: Historical — `maxConcurrentLiveSessions` was 3
+here; three-session smoke passed on one real Mac. Superseded by "N-app Product Real Control"
+below (no app-count limit). The measurements stay the only real-hardware multi-session evidence.
 
 Cap 3 is enabled for Product Real Control — it now supports up to three apps controlled live at
 the same time. A three-session smoke passed on one real Mac (M4 Pro, Release; two direct apps +
@@ -500,16 +584,52 @@ one helper, panel mostly closed):
   warnings, CPU returning to ~0%. CI is green.
 
 **Caveat**: one real Mac, short smoke runs. Not a proof for all hardware, hours-long runs, or
-N > 3. Raising the cap beyond 3 (`N > 3`) remains deferred (see below and `docs/DECISIONS.md`).
+more than three sessions.
 
 ---
 
-### Release packaging and distribution
+### N-app Product Real Control (app-count limit removed) — done in code; hardware evidence pending
 
-**Priority**: Medium | **Risk**: Low-Medium
+**Priority**: High | **Risk**: Medium | **Status**: Implemented (`08d49bc`, `da2b06e`, `c57bf37`,
+`5a78656`, `774268a`); real-hardware characterization beyond three sessions **not done**
 
-Investigate a direct-distribution package such as a notarized `.zip` or `.dmg`. Keep this
-separate from runtime audio behavior.
+Owner decision: like the Windows Volume Mixer, every app the user interacts with (global toggle
+ON) can be Real at the same time. What landed:
+
+- **Cap removed**: `AppConstants.maxConcurrentLiveSessions: Int? = nil`,
+  `ProcessTapLiveSessionManager(maxSessions: Int?)`, injectable `maxConcurrentSessions` on the
+  start coordinator / facade so tests still prove the cap mechanism. Fake-backed tests cover 6–8
+  concurrent sessions (real manager + fake controllers end to end, facade, banner).
+- **Queued start lane** (resolves "gap B"): one helper resolution or product start in flight;
+  further slider/mute/toggle starts queue FIFO with the pending badge and re-preflight at drain;
+  cleared by per-app stop, Stop All, Real off, output change, sleep, termination, panel close, app
+  exit. Stop All also cancels an in-flight helper resolution.
+- **Diagnostics focus/visibility**: only the newest session publishes to the shared Advanced card,
+  and only while the Advanced section is visible; attribution logging stays per session.
+- **Multi-session fixes**: quitting the Advanced-selected app no longer stops every product
+  session; the cached-helper retry runs alongside other product sessions.
+
+**Remaining gates**: the real-hardware N-session characterization and the deferred many-session
+hardening (both in "Later Research / Experimental Work" above). Real control stays opt-in.
+
+---
+
+### Release packaging and distribution — scaffolding done; notarization future
+
+**Priority**: Medium | **Risk**: Low-Medium | **Status**: Ad-hoc packaging implemented
+(`e0a60b4`); no release cut
+
+- `scripts/package-app.sh`: Release build, ad-hoc signed staged copy (required to launch arm64
+  code; not notarized), `dist/MacMiniMixer-<version>[-<label>].zip` + `.sha256`.
+- `Build` workflow `package` job: uploads the zip as the `MacMiniMixer-app` artifact (14 days).
+- `release.yml`: on `v*` tags runs tests → package → checks the tag equals `v` + `MARKETING_VERSION`
+  → creates a **draft** GitHub Release; manual dispatch produces the artifact only.
+- `docs/RELEASING.md`: maintainer checklist, Gatekeeper instructions for ad-hoc builds (incl. the
+  macOS 15 "Open Anyway" flow), and the documented-only Developer ID + notarization steps.
+
+**Future**: Developer ID signing + notarization (needs an Apple Developer membership, a real
+bundle identifier instead of `com.example.MacMiniMixer`, and a check that Process Tap capture works
+under the hardened runtime). A `.dmg` is optional. Keep this separate from runtime audio behavior.
 
 ---
 
@@ -519,29 +639,29 @@ The maintainer's end goal is a true Windows Volume Mixer experience: **simultane
 independent per-app volume control for every app shown in the audio list**, changed live and
 at the same time. This is the product's north star, not a deferred curiosity.
 
-The work is still approached **incrementally** for sound engineering reasons (see
-`docs/DECISIONS.md`): one validated active session today, two short-lived sessions measured
-via Two-App Readiness, then more — only as evidence shows simultaneous sessions stay stable
-on CPU, latency, and buffer timing. The diagnostic tooling is retained precisely because it
-is the evidence base and the development instrument for this goal.
+The work was approached **incrementally** for sound engineering reasons (see
+`docs/DECISIONS.md`): one validated session, then two, then three, each with real-hardware
+evidence. The diagnostic tooling is retained precisely because it is the evidence base and the
+development instrument for this goal.
 
-**Likely milestones toward it** (each gated by characterization evidence):
-1. Sustained two-app live control (promote Two-App Readiness from diagnostic to product).
-2. N-app session management in `ProcessTapLiveSessionManager` (raise `maxSessions`).
-3. Per-row real control state in the main UI (remove the one-active-session limit).
-4. Resource/latency characterization under many simultaneous sessions.
+**Milestones toward it**:
+1. Sustained two-app live control — **done** (Phase 0–3).
+2. N-app session management in `ProcessTapLiveSessionManager` — **done** (`maxSessions: Int?`,
+   unlimited in the product).
+3. Per-row real control state in the main UI, any number of rows — **done** (per-app stop, Stop
+   All, "+N more" banner, queued start lane, per-app exit handling).
+4. Resource/latency characterization under many simultaneous sessions — **open** (the next gate).
 
-Three-app control (`maxConcurrentLiveSessions = 3`) is implemented and its Release CPU/resource
-gate is considered passed for current scope (see "Three-app cap (cap=3) enabled" above).
-Raising the cap beyond 3 (`N > 3`) remains **deferred to a dedicated plan** — CPU is no longer a
-hard blocker, but N > 3 is not a config bump: it needs resolver serialization / multi-helper UX,
-N-session Core Audio resource-scale evidence, larger-N UI/banner behaviour, sustained long-run
-characterization, the orphan-tap repro, and AudioQueue underrun/jitter measurement (see
-`PLAN_MULTI_APP.md` Phase 5 and `docs/DECISIONS.md`).
+The app-count limit is gone by **owner decision** (`maxConcurrentLiveSessions = nil`), so the
+remaining gap to the north star is **evidence and hardening, not a configuration value**:
+real-hardware N-session characterization (e.g. 5–8 apps: CPU, Drops/Fail/Starv, output change,
+Stop All, sleep/wake), then the deferred many-session hardening (engine self-stops through the
+gates, main-thread hard teardown, sequential Stop All). Real-hardware evidence currently stops at
+three sessions (see "Three-app cap (cap=3) enabled" above). Control also still requires the opt-in
+toggle plus interaction with each row, so "every app in the list, automatically" is not a goal of
+the current design.
 
-The detailed, phased implementation plan lives in [`PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md).
-The first concrete step is **Phase 0: sustained characterization** of two simultaneous
-sessions.
+The phased implementation plan and its status live in [`PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md).
 
 ---
 
@@ -557,7 +677,8 @@ public-API path proves insufficient.
 - Large Core Audio redesign.
 - Installer/uninstaller work required by any future persistent system component.
 
-The current direction remains: preserve the public-API Process Tap approach, grow Product
-control from one-active-session toward multi-app **incrementally as evidence allows**,
-validate behavior with tests/manual diagnostics, and avoid broad audio-path rewrites unless
-evidence shows they are necessary.
+The current direction remains: preserve the public-API Process Tap approach (one independent
+session per app), gather real-hardware evidence for many simultaneous sessions before claiming
+it is stable, validate behavior with tests/manual diagnostics, and avoid broad audio-path
+rewrites unless evidence shows they are necessary. A centralized renderer stays deferred unless
+the N-session measurements show independent sessions do not scale.

@@ -12,7 +12,8 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 
 ## 1. Repo identity
 
-- Local path: `/Users/ahmed/MacMiniMixer`
+- Local path: `/Users/ahmed/MacMiniMixer` on the maintainer's Mac. The path may differ by machine
+  (other clones, agent worktrees, cloud sessions); adjust the `cd` in §9 accordingly.
 - Branch: `main`
 - GitHub: `akwnnwastaken/MacMiniMixer`
 - macOS **Swift + SwiftUI menu bar** app (Windows-Volume-Mixer-inspired).
@@ -41,7 +42,14 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   observer. A prior one caused silent system audio that survived app quit and required
   `sudo killall coreaudiod`.
 - Polling → HAL property-listener migration is **research-only** for now (same danger as above).
-- Product Real **cap stays 3** concurrent sessions; **N > 3 is deferred**.
+- **Product Real has no app-count limit — owner decision.** `AppConstants.maxConcurrentLiveSessions`
+  is `Int? = nil` (unlimited). The cap mechanism stays injectable for tests
+  (`ProcessTapLiveSessionManager(maxSessions:)`, `maxConcurrentSessions` on the start coordinator /
+  facade). **Do not reintroduce a cap without asking the owner.** The remaining gates for many
+  sessions are **real-hardware evidence** (CPU, Drops/Fail/Starv, output change, Stop All, sleep/quit
+  with e.g. 5–8 apps) and the deferred engine-self-stop gating (§7), not a config value.
+- Real control stays **opt-in**: the global "Real app control" toggle defaults to OFF, and only user
+  interaction with a row starts a session.
 - **No broad `MixerViewModel` refactor** without a dedicated prompt.
 - Avoid `*.xcodeproj` / `*.pbxproj` edits unless truly necessary.
 - If a local `MacMiniMixer.xcscheme` Release-profiling change appears unexpectedly, **do not stage
@@ -52,9 +60,10 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 ## 4. Current Product Real state
 
 - **Code layout — the internal Product Real split is COMPLETE (Prompts 223–228).**
-  `ProductRealControlCoordinator` is now a **thin facade (~170 lines) with no start/stop
-  implementation logic**: it owns exactly one `ProductRealControlStateStore` and two sub-coordinators,
-  constructs and wires them, and forwards its unchanged public API. `MixerViewModel` knows **only** the
+  `ProductRealControlCoordinator` is a **thin facade (~180 lines) with no start/stop implementation
+  logic**: it owns exactly one `ProductRealControlStateStore` and two sub-coordinators, constructs and
+  wires them, and forwards its public API (unchanged by the split; `requestAutomaticStart` and
+  `clearQueuedStarts` were added later with the start lane). `MixerViewModel` knows **only** the
   facade (never the store or either sub-coordinator).
   - **`ProductRealControlStateStore`** (`ProductRealControlStateStore.swift`, Prompt 223) — the
     **single** production source of `ProductRealControlState` plus the `onWillChange` callback
@@ -66,17 +75,24 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
     product-only START + resolution path: app-audio resolution (`startResolvedExperimentalControl`,
     `handleAppAudioTargetResolution`, `cancelAppAudioTargetResolution`, `cancelResolutionTask`) and the
     `appAudioResolutionTask` **ownership + `deinit` cancellation**; `productSessionStartBlockReason`
-    (cap/mutual-exclusion preflight); **both `startExperimentalControl` overloads** (sync preflight +
-    async body); diagnostics-callback acceptance (`shouldAcceptCallback`); cached-helper retry;
-    stale-start rejection; stale-orphan cleanup (`cleanupStaleProductLiveStart`); and settle-gate start
-    ordering (`waitForReadyToStart` → `startSession` → orphan `registerStop`). Deps: the **shared**
-    state store, the live-session manager, the settle gate, the app-audio resolver, the ProcessTap
-    eligibility closure, weak `sideEffects`/`context`, and two narrow callbacks (`onEngineStopped`,
-    `refreshActiveName`). It holds **no** reference to the stop side.
+    (mutual-exclusion preflight, plus a count check only when a cap is configured); the slider/mute
+    auto-start `requestAutomaticStart(for:)` (moved here from the view model in `774268a`); **both
+    `startExperimentalControl` overloads** (sync preflight + async body); the **queued start lane**
+    (`isStartLaneBusy`, FIFO drain, `clearQueuedStarts()`); diagnostics-callback acceptance
+    (`shouldAcceptCallback`); the **live-diagnostics focus** (`liveDiagnosticsFocusAppID`,
+    `shouldPublishLiveDiagnostics(for:)`); per-session starvation attribution logging
+    (`ProductRealStarvationAttributionLog`); cached-helper retry; stale-start rejection; stale-orphan
+    cleanup (`cleanupStaleProductLiveStart`); and settle-gate start ordering (`waitForReadyToStart` →
+    `startSession` → orphan `registerStop`). Deps: the **shared** state store, the live-session
+    manager, the settle gate, the app-audio resolver, the ProcessTap eligibility closure, an optional
+    `maxConcurrentSessions: Int?` (default `AppConstants.maxConcurrentLiveSessions` = nil), weak
+    `sideEffects`/`context`, and two narrow callbacks (`onEngineStopped`, `refreshActiveName`). It holds
+    **no** reference to the stop side.
   - **`ProductRealStopCoordinator`** (`ProductRealStopCoordinator.swift`, Prompt 224) — owns the
     product-only STOP path: `stopExperimentalControl(for:reason:)` (per-app stop leaf),
     `stopProductLiveSessions(reason:)` (Stop All core), `handleProductLiveControlStopped(sessionID:result:diagnostics:)`
-    (engine stop callback), `stopRealControlForExitedTargetApps()` (app-exit slice),
+    (engine stop callback), `stopRealControlForExitedTargetApps()` (app-exit slice; also drops queued
+    starts of apps that exited),
     `tearDownProductStateForHardStop()` (hard-teardown state-reset sub-block), and the shared
     `updateActiveLiveControlAppNameAfterProductChange()`. Deps: the **shared** state store, the
     live-session manager, the settle gate, the app-audio resolver (only for app-exit cached-target
@@ -85,9 +101,11 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   - **Facade (`ProductRealControlCoordinator.swift`, slimmed in Prompt 228)** — constructs the store +
     both sub-coordinators (threading the injected engine/settle/resolver deps and weak seam straight
     through; it stores **none** of them itself), wires the three cross-edges, and forwards
-    `productRealControlState` / `setOnWillChange` to the store and the public start/stop methods to the
-    sub-coordinators. Its initializer signature is **unchanged** (MixerViewModel unchanged), and it has
-    no redundant stored dependencies (only `stateStore`, `startCoordinator`, `stopCoordinator`).
+    `productRealControlState` / `setOnWillChange` to the store and the public start/stop methods
+    (including `requestAutomaticStart` and `clearQueuedStarts`) to the sub-coordinators. Its
+    initializer only gained a **defaulted** `maxConcurrentSessions: Int?` parameter in `08d49bc`, so
+    the view model's call site is unchanged, and it has no redundant stored dependencies (only
+    `stateStore`, `startCoordinator`, `stopCoordinator`).
   - **Cross-edges — all three are facade-wired `[weak self]` closures; no direct Start↔Stop sibling
     ownership, no retain cycle:**
     - **Start `onStopped` → Stop:** `startCoordinator.setOnEngineStopped { [weak self] sid, res, diag in
@@ -99,9 +117,23 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
       post-init setters after both sub-coordinators exist).
 - **Still in `MixerViewModel` (cross-subsystem router + lifecycle/UI orchestration — intentional):**
   - `toggleExperimentalControl` (row entry point) — delegates to `coordinator.startExperimentalControl`
-    on start and `coordinator.stopExperimentalControl` on stop.
+    on start and `coordinator.stopExperimentalControl` on stop. `setAppVolume` / `setMuted` (slider /
+    mute entry points) forward to `coordinator.requestAutomaticStart(for:)`; the former
+    `startAutomaticRealControlIfNeeded` body now lives in the start coordinator.
   - `stopProcessTapLiveControl` (router: product vs advanced-manual) — its product branch delegates
     to `coordinator.stopProductLiveSessions`; `handleAdvancedManualLiveControlStopped` (advanced-manual stop).
+    The public no-argument `stopProcessTapLiveControl()` (banner Stop / Stop All) also calls
+    `coordinator.cancelAppAudioTargetResolution(reason: .userStopped)` since `774268a`.
+  - `stopTwoAppReadinessForPanelClose` (panel `onDisappear`) — calls `coordinator.clearQueuedStarts()`
+    **before** cancelling the in-flight resolution, so queued starts never drain into background
+    helper probing after the panel closes.
+  - `isLiveDiagnosticsDisplayVisible` — a plain stored property (**not** `@Published`, hidden by
+    default) plus `setLiveDiagnosticsDisplayVisible(_:)`; `MixerPanelView` sets it on appear (current
+    Advanced state), clears it on disappear, and sets it from the Advanced disclosure action (no
+    `onChange`, macOS 13 compatible).
+  - `refreshProcessTapSelectionAfterAppRefresh` — when the Advanced-selected app vanishes it stops
+    **only Advanced manual control** (guarded on `advancedManualLiveControlActive`, `da2b06e`); product
+    sessions of exited apps are stopped per app by `stopRealControlForExitedTargetApps`.
   - `applyLiveControlStoppedDisplay` + `showLiveControlWarningIfNeeded` (**shared** display cleanup
     used by both product and advanced-manual stops — reached from the coordinator through the seam's
     `applyLiveControlStoppedDisplay` callback; do **not** move into the product coordinator).
@@ -126,8 +158,10 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
     `isExperimentalRealAppControlEnabled`, `advancedManualLiveControlActive`,
     `isTwoAppReadinessRunning`, `isProcessTapTesting`, `isHelperBusy`, `isAppAudioTargetResolving`,
     `isProcessTapLiveControlActive`, `processTapLiveDiagnostics` (added Prompt 216 for the Stop All
-    no-active-session display path). The unused `selectedProcessTapAppID` requirement was **removed**
-    in Prompt 221 (the coordinator never read it; the VM keeps its own property for the row filter).
+    no-active-session display path), and `isLiveDiagnosticsDisplayVisible` (added in `5a78656`; gates
+    only the per-callback product diagnostics publish). The unused `selectedProcessTapAppID`
+    requirement was **removed** in Prompt 221 (the coordinator never read it; the VM keeps its own
+    property for the row filter).
   - `MixerViewModel` conforms to both; the coordinator holds them **weakly** (the VM owns the
     coordinator, so a strong back-reference would be a retain cycle).
 - **Coordinator init / IUO note:** `MixerViewModel` stores the coordinator as an implicitly-unwrapped
@@ -145,29 +179,100 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   `@Published willSet`). The VM keeps a forwarding computed `productRealControlState` so all its
   existing call sites are unchanged.
 - Uses Core Audio **Process Tap + `.mutedWhenTapped` + AudioQueue replay/gain**. Each session owns
-  its own tap / private aggregate device / IOProc / replay AudioQueue.
-- **Up to 3 concurrent** Product Real sessions; the active banner summarizes 3+ apps as "first two
-  names +1 more" with "Stop All". **N > 3 deferred.**
+  its own tap / private aggregate device / IOProc / replay AudioQueue, so CPU and Core Audio load
+  grow per active app.
+- **No app-count limit (owner decision, `08d49bc`):** any number of Product Real sessions can run at
+  once (`maxConcurrentLiveSessions = nil`; the product manager is built with `maxSessions: nil`). The
+  active banner summarizes 3+ apps as "first two names +N more" (full list in the accessibility
+  label) with "Stop All". Fake-backed tests cover 6–8 concurrent sessions; **real hardware has only
+  been characterized up to 3** (see §7/§10).
+- **Queued start lane (`774268a`):** at most one Product Real helper resolution or product start is
+  *physically* in flight. A start requested meanwhile (slider/mute → `requestAutomaticStart`, or the
+  row toggle; direct-PID or helper) is queued FIFO in `ProductRealControlState.queuedStarts`. Queued
+  apps report `isOperationPending` (pending badge + dedupe) and stay visible in the row filter.
+  Ordering: dedupe → hard blocks reject immediately (Real off, two-app test, ineligible app, helper
+  probe busy) → lane busy ⇒ enqueue → `productSessionStartBlockReason` only once the lane is free.
+  The lane drains only when it physically frees: at the end of a start's post-await block (after a
+  cached-helper retry has taken the lane; in the stale branch only after the orphan teardown is
+  registered with the settle gate) and when a resolution task finishes (a *cancel* does not drain).
+  Each drained entry re-runs its full preflight against current `context.apps` (gain = slider at
+  drain time). The in-flight tracking (`inFlightStartRequestIDs`, `inFlightResolutionTaskCount`) is
+  private to the start coordinator, **not** in the shared state, so global resets cannot free the
+  lane while a cancelled start/probe is still running. Queued entries are dropped by per-app stop
+  (`clearStartRequest`), Stop All / Real off / output change (`clearAllStartRequests` /
+  `clearAllOperations`), sleep / termination (hard-teardown reset), panel close
+  (`clearQueuedStarts`), and app exit (`removeQueuedStarts(notIn:)`).
+- **Live diagnostics focus / visibility (`5a78656`):** only the focused session publishes to the
+  shared Advanced surface (`setProcessTapLiveDiagnostics` / `setLiveControlDiagnosticProgress`). The
+  newest start takes the focus; if the focused app no longer has a session, the next accepted
+  callback from a surviving session adopts it (no stop-side bookkeeping); stale callbacks are
+  rejected before they can touch the focus. Per-callback publishing also requires
+  `isLiveDiagnosticsDisplayVisible` (Advanced section on screen). Not gated: start / failure / stop
+  display writes, the Advanced manual path, `recordDiagnostics`, the controller's ~4 Hz publish gate,
+  and the per-session starvation attribution log (`617b7f2`), which runs for every accepted callback.
+- **Multi-session fixes:** quitting the Advanced-selected app stops only Advanced manual control
+  (`da2b06e`); the cached-helper retry runs alongside other product sessions and is suppressed only
+  by Advanced manual control (`c57bf37`); Stop All also cancels an in-flight helper resolution
+  (`774268a`).
 - Normal per-app row sliders/mute are **UI-state/preview only** when Real Control is not active for
   that row — they do not change any app's real per-app audio. When Real Control **is** active for a
   row, that row's slider/gain drives the **real** Process Tap gain.
-- **System output volume is real Core Audio** (via `SystemVolumeControlling`).
-- `MockAudioController` (the production `AudioControlling`) is a UI-state cache for preview slider
-  values and the system-volume display — it does **not** mean the app's real audio paths are fake.
+- **System output volume is real Core Audio** (via `SystemVolumeControlling`). Writability is probed
+  proactively (`isCurrentOutputVolumeSettable()`, `3c2f4e8`) at init, on output-device change, and
+  after a successful selection, so the "Read-only" badge shows before the first drag.
+- `PreviewAudioStateController` (renamed from `MockAudioController` in `54d351b`; the production
+  `AudioControlling`) is an in-memory store for preview slider values and the system-volume display —
+  it does **not** mean the app's real audio paths are fake.
 - **Normal-use 3-session long-run smoke PASSED (with caveat)** on one real Mac (Drops/Fail/Starv 0,
-  CPU ~20–35% depending on panel state, no `coreaudiod` restart).
-- **Rapid manual Real on/off toggle spam** is now guarded (Prompt 194): a per-app
-  pending-operation flag in `ProductRealControlState` makes `MixerViewModel` ignore toggle/
-  slider-auto-start attempts for a row while its start/stop is in flight, and the row shows a
-  non-interactive "working" spinner badge. This is layered **above** the settle (P179) and
-  lifecycle-serialization (P181) gates; the audio callback is untouched. Deliberate consequence: a
-  toggle can no longer cancel an in-flight start mid-flight — the start finishes first.
+  CPU ~20–35% depending on panel state, no `coreaudiod` restart). Nothing has been measured on real
+  hardware with more than 3 sessions.
+- **Rapid manual Real on/off toggle spam** is guarded (Prompt 194): a per-app pending-operation flag
+  in `ProductRealControlState` makes toggle / slider-auto-start attempts for a row no-ops while its
+  start/stop is in flight (or its start is queued), and the row shows a non-interactive "working"
+  spinner badge. This is layered **above** the settle (P179) and lifecycle-serialization (P181)
+  gates; the audio callback is untouched. Deliberate consequence: a toggle can no longer cancel an
+  in-flight start mid-flight — the start finishes first.
 - **Real-device stress testing should continue** (the guard's real-world effect is not yet
-  hardware-verified). See `docs/MANUAL_TEST_CHECKLIST.md` §18.
+  hardware-verified). See `docs/MANUAL_TEST_CHECKLIST.md` §18 and the many-app section §19.
+- **Release packaging exists but no release is cut:** `scripts/package-app.sh`, the `Build`
+  workflow's `package` job (`MacMiniMixer-app` artifact), and `release.yml` (draft release on `v*`
+  tags) — see `docs/RELEASING.md` (`e0a60b4`). `MARKETING_VERSION` is still `0.13`.
 
 ## 5. Recent key commits
 
-Most recent (the **internal Product Real split — now COMPLETE**):
+Most recent (**multi-app / no-limit work, release scaffolding, cleanups** — after the split):
+
+```
+774268a Queue Product Real starts behind a single start lane instead of rejecting them
+5a78656 Publish Product Real live diagnostics for one session, only while visible
+c57bf37 Let the cached-helper retry run alongside other Product Real sessions
+da2b06e Stop only Advanced manual control when the Advanced-selected app quits
+08d49bc Remove the Product Real Control app-count limit (cap 3 -> unlimited)
+e0a60b4 Add release packaging: ad-hoc signed zip script, CI artifact, draft-release workflow
+3a84483 Complete accessibility coverage of the menu bar UI
+3c2f4e8 Probe system output volume writability proactively on device changes
+1469eb2 Fill NSHumanReadableCopyright in Info.plist
+f94a5cd Remove unused production mock types
+54d351b Rename MockAudioController to PreviewAudioStateController
+617b7f2 Add per-session starvation attribution logging
+040c5db Update docs after completing the internal Product Real coordinator split   (docs)
+```
+
+The docs refresh describing these commits lands right after `774268a`. Every commit message in
+`git log 617b7f2^..774268a` is detailed (rationale, exact scope, tests) — read them before touching
+the multi-session code.
+
+- **`08d49bc`** is the owner decision (no app-count limit); the cap mechanism stays testable.
+- **`da2b06e`, `c57bf37`, `5a78656`, `774268a`** are the follow-ups that make many concurrent
+  sessions behave: per-app exit handling, cached-helper retry, diagnostics focus/visibility, and the
+  queued start lane. The design notes behind them are summarized in `docs/DECISIONS.md` (three new
+  entries) and `docs/PLAN_MULTI_APP.md`.
+- **`e0a60b4`** adds packaging only — no release, no tag, no version bump.
+- **`54d351b`, `f94a5cd`, `1469eb2`, `3c2f4e8`, `3a84483`** close the earlier §7 candidates
+  (mock rename/removal, copyright, proactive writability + `SystemOutputCoordinator` failure-path
+  tests, accessibility).
+
+Preceding (the **internal Product Real split — COMPLETE**):
 
 ```
 bc533d6 Slim ProductRealControlCoordinator into a true facade            (Prompt 228)
@@ -293,12 +398,14 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 ## 6. Test & CI state (as of last update)
 
-- **Local:** last full run = **414 passed / 0 failed / 0 skipped** (code state = `bc533d6`, the
-  current HEAD before this docs-only refresh). The +7 over the prior 407 = 18 new
-  `ProductRealStartCoordinatorTests` + 2 facade cross-edge integration tests − 13 start/resolution
-  tests moved out of `ProductRealControlCoordinatorTests` (Prompt 227); Prompt 228 (facade slimming)
-  changed no test count.
-- **CI:** **green** at the last pushed state (GitHub Actions Build workflow, success).
+- **Last full run (CI, macos-15):** **515 passed / 0 failed / 0 skipped** (code state =
+  `774268a`). History: 414 after the split (`bc533d6`), 431 after the attribution logging
+  (`617b7f2`); the commits since then added, among others, 20 `SystemOutputCoordinatorTests`, the
+  unlimited-session tests (6–8 sessions at manager / facade / VM level), the diagnostics focus /
+  visibility tests, and `ProductRealStartLaneTests`.
+- **CI:** **green** (GitHub Actions `Build` workflow: `build` job with tests, then the `package` job
+  that uploads the `MacMiniMixer-app` zip). The `Release` workflow has not run against a tag (no tag
+  has been pushed).
 - An earlier README-only commit had a one-off CI failure that **passed on rerun** (a flake).
 - `xcodebuild test` exits `0` on pass, `65` on any test failure. Get exact counts from the newest
   result bundle:
@@ -306,16 +413,37 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 ## 7. Known deferred / candidate items
 
-- **N > 3** concurrent sessions — deferred.
-- **`MARKETING_VERSION` bump / tag / public release** — deferred (stays `0.13`).
+**Open with many sessions (needs real hardware; deliberately not changed yet — audio-adjacent):**
+
+- **No real-hardware characterization for more than 3 sessions.** CPU, memory/threads,
+  Drops/Fail/Starv, output-device change, Stop All, quit-one-app, and sleep/wake with e.g. 5–8 Real
+  apps have **not** been measured. This is the first gate (§10).
+- **Engine self-stops bypass the gates.** Stops the live controller initiates itself (output-device
+  change or target-app exit detected by its diagnostics timer, timeout) go around the Core Audio
+  lifecycle gate (P181) and the stop→start settle gate (P179), so many sessions can tear down
+  concurrently.
+- **Hard teardown blocks the main thread** at sleep/quit (`stopLiveControlNow`, synchronous, per
+  session fade + destroy): estimated from the code path at roughly 0.4–3.4 s with many sessions — not
+  measured.
+- **Stop All is sequential:** `stopProductLiveSessions` stops sessions one after another (N × fade +
+  destroy), registered as one settle-gate task.
+- **The menu bar label / scene still observes the whole view model**, so any `objectWillChange`
+  re-evaluates it (diagnostics are now gated, but other state changes are not).
+- Smaller items from the multi-app plan: the shared active-name display uses dictionary order
+  (`activeSessions.first`, not deterministic); slider moves during a start's optimistic window are
+  dropped (no `liveSessionID` yet) until the next move after confirmation; optionally register a
+  settle after a `.discoveredHelper` resolution so the first helper start also waits after the
+  probe's aggregate destroy.
+
+**Other deferred items:**
+
+- **`MARKETING_VERSION` bump / tag / public release** — deferred (stays `0.13`). Packaging scaffolding
+  is ready (`docs/RELEASING.md`); Developer ID signing + notarization is documented only.
 - **Core Audio property-listener (polling → HAL) migration** — deferred / research-only.
 - **Broad `MixerViewModel` / `ProductRealControlCoordinator` extraction** — deferred.
-- **`Info.plist` `NSHumanReadableCopyright`** — empty; deferred until owner/year confirmed
-  (candidates: `Copyright © 2026 Ahmed Tuğra Kasem`, or owner-neutral `© 2026 MacMiniMixer
-  contributors` — project is MIT-licensed).
-- Candidates, not urgent: UI **accessibility polish**; direct **`SystemOutputCoordinator`
-  failure-path tests**; **`MockAudioController` rename**; **localization**; **keyboard
-  navigation**; **view/snapshot** and **integration** tests.
+- Candidates, not urgent: **localization**; **keyboard navigation**; **view/snapshot** and
+  **integration** tests; a real bundle identifier before any Developer ID distribution (still
+  `com.example.MacMiniMixer`).
 
 ## 8. Environment notes
 
@@ -339,8 +467,9 @@ git status --short
 git log -12 --oneline
 git diff --name-only
 git diff --name-only -- '*.xcodeproj' '*.pbxproj'
-git grep -n "maxConcurrentLiveSessions" -- MacMiniMixer          # expect cap = 3
+git grep -n "maxConcurrentLiveSessions" -- MacMiniMixer          # expect `Int? = nil` (unlimited)
 git grep -n "MARKETING_VERSION = 0.13" -- '*.pbxproj'            # expect present (unchanged)
+git tag --list 'v*'                                              # expect empty (no release cut)
 ```
 
 Full test + Release build (when code changes):
@@ -352,18 +481,23 @@ xcodebuild build -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configura
   -destination 'platform=macOS' -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO
 ```
 
-## 10. Product Real internal split complete & recommended next direction
+## 10. Current state & recommended next direction
 
-### Product Real internal split complete
+### Where things stand
 
-The internal Product Real coordinator split is **done** (Prompts 223–228, full suite green at 414).
-`ProductRealControlCoordinator` is now a **thin facade (~170 lines) with no start/stop implementation**
-composing one `ProductRealControlStateStore` + `ProductRealStartCoordinator` + `ProductRealStopCoordinator`
-(exact ownership in §4). One shared state source; three `[weak self]` facade-wired cross-edges with no
-sibling ownership and no retain cycle; the facade initializer signature and public API are unchanged;
-and **`MixerViewModel` stayed byte-for-byte unchanged** across the state-store, Stop, Start, and
-facade-slimming steps. There is **no further Product Real structural refactor pending**. First re-verify
-live state (§9) — **do not trust the line numbers in this file; inspect the repo.**
+The internal Product Real coordinator split is **done** (Prompts 223–228): `ProductRealControlCoordinator`
+is a **thin facade with no start/stop implementation** composing one `ProductRealControlStateStore` +
+`ProductRealStartCoordinator` + `ProductRealStopCoordinator` (exact ownership in §4), with one shared
+state source and three `[weak self]` facade-wired cross-edges (no sibling ownership, no retain cycle).
+`MixerViewModel` stayed byte-for-byte unchanged during the split; the later behavior commits
+(`da2b06e`, `5a78656`, `774268a`) changed it deliberately and narrowly (§4). There is **no further
+Product Real structural refactor pending**.
+
+On top of that, the owner removed the app-count limit (`08d49bc`) and the multi-session follow-ups
+landed (per-app exit handling, cached-helper retry, diagnostics focus/visibility, queued start lane).
+What is missing is **evidence**, not code: nothing has been measured on real hardware with more than
+three sessions. First re-verify live state (§9) — **do not trust the line numbers in this file;
+inspect the repo.**
 
 ### What remains in `MixerViewModel` (intentional — cross-subsystem, NOT Product Real)
 
@@ -371,7 +505,8 @@ The view model remains the **cross-subsystem router and lifecycle/UI orchestrati
 responsibilities are deliberately *not* in any Product Real coordinator — they are not product-only, so
 moving them into a product-scoped type would *increase* coupling:
 
-- `toggleExperimentalControl` — the row entry point (delegates start/stop to the facade).
+- `toggleExperimentalControl` — the row entry point (delegates start/stop to the facade);
+  `setAppVolume` / `setMuted` forward to `requestAutomaticStart`.
 - `stopProcessTapLiveControl` — the **product-vs-advanced-manual router** (product branch delegates
   to `coordinator.stopProductLiveSessions`); `handleAdvancedManualLiveControlStopped`.
 - `applyLiveControlStoppedDisplay` + `showLiveControlWarningIfNeeded` — **shared** display/status
@@ -382,25 +517,31 @@ moving them into a product-scoped type would *increase* coupling:
   `coordinator.tearDownProductStateForHardStop()`.
 - `stopActiveAudioWorkForOutputDeviceChange` — the 5-subsystem output-device-change fan-out.
 - `setExperimentalRealAppControlEnabled`, `handleSystemWillSleep` / `handleSystemDidWake` /
-  `stopProcessTapLiveControlForTermination`, and `refreshApplications` / running-app orchestration
+  `stopProcessTapLiveControlForTermination`, `stopTwoAppReadinessForPanelClose` (also clears queued
+  starts), `setLiveDiagnosticsDisplayVisible`, and `refreshApplications` / running-app orchestration
   (delegates only the app-exit product slice).
 - Advanced diagnostics, helper discovery/probe, and Two-App Readiness orchestration.
 
 ### Recommended next engineering direction (conservative)
 
-- **Stop Product Real structural refactoring for now** — the facade/store/start/stop boundary is
-  healthy and complete; do **not** split it further absent a concrete defect.
-- If more decomposition is wanted, do a **read-only reassessment of the remaining `MixerViewModel`
-  responsibilities** first, comparing three candidate boundaries as the *next possible* extraction
-  targets: (1) lifecycle / global teardown (`tearDownAllProcessTapWork`, sleep/wake/termination
-  entry points), (2) app-refresh orchestration (`refreshApplications` + its selection-refresh
-  helpers), and (3) shared display/status handling (`applyLiveControlStoppedDisplay` /
-  `showLiveControlWarningIfNeeded` / `showStatus`). **Do not force cross-subsystem responsibilities
-  into a Product Real coordinator** — these are candidates for their *own* focused types only if a
-  clean, self-contained boundary emerges.
-- If no clearly independent boundary emerges, **resume feature work or real-hardware stability
-  verification** (rapid-toggle guard field-check, 3-session long-run/jitter smokes — see
-  `docs/MANUAL_TEST_CHECKLIST.md`) rather than refactoring for its own sake.
+1. **Real-hardware N-session characterization first** (procedure: `docs/MANUAL_TEST_CHECKLIST.md`
+   §19). Release build, one real Mac, e.g. **5–8** Real apps (mix of direct apps and a browser/helper
+   row): start them quickly via sliders (rows should queue, then start one by one); record panel-closed
+   CPU, memory, threads, and the Advanced card's Drops/Fail/Starv/Gap for the focused session; then
+   per-app stop, Stop All (time until audio is back and CPU ~0%), an output-device change with all
+   sessions active, quitting one controlled app, and sleep/wake. Watch for orphaned mutes (an app
+   silent until MacMiniMixer quits) and for `sudo killall coreaudiod` being needed. Record results as
+   `> Reference (…)` blocks; **do not invent numbers** — if it was not measured, say so.
+2. **Then the deferred engine-self-stop gating** (§7): route controller-initiated stops (output
+   change / app exit / timeout) through the lifecycle (P181) and settle (P179) gates so N sessions do
+   not tear down at once. This is audio-adjacent: small, test-first steps, and a real-hardware retest.
+3. After that, guided by the measurements: Stop All parallelism/latency, the main-thread hard
+   teardown at sleep/quit, and narrowing what the menu bar label observes.
+4. Optional: a **read-only reassessment of the remaining `MixerViewModel` responsibilities** —
+   (1) lifecycle / global teardown, (2) app-refresh orchestration (`refreshApplications` + its
+   selection-refresh helpers), (3) shared display/status handling. **Do not force cross-subsystem
+   responsibilities into a Product Real coordinator**; extract only if a clean, self-contained
+   boundary emerges.
 
-Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION`; keep the cap at 3 and
-`N > 3` deferred.
+Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION`; do **not** reintroduce an
+app-count cap without the owner's say-so; keep Real control opt-in.
