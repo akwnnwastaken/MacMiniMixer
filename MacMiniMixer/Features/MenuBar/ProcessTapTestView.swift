@@ -109,6 +109,8 @@ struct ProcessTapTestView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Process Tap Test, experimental"))
+            .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
 
             if isExpanded {
                 content
@@ -140,6 +142,7 @@ struct ProcessTapTestView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(controlsDisabled || (apps.isEmpty && advancedTarget == nil))
+                .accessibilityHint(Text(testButtonSpokenHint))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -173,6 +176,7 @@ struct ProcessTapTestView: View {
                 .buttonStyle(.plain)
                 .disabled(visibleAppControlsDisabled)
                 .opacity(visibleAppControlsDisabled ? 0.52 : 1)
+                .accessibilityHint(Text("Briefly mutes the selected app to test Process Tap mute behavior"))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -202,6 +206,7 @@ struct ProcessTapTestView: View {
                 .buttonStyle(.plain)
                 .disabled(replayControlsDisabled)
                 .opacity(replayControlsDisabled ? 0.52 : 1)
+                .accessibilityHint(Text(replayProbeSpokenHint))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -215,9 +220,11 @@ struct ProcessTapTestView: View {
             }
 
             HStack(spacing: 7) {
+                // Visual caption only; the picker itself carries the "Replay gain" label.
                 Text("Replay gain")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
                 Spacer(minLength: 0)
 
@@ -287,6 +294,8 @@ struct ProcessTapTestView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(apps.isEmpty || controlsDisabled)
+        .accessibilityLabel(Text("Process Tap Test app"))
+        .accessibilityValue(Text(selectedAppSpokenValue))
     }
 
     private var liveControlRow: some View {
@@ -304,10 +313,12 @@ struct ProcessTapTestView: View {
                     Label("Live active", systemImage: "record.circle.fill")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.green)
+                        .accessibilityLabel(Text("Live control is active"))
                 } else {
                     Label("Live control", systemImage: "dot.radiowaves.left.and.right")
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("Live control is not active"))
                 }
 
                 Spacer(minLength: 0)
@@ -320,6 +331,7 @@ struct ProcessTapTestView: View {
                             .font(.caption.weight(.medium))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Stop live control"))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(
@@ -340,6 +352,7 @@ struct ProcessTapTestView: View {
                     .buttonStyle(.plain)
                     .disabled(visibleAppControlsDisabled)
                     .opacity(visibleAppControlsDisabled ? 0.52 : 1)
+                    .accessibilityHint(Text("Experimental. Replays the selected app's audio at the replay gain until stopped"))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(
@@ -391,6 +404,9 @@ struct ProcessTapTestView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(replayControlsDisabled)
+        .accessibilityLabel(Text("Replay gain"))
+        .accessibilityValue(Text(selectedReplayGain.percentLabel))
+        .accessibilityHint(Text("Gain used by Replay Probe and Live Control"))
     }
 
     private var controlsDisabled: Bool {
@@ -423,12 +439,29 @@ struct ProcessTapTestView: View {
         apps.first { $0.id == selectedAppID }?.name ?? "Select app"
     }
 
+    private var selectedAppSpokenValue: String {
+        apps.first { $0.id == selectedAppID }?.name ?? "None selected"
+    }
+
+    private var testButtonSpokenHint: String {
+        advancedTarget == nil
+            ? "Runs a short Process Tap diagnostic on the selected app"
+            : "Runs a short Process Tap diagnostic on the Advanced target"
+    }
+
+    private var replayProbeSpokenHint: String {
+        advancedTarget == nil
+            ? "Briefly mutes the selected app and replays its captured audio at the replay gain"
+            : "Briefly mutes the selected helper and replays its captured audio at the replay gain"
+    }
+
     private func advancedTargetRow(_ target: AdvancedProcessTapTarget) -> some View {
         HStack(spacing: 7) {
             Image(systemName: "scope")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.blue)
                 .frame(width: 13)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Advanced target: \(target.displayName)")
@@ -441,6 +474,7 @@ struct ProcessTapTestView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
+            .accessibilityElement(children: .combine)
 
             Spacer(minLength: 0)
 
@@ -458,6 +492,8 @@ struct ProcessTapTestView: View {
             }
             .buttonStyle(.plain)
             .disabled(controlsDisabled)
+            .accessibilityLabel(Text("Clear Advanced target"))
+            .accessibilityHint(Text("Tests the selected app instead of the helper process"))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -505,6 +541,7 @@ struct ProcessTapTestView: View {
                 }
             }
             .frame(height: 7)
+            .accessibilityHidden(true)
 
             HStack(spacing: 8) {
                 Text("Peak \(formattedLevel(progress.peakLevel))")
@@ -520,6 +557,12 @@ struct ProcessTapTestView: View {
                 .fill(Color.accentColor.opacity(0.07))
         )
         .animation(.linear(duration: 0.08), value: progress)
+        // One meter element: the decorative bar is hidden and the visible metric texts are
+        // replaced by a spoken value ("Peak 42 percent, RMS 10 percent, ...").
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Live level"))
+        .accessibilityValue(Text(levelMeterSpokenValue(progress)))
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     private func resultLine(_ result: ProcessTapTestResult) -> some View {
@@ -529,11 +572,13 @@ struct ProcessTapTestView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(result.severity.tint)
                     .frame(width: 13)
+                    .accessibilityHidden(true)
 
                 Text(result.message)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityLabel(Text("\(result.severity.spokenName): \(result.message)"))
 
                 Spacer(minLength: 0)
             }
@@ -584,6 +629,8 @@ struct ProcessTapTestView: View {
                 Spacer(minLength: 0)
                 Text(diagnostics.selectedGain.percentLabel)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(liveDiagnosticsSpokenLabel(diagnostics)))
 
             // Neutral waiting/no-audio state: the tapped app has not produced real audio yet, so a
             // drained queue is idle, not starvation. Shown instead of misreading it as a problem.
@@ -619,6 +666,26 @@ struct ProcessTapTestView: View {
     private func formattedLevel(_ level: Double) -> String {
         String(format: "%.3f", level)
     }
+
+    private func levelMeterSpokenValue(_ progress: ProcessTapDiagnosticProgress) -> String {
+        let audioText = progress.audioDetected ? "audio detected" : "no audio detected"
+        return "Peak \(spokenPercent(progress.peakLevel)), RMS \(spokenPercent(progress.rmsLevel)), \(progress.callbackCount) callbacks, \(audioText)"
+    }
+
+    private func liveDiagnosticsSpokenLabel(_ diagnostics: ProcessTapLiveDiagnostics) -> String {
+        "\(diagnostics.enqueuedBufferCount) buffers queued, \(diagnostics.droppedBufferCount) drops, \(diagnostics.totalFailureCount) failures, gain \(diagnostics.selectedGain.percentLabel)"
+    }
+
+    /// Spoken form of a 0...1 linear level, e.g. "42 percent". Small non-zero levels read as
+    /// "less than 1 percent" instead of rounding down to zero.
+    private func spokenPercent(_ level: Double) -> String {
+        let percent = min(max(level, 0), 1) * 100
+        if percent > 0, percent < 1 {
+            return "less than 1 percent"
+        }
+
+        return "\(Int(percent.rounded())) percent"
+    }
 }
 
 private extension ProcessTapTestResult.Severity {
@@ -637,6 +704,16 @@ private extension ProcessTapTestResult.Severity {
             return .blue
         case .warning:
             return .orange
+        }
+    }
+
+    /// Spoken severity for result lines, replacing the hidden icon.
+    var spokenName: String {
+        switch self {
+        case .info:
+            return "Info"
+        case .warning:
+            return "Warning"
         }
     }
 }

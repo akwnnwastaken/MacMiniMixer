@@ -61,6 +61,8 @@ struct TwoAppReadinessTestView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Two-App Readiness"))
+            .accessibilityValue(Text(disclosureSpokenValue))
 
             if isExpanded {
                 content
@@ -106,15 +108,18 @@ struct TwoAppReadinessTestView: View {
             }
 
             HStack(spacing: 8) {
+                // "Gain" / "Dur" are visual captions; the pickers carry their own labels.
                 Text("Gain")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
                 gainPicker
 
                 Text("Dur")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
                 durationPicker
 
@@ -128,6 +133,7 @@ struct TwoAppReadinessTestView: View {
                             .font(.caption.weight(.medium))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Stop All two-app test sessions"))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(
@@ -148,6 +154,7 @@ struct TwoAppReadinessTestView: View {
                     .buttonStyle(.plain)
                     .disabled(!canStart)
                     .opacity(canStart ? 1 : 0.48)
+                    .accessibilityHint(Text("Starts live control on both selected targets at once, then stops automatically after the selected duration"))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(
@@ -230,6 +237,9 @@ struct TwoAppReadinessTestView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(isRunning || eligibleApps.isEmpty)
+        .accessibilityLabel(Text("\(title) target"))
+        .accessibilityValue(Text(selectedTargetSpokenValue(selectedAppID)))
+        .accessibilityHint(Text("Chooses a tap-eligible target for the two-app test"))
     }
 
     private var gainPicker: some View {
@@ -268,6 +278,8 @@ struct TwoAppReadinessTestView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(isRunning)
+        .accessibilityLabel(Text("Two-app test gain"))
+        .accessibilityValue(Text(selectedGain.percentLabel))
     }
 
     private var durationPicker: some View {
@@ -307,6 +319,8 @@ struct TwoAppReadinessTestView: View {
         .menuStyle(.borderlessButton)
         .disabled(isRunning)
         .help("How long the two-app test runs before auto-stopping. Longer runs gather sustained-stability evidence.")
+        .accessibilityLabel(Text("Test duration"))
+        .accessibilityValue(Text(selectedDuration.spokenLabel))
     }
 
     private func diagnosticRow(_ session: ProcessTapTwoAppReadinessSessionSnapshot) -> some View {
@@ -355,6 +369,9 @@ struct TwoAppReadinessTestView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.orange.opacity(0.055))
         )
+        // One element per session card; the abbreviated metrics ("D 0", "F 0") are spoken in full.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(sessionSpokenSummary(session)))
     }
 
     private func resultLine(_ result: ProcessTapTwoAppReadinessResult) -> some View {
@@ -364,11 +381,13 @@ struct TwoAppReadinessTestView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(result.severity.tint)
                     .frame(width: 13)
+                    .accessibilityHidden(true)
 
                 Text(result.message)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityLabel(Text("\(result.severity.spokenName): \(result.message)"))
 
                 Spacer(minLength: 0)
             }
@@ -491,6 +510,75 @@ struct TwoAppReadinessTestView: View {
     private func formattedLevel(_ level: Double) -> String {
         String(format: "%.3f", level)
     }
+
+    private var disclosureSpokenValue: String {
+        let state = isExpanded ? "Expanded" : "Collapsed"
+        return isRunning ? "\(state), test running" : state
+    }
+
+    private func selectedTargetSpokenValue(_ appID: MixerAppItem.ID?) -> String {
+        guard let appID,
+              let option = target(for: appID) else {
+            return "None selected"
+        }
+
+        return option.title
+    }
+
+    private func sessionSpokenSummary(_ session: ProcessTapTwoAppReadinessSessionSnapshot) -> String {
+        let diagnostics = session.diagnostics
+        let callbackCount: Int = diagnostics?.callbackCount ?? 0
+        let peakLevel: Double = diagnostics?.peakLevel ?? 0
+        let rmsLevel: Double = diagnostics?.rmsLevel ?? 0
+        let queuedCount: Int = diagnostics?.enqueuedBufferCount ?? 0
+        let dropCount: Int = diagnostics?.droppedBufferCount ?? 0
+        let failureCount: Int = diagnostics?.totalFailureCount ?? 0
+
+        var parts: [String] = [
+            "\(session.slot.label): \(session.appName)",
+            session.phase.label,
+            "\(callbackCount) callbacks",
+            "peak \(spokenPercent(peakLevel))",
+            "RMS \(spokenPercent(rmsLevel))",
+            "\(queuedCount) buffers queued",
+            "\(dropCount) drops",
+            "\(failureCount) failures",
+            "gain \(session.selectedGain.percentLabel)"
+        ]
+
+        if let message = session.message, !message.isEmpty {
+            parts.append(message)
+        }
+
+        return parts.joined(separator: ", ")
+    }
+
+    /// Spoken form of a 0...1 linear level, e.g. "42 percent". Small non-zero levels read as
+    /// "less than 1 percent" instead of rounding down to zero.
+    private func spokenPercent(_ level: Double) -> String {
+        let percent = min(max(level, 0), 1) * 100
+        if percent > 0, percent < 1 {
+            return "less than 1 percent"
+        }
+
+        return "\(Int(percent.rounded())) percent"
+    }
+}
+
+private extension ProcessTapTwoAppReadinessDurationOption {
+    /// Spoken form of the compact duration label ("10s" → "10 seconds").
+    var spokenLabel: String {
+        switch self {
+        case .short:
+            return "\(Int(duration)) seconds"
+        case .oneMinute:
+            return "1 minute"
+        case .fiveMinutes:
+            return "5 minutes"
+        case .thirtyMinutes:
+            return "30 minutes"
+        }
+    }
 }
 
 private extension ProcessTapLiveSessionPhase {
@@ -539,6 +627,16 @@ private extension ProcessTapTestResult.Severity {
             return .blue
         case .warning:
             return .orange
+        }
+    }
+
+    /// Spoken severity for result lines, replacing the hidden icon.
+    var spokenName: String {
+        switch self {
+        case .info:
+            return "Info"
+        case .warning:
+            return "Warning"
         }
     }
 }
