@@ -436,6 +436,23 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "a", cap: 1))
     }
 
+    // A nil cap is the product default (no app-count limit): never blocks, however many apps run.
+    func testNilCapNeverBlocksNewOrExistingApp() {
+        var state = ProductRealControlState()
+        for appID in ["a", "b", "c", "d", "e", "f", "g"] {
+            state.beginSession(
+                visibleAppID: appID,
+                displayName: appID,
+                controlledProcessIdentifier: 100,
+                source: .directVisiblePID
+            )
+        }
+
+        XCTAssertEqual(state.activeSessions.count, 7)
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "h", cap: nil))
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "a", cap: nil))
+    }
+
     func testGainOptionUsesCurrentMuteAndVolumeMapping() {
         let audibleApp = MixerAppItem(
             id: "spotify",

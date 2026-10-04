@@ -45,9 +45,10 @@ enum RealControlBannerPresenter {
             let count = productNames.count
             let isMultiple = count >= 2
             let joined = productNames.joined(separator: ", ")
-            // Visible summary stays one line: for 3+ apps show the first two names plus a
-            // "+N more" count so the narrow panel does not truncate mid-name. The accessibility
-            // label below keeps the full list, so nothing is lost for assistive tech.
+            // Visible summary stays one line: for 3+ apps (there is no app-count limit) show the
+            // first two names plus a "+N more" count so the narrow panel does not truncate
+            // mid-name. The accessibility label below keeps the full list, so nothing is lost for
+            // assistive tech.
             let summaryText: String
             if count > 2 {
                 let firstTwo = productNames.prefix(2).joined(separator: ", ")

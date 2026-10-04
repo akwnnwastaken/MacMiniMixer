@@ -21,6 +21,10 @@ final class ProductRealStartCoordinator {
     private let appAudioTargetResolver: AppAudioTargetResolving
     private let startSettleGate: ProductRealStartSettling
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
+    /// Optional concurrent Product Real session cap for the start preflight; `nil` = unlimited (the
+    /// product default, `AppConstants.maxConcurrentLiveSessions`). Injectable so tests can prove the
+    /// cap mechanism and its message with an explicit value.
+    private let maxConcurrentSessions: Int?
     private weak var sideEffects: ProductRealControlSideEffects?
     private weak var context: ProductRealControlContext?
     private var appAudioResolutionTask: Task<Void, Never>?
@@ -46,13 +50,15 @@ final class ProductRealStartCoordinator {
         startSettleGate: ProductRealStartSettling,
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility,
         sideEffects: ProductRealControlSideEffects,
-        context: ProductRealControlContext
+        context: ProductRealControlContext,
+        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions
     ) {
         self.stateStore = stateStore
         self.liveSessionManager = liveSessionManager
         self.appAudioTargetResolver = appAudioTargetResolver
         self.startSettleGate = startSettleGate
         self.processTapEligibility = processTapEligibility
+        self.maxConcurrentSessions = maxConcurrentSessions
         self.sideEffects = sideEffects
         self.context = context
     }
@@ -222,9 +228,11 @@ final class ProductRealStartCoordinator {
     }
 
     /// Whether a new product real-control session may start for `appID`. Returns a warning message
-    /// when blocked, or nil when allowed. Multiple product sessions are permitted up to
-    /// `maxConcurrentLiveSessions`; Advanced manual control and diagnostics remain mutually exclusive
-    /// with product control. Callers handle "already active for this app" separately.
+    /// when blocked, or nil when allowed. Any number of product sessions may run concurrently by
+    /// default (`maxConcurrentSessions == nil`); when a cap is configured, a new app is blocked once
+    /// it is reached and the message names that configured count. Advanced manual control and
+    /// diagnostics remain mutually exclusive with product control. Callers handle "already active
+    /// for this app" separately.
     func productSessionStartBlockReason(for appID: MixerAppItem.ID) -> String? {
         if context?.isProcessTapTesting == true {
             return "Stop active live control first"
@@ -234,11 +242,9 @@ final class ProductRealStartCoordinator {
             return "Stop the active live control first"
         }
 
-        if productRealControlState.wouldExceedConcurrentSessionCap(
-            for: appID,
-            cap: AppConstants.maxConcurrentLiveSessions
-        ) {
-            return "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
+        if let cap = maxConcurrentSessions,
+           productRealControlState.wouldExceedConcurrentSessionCap(for: appID, cap: cap) {
+            return "Real app control supports \(cap) apps at a time"
         }
 
         return nil

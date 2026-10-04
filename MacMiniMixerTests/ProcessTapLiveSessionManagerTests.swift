@@ -117,6 +117,48 @@ final class ProcessTapLiveSessionManagerTests: XCTestCase {
         XCTAssertTrue(manager.activeSessions.isEmpty)
     }
 
+    // `maxSessions: nil` is the Product Real default (`AppConstants.maxConcurrentLiveSessions`):
+    // the manager admits every session — here eight at once — each with its own controller, and
+    // per-session stop / stopAll still tear them down individually.
+    func testUnlimitedManagerAcceptsManyConcurrentSessions() async throws {
+        let controllers = FakeLiveControllerFactory()
+        let manager = ProcessTapLiveSessionManager(maxSessions: nil) {
+            controllers.makeController()
+        }
+        let pids: [Int32] = [101, 102, 103, 104, 105, 106, 107, 108]
+
+        var sessionIDs: [ProcessTapLiveSessionID] = []
+        for pid in pids {
+            let start = await manager.startSession(
+                for: makeTarget(pid: pid),
+                gain: .defaultOption,
+                onDiagnostics: { _, _ in },
+                onStopped: { _, _, _ in }
+            )
+            XCTAssertEqual(start.result.outcome, .liveControlStarted)
+            let sessionID = try XCTUnwrap(start.sessionID)
+            sessionIDs.append(sessionID)
+        }
+
+        XCTAssertEqual(Set(sessionIDs).count, pids.count)
+        XCTAssertEqual(manager.activeSessions.count, pids.count)
+        XCTAssertEqual(Set(manager.activeSessions.compactMap(\.processIdentifier)), Set(pids))
+        XCTAssertEqual(controllers.controllers.count, pids.count)
+        XCTAssertTrue(controllers.controllers.allSatisfy { $0.startCallCount == 1 })
+
+        // Stopping one session leaves the other seven running.
+        let stoppedID = sessionIDs[3]
+        _ = await manager.stopSession(id: stoppedID, reason: .userStopped)
+        XCTAssertEqual(manager.activeSessions.count, pids.count - 1)
+        XCTAssertFalse(manager.activeSessions.contains { $0.id == stoppedID })
+
+        // stopAll tears down every remaining session.
+        let results = await manager.stopAll(reason: .userStopped)
+        XCTAssertEqual(results.count, pids.count - 1)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertTrue(controllers.controllers.allSatisfy { $0.stopReasons == [.userStopped] })
+    }
+
     func testUpdateGainRoutesToCorrectActiveSession() async throws {
         let controllers = FakeLiveControllerFactory()
         let manager = ProcessTapLiveSessionManager(maxSessions: 2) {

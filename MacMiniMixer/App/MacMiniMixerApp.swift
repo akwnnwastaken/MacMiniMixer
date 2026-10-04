@@ -13,6 +13,8 @@ struct MacMiniMixerApp: App {
         let systemVolumeController = CoreAudioSystemVolumeController()
         let processTapTester = CoreAudioProcessTapTester()
         let processTapReplayProbe = CoreAudioProcessTapReplayProbe()
+        // Product Real session manager. `maxConcurrentLiveSessions` is nil (owner decision: no
+        // app-count limit), so this manager admits every session the product start path requests.
         let processTapLiveController = ProcessTapLiveSessionManager(
             maxSessions: AppConstants.maxConcurrentLiveSessions,
             controllerFactory: { CoreAudioProcessTapLiveController() }

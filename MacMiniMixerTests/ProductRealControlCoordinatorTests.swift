@@ -326,6 +326,85 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
     }
 
+    // MARK: - Concurrent-session limit (threaded through the facade)
+
+    // Default facade (no `maxConcurrentSessions` argument, exactly as `MixerViewModel` builds it):
+    // no app-count limit. Six distinct apps are started one after another through the real start
+    // path and all are confirmed at once; a per-app stop tears down only that app's session, and Stop
+    // All then stops every remaining session by its own engine id.
+    func testDefaultFacadeRunsManyConcurrentSessionsPerAppStopAndStopAll() async {
+        let harness = makeHarness(visibleProcessEligible: true)
+        let apps = (1...6).map { makeApp(id: "app\($0)", name: "App \($0)", pid: Int32(100 + $0)) }
+        harness.context.apps = apps
+
+        var sessionIDs: [ProcessTapLiveSessionID] = []
+        for app in apps {
+            XCTAssertNil(harness.coordinator.productSessionStartBlockReason(for: app.id))
+            let sessionID = ProcessTapLiveSessionID()
+            harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+            harness.coordinator.startResolvedExperimentalControl(for: app)
+            await waitUntil {
+                harness.coordinator.productRealControlState.activeSessionsByAppID[app.id]?.liveSessionID == sessionID
+            }
+            sessionIDs.append(sessionID)
+        }
+
+        let started = harness.coordinator.productRealControlState
+        XCTAssertEqual(started.activeSessions.count, apps.count)
+        XCTAssertEqual(Set(started.activeSessions.compactMap(\.liveSessionID)), Set(sessionIDs))
+        XCTAssertFalse(harness.sideEffects.statusMessages.contains { $0.contains("apps at a time") })
+
+        // Per-app stop: only the third app's session is stopped by its own id.
+        let stoppedApp = apps[2]
+        let stoppedID = sessionIDs[2]
+        harness.coordinator.stopExperimentalControl(for: stoppedApp.id)
+        await waitUntil { harness.liveSessionManager.stopSessionCalls.count == 1 }
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.id, stoppedID)
+
+        // Deliver that session's engine stop; only its app is cleared, the other five stay active.
+        harness.liveSessionManager.emitCapturedStopped(id: stoppedID, result: makeResult(.liveControlStopped), diagnostics: nil)
+        await waitUntil { harness.coordinator.productRealControlState.activeSessionsByAppID[stoppedApp.id] == nil }
+        XCTAssertEqual(harness.coordinator.productRealControlState.activeSessions.count, apps.count - 1)
+
+        // Stop All stops every remaining session, each by its own engine id.
+        harness.coordinator.stopProductLiveSessions(reason: .userStopped)
+        await waitUntil { harness.liveSessionManager.stopSessionCalls.count == apps.count }
+        let stopAllIDs = harness.liveSessionManager.stopSessionCalls.dropFirst().map { $0.id }
+        XCTAssertEqual(stopAllIDs.count, apps.count - 1)
+        XCTAssertEqual(Set(stopAllIDs), Set(sessionIDs.filter { $0 != stoppedID }))
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.allSatisfy { $0.reason == .userStopped })
+    }
+
+    // An explicitly injected cap still works end to end through the facade: the preflight blocks a
+    // brand-new app once the configured count is reached, the row-toggle start surfaces the message
+    // naming that configured count, and nothing is started for the blocked app.
+    func testInjectedCapBlocksNewAppThroughFacadeWithConfiguredCountMessage() {
+        let harness = makeHarness(maxConcurrentSessions: 3)
+        let apps = (1...4).map { makeApp(id: "app\($0)", name: "App \($0)", pid: Int32(100 + $0)) }
+        harness.context.apps = apps
+        for app in apps.prefix(3) {
+            harness.coordinator.productRealControlState.beginSession(
+                visibleAppID: app.id, displayName: app.name,
+                controlledProcessIdentifier: app.processIdentifier,
+                source: .directVisiblePID, liveSessionID: ProcessTapLiveSessionID()
+            )
+        }
+        let blockedApp = apps[3]
+
+        XCTAssertEqual(
+            harness.coordinator.productSessionStartBlockReason(for: blockedApp.id),
+            "Real app control supports 3 apps at a time"
+        )
+
+        harness.coordinator.startExperimentalControl(for: blockedApp.id)
+
+        XCTAssertEqual(harness.sideEffects.statusMessages, ["Real app control supports 3 apps at a time"])
+        XCTAssertNil(harness.coordinator.productRealControlState.activeSessionsByAppID[blockedApp.id])
+        XCTAssertEqual(harness.coordinator.productRealControlState.activeSessions.count, 3)
+        // An app that already owns a session is never counted against the cap.
+        XCTAssertNil(harness.coordinator.productSessionStartBlockReason(for: apps[0].id))
+    }
+
     // MARK: - Hard-teardown state reset
 
     func testTearDownProductStateForHardStopClearsAllProductState() {
@@ -395,7 +474,10 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
         let context: StubProductRealControlContext
     }
 
-    private func makeHarness(visibleProcessEligible: Bool = false) -> Harness {
+    private func makeHarness(
+        visibleProcessEligible: Bool = false,
+        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions
+    ) -> Harness {
         let liveSessionManager = FakeProductRealLiveSessionManager()
         let resolver = RecordingAppAudioTargetResolver()
         let settleGate = RecordingStartSettleGate()
@@ -409,7 +491,8 @@ final class ProductRealControlCoordinatorTests: XCTestCase {
                 visibleProcessEligible ? .eligible : ProcessTapProcessEligibility(isEligible: false, reason: nil)
             },
             sideEffects: sideEffects,
-            context: context
+            context: context,
+            maxConcurrentSessions: maxConcurrentSessions
         )
         return Harness(
             coordinator: coordinator,

@@ -236,6 +236,58 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(harness.resolver.invalidatedTargetCount, 1)
     }
 
+    // MARK: - Concurrent-session limit (start preflight)
+
+    // Owner decision: Product Real Control has no app-count limit by default.
+    func testProductDefaultHasNoConcurrentSessionLimit() {
+        XCTAssertNil(AppConstants.maxConcurrentLiveSessions)
+    }
+
+    func testBlockReasonAllowsNewAppAlongsideManySessionsWithDefaultLimit() {
+        let harness = makeStartHarness()
+        beginConfirmedSessions(["a", "b", "c", "d", "e", "f", "g"], in: harness)
+
+        XCTAssertNil(harness.coordinator.productSessionStartBlockReason(for: "h"))
+    }
+
+    func testBlockReasonStillEnforcesMutualExclusionWithDefaultLimit() {
+        let harness = makeStartHarness()
+        harness.context.isProcessTapTesting = true
+
+        XCTAssertEqual(harness.coordinator.productSessionStartBlockReason(for: "a"), "Stop active live control first")
+
+        harness.context.isProcessTapTesting = false
+        harness.context.advancedManualLiveControlActive = true
+
+        XCTAssertEqual(harness.coordinator.productSessionStartBlockReason(for: "a"), "Stop the active live control first")
+    }
+
+    func testInjectedCapBlocksNewAppWithConfiguredCountMessage() {
+        let harness = makeStartHarness(maxConcurrentSessions: 3)
+        beginConfirmedSessions(["a", "b", "c"], in: harness)
+
+        XCTAssertEqual(
+            harness.coordinator.productSessionStartBlockReason(for: "d"),
+            "Real app control supports 3 apps at a time"
+        )
+        // An app that already owns a session is never counted against the cap.
+        XCTAssertNil(harness.coordinator.productSessionStartBlockReason(for: "b"))
+    }
+
+    func testInjectedCapMessageUsesTheConfiguredValue() {
+        let harness = makeStartHarness(maxConcurrentSessions: 5)
+        beginConfirmedSessions(["a", "b", "c", "d"], in: harness)
+
+        XCTAssertNil(harness.coordinator.productSessionStartBlockReason(for: "e"))
+
+        beginConfirmedSessions(["e"], in: harness)
+
+        XCTAssertEqual(
+            harness.coordinator.productSessionStartBlockReason(for: "f"),
+            "Real app control supports 5 apps at a time"
+        )
+    }
+
     // MARK: - Starvation attribution logging (diagnostics-only)
 
     func testAcceptedStarvationDiagnosticsStillPublishProgressUnchanged() async {
@@ -332,7 +384,10 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         let refreshActiveNameSpy: RefreshActiveNameSpy
     }
 
-    private func makeStartHarness(visibleProcessEligible: Bool = false) -> StartHarness {
+    private func makeStartHarness(
+        visibleProcessEligible: Bool = false,
+        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions
+    ) -> StartHarness {
         let stateStore = ProductRealControlStateStore()
         let liveSessionManager = FakeProductRealLiveSessionManager()
         let settleGate = RecordingStartSettleGate()
@@ -350,7 +405,8 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
                 visibleProcessEligible ? .eligible : ProcessTapProcessEligibility(isEligible: false, reason: nil)
             },
             sideEffects: sideEffects,
-            context: context
+            context: context,
+            maxConcurrentSessions: maxConcurrentSessions
         )
         coordinator.setOnEngineStopped { sessionID, result, diagnostics in
             engineStoppedSpy.record(sessionID, result, diagnostics)
@@ -375,6 +431,20 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
 
     private func makeTarget(for app: MixerAppItem) -> ProcessTapTarget {
         ProcessTapTarget(appID: app.id, appName: app.name, processIdentifier: app.processIdentifier)
+    }
+
+    /// Seeds one confirmed (engine session id set) Product Real session per app id, directly in the
+    /// shared state store, so the start preflight sees that many concurrent sessions.
+    private func beginConfirmedSessions(_ appIDs: [MixerAppItem.ID], in harness: StartHarness) {
+        for (index, appID) in appIDs.enumerated() {
+            harness.stateStore.productRealControlState.beginSession(
+                visibleAppID: appID,
+                displayName: appID,
+                controlledProcessIdentifier: Int32(100 + index),
+                source: .directVisiblePID,
+                liveSessionID: ProcessTapLiveSessionID()
+            )
+        }
     }
 
     private func startedResult(_ sessionID: ProcessTapLiveSessionID) -> ProcessTapLiveSessionStartResult {

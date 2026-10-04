@@ -271,9 +271,15 @@ struct ProductRealControlState: Equatable, Sendable {
     }
 
     /// Whether starting a new product session for `appID` would exceed the concurrent-session `cap`.
-    /// An app that already owns a session does not count toward the limit (a restart / re-assert of
-    /// the same app is always allowed); a brand-new app is blocked once the cap is reached.
-    func wouldExceedConcurrentSessionCap(for appID: MixerAppItem.ID, cap: Int) -> Bool {
+    /// A `nil` cap means unlimited (the product default, `AppConstants.maxConcurrentLiveSessions`),
+    /// so nothing is ever blocked. With a cap, an app that already owns a session does not count
+    /// toward the limit (a restart / re-assert of the same app is always allowed); a brand-new app
+    /// is blocked once the cap is reached.
+    func wouldExceedConcurrentSessionCap(for appID: MixerAppItem.ID, cap: Int?) -> Bool {
+        guard let cap = cap else {
+            return false
+        }
+
         let alreadyCountsTowardLimit = activeSessionsByAppID[appID] != nil
         return !alreadyCountsTowardLimit && activeSessions.count >= cap
     }

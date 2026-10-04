@@ -87,9 +87,10 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "YouTube")
     }
 
-    // Multi-app cap invariant: confirmed Product sessions are allowed up to the cap (see
-    // testThirdProductSessionAllowedUnderCapOfThree / testConcurrentStartUpToCapPreservedWithControlledCompletion),
-    // and the (cap+1)th is blocked (testFourthProductSessionBlockedByCap). What this test pins
+    // Multi-app invariant: confirmed Product sessions have no app-count limit by default (see
+    // testThirdProductSessionAllowed / testFourthProductSessionAllowedWithDefaultUnlimitedLimit /
+    // testManyProductSessionsRunConcurrentlyThroughRealSessionManagerWithDefaultLimit); an injected
+    // cap is covered in ProductRealControlCoordinatorTests. What this test pins
     // is the transient *serialization* guard: while one Product start is still in flight (pending,
     // unconfirmed), a second Product start and an Advanced Manual start are both rejected, and only
     // the first start reaches the controller. Replaces the former stale single-session test
@@ -483,9 +484,9 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
     }
 
-    // Cap=3 (Phase 5a): a third confirmed Product session is now allowed. Drives three direct
+    // A third confirmed Product session is allowed (no app-count limit). Drives three direct
     // sessions (all default-eligible in the harness) and asserts all three are active.
-    func testThirdProductSessionAllowedUnderCapOfThree() async {
+    func testThirdProductSessionAllowed() async {
         let harness = makeHarness()
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
@@ -502,10 +503,12 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 3)
     }
 
-    // The (cap+1)th product start is rejected with the dynamic cap message; the existing
-    // sessions stay active. Reads the cap from AppConstants so the assertion does not need to
-    // change if the cap moves again.
-    func testFourthProductSessionBlockedByCap() async {
+    // No app-count limit by default (owner decision; `AppConstants.maxConcurrentLiveSessions` is
+    // nil): a fourth Product start for a distinct eligible app is admitted exactly like the first
+    // three and no limit message is shown. (Formerly testFourthProductSessionBlockedByCap; the cap
+    // mechanism + configured-count message with an injected cap are now pinned in
+    // ProductRealControlCoordinatorTests / ProductRealStartCoordinatorTests.)
+    func testFourthProductSessionAllowedWithDefaultUnlimitedLimit() async {
         let apps = makeLiveControlApps() + [
             MixerAppItem(id: "podcasts", name: "Podcasts", icon: .systemSymbol("mic"), processIdentifier: 103, volume: 50)
         ]
@@ -518,17 +521,81 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         await waitFor { harness.liveController.startedSessionIDs.count == 2 && !harness.viewModel.isProcessTapTesting }
         harness.viewModel.setAppVolume(50, for: "youtube")
         await waitFor { harness.liveController.startedSessionIDs.count == 3 && !harness.viewModel.isProcessTapTesting }
-
         harness.viewModel.setAppVolume(50, for: "podcasts")
-        await drainMainActor()
+        await waitFor { harness.liveController.startedSessionIDs.count == 4 && !harness.viewModel.isProcessTapTesting }
 
-        XCTAssertFalse(harness.viewModel.isExperimentalControlActive(for: "podcasts"))
-        XCTAssertEqual(
-            harness.viewModel.statusMessage?.text,
-            "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
-        )
-        XCTAssertEqual(harness.liveController.startedSessionIDs.count, 3)
-        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 3)
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "spotify"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "youtube"))
+        XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "podcasts"))
+        XCTAssertEqual(harness.viewModel.confirmedProductRealControlSessionCount, 4)
+        XCTAssertFalse(harness.viewModel.statusMessage?.text.contains("apps at a time") ?? false)
+    }
+
+    // End-to-end "no limit" proof through the production session manager: the view model drives a
+    // real `ProcessTapLiveSessionManager` built exactly as `MacMiniMixerApp` builds it (with
+    // `AppConstants.maxConcurrentLiveSessions`, i.e. unlimited), with one fake controller per
+    // session. Seven distinct eligible apps all become active at once and the manager holds all
+    // seven; a per-app stop leaves the other six running; Stop All stops every one of them.
+    // Deterministic: each step waits on observable state (deadline-bounded), no sleeps.
+    func testManyProductSessionsRunConcurrentlyThroughRealSessionManagerWithDefaultLimit() async throws {
+        let apps = makeLiveControlApps() + [
+            MixerAppItem(id: "podcasts", name: "Podcasts", icon: .systemSymbol("mic"), processIdentifier: 103, volume: 50),
+            MixerAppItem(id: "zoom", name: "Zoom", icon: .systemSymbol("video"), processIdentifier: 104, volume: 50),
+            MixerAppItem(id: "safari", name: "Safari", icon: .systemSymbol("safari"), processIdentifier: 105, volume: 50),
+            MixerAppItem(id: "slack", name: "Slack", icon: .systemSymbol("message"), processIdentifier: 106, volume: 50)
+        ]
+        let controllers = PerSessionFakeLiveControllerFactory()
+        let manager = ProcessTapLiveSessionManager(maxSessions: AppConstants.maxConcurrentLiveSessions) {
+            controllers.make()
+        }
+        let viewModel = makeViewModel(apps: apps, liveController: manager)
+        viewModel.setExperimentalRealAppControlEnabled(true)
+
+        for (index, app) in apps.enumerated() {
+            viewModel.setAppVolume(50, for: app.id)
+            await waitFor {
+                viewModel.confirmedProductRealControlSessionCount == index + 1 && !viewModel.isProcessTapTesting
+            }
+        }
+
+        // Every app is active at once and the real manager holds one live session per app.
+        XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, apps.count)
+        for app in apps {
+            XCTAssertTrue(viewModel.isExperimentalControlActive(for: app.id), "\(app.id) should be active")
+        }
+        XCTAssertEqual(manager.activeSessions.count, apps.count)
+        XCTAssertEqual(Set(manager.activeSessions.map(\.appID)), Set(apps.map(\.id)))
+        XCTAssertEqual(controllers.controllers.count, apps.count)
+        XCTAssertFalse(viewModel.statusMessage?.text.contains("apps at a time") ?? false)
+        let banner = try XCTUnwrap(viewModel.realControlBannerPresentation)
+        XCTAssertEqual(banner.summaryText, "Real control: Spotify, Music +5 more")
+        XCTAssertEqual(banner.stopButtonTitle, "Stop All")
+
+        // Per-app stop: only Music's session is torn down; the other six keep running.
+        viewModel.toggleExperimentalControl(for: "music")
+        await waitFor {
+            !viewModel.isExperimentalControlActive(for: "music")
+                && !viewModel.isExperimentalControlPending(for: "music")
+                && manager.activeSessions.count == apps.count - 1
+        }
+        XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, apps.count - 1)
+        XCTAssertFalse(manager.activeSessions.contains { $0.appID == "music" })
+        for app in apps where app.id != "music" {
+            XCTAssertTrue(viewModel.isExperimentalControlActive(for: app.id), "\(app.id) should still be active")
+        }
+
+        // Stop All stops every remaining session.
+        viewModel.stopProcessTapLiveControl()
+        await waitFor {
+            viewModel.confirmedProductRealControlSessionCount == 0
+                && manager.activeSessions.isEmpty
+                && !viewModel.isProcessTapLiveControlActive
+        }
+        XCTAssertNil(viewModel.realControlBannerPresentation)
+        // Each session's own controller was stopped exactly once, with the user-stop reason (Music
+        // by the per-app stop, the other six by Stop All).
+        XCTAssertTrue(controllers.controllers.allSatisfy { $0.stopReasons == [.userStopped] })
     }
 
     func testStoppingOneOfThreeProductSessionsLeavesTwoActive() async {
@@ -1504,12 +1571,12 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
     }
 
-    func testConcurrentStartUpToCapPreservedWithControlledCompletion() async {
+    func testThreeConcurrentStartsPreservedWithControlledCompletion() async {
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
 
-        // Cap is 3 (Phase 5a): three apps are confirmed one at a time through controlled
+        // Three apps are confirmed one at a time through controlled
         // completion. `startConfirmedProductSession` waits for each start to fully settle
         // (session id recorded, isProcessTapTesting back to false) before the next, which keeps
         // the serialized start path deterministic instead of racing the next start.
@@ -2000,7 +2067,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(banner.stopAccessibilityLabel, "Stop real control for all apps")
     }
 
-    // Cap=3 banner: the visible summary collapses to "first two + N more" so the one-line panel
+    // 3+ banner: the visible summary collapses to "first two + N more" so the one-line panel
     // does not truncate mid-name, while the accessibility label keeps the full ordered list.
     func testBannerPresentationThreeSessionsShowsFirstTwoPlusMore() async throws {
         let controller = FakeControlledLiveController()
@@ -2526,6 +2593,38 @@ final class MixerViewModelLiveControlTests: XCTestCase {
 
         XCTAssertEqual(controller.stopReasons.count, sessionCount)
         XCTAssertTrue(controller.stopReasons.allSatisfy { $0 == .userStopped })
+    }
+
+    /// Builds a view model around an arbitrary live-session manager — e.g. a real
+    /// `ProcessTapLiveSessionManager` with fake per-session controllers — using the same fakes,
+    /// no-op settle sleeper, and all-eligible PID policy as `makeHarness`.
+    private func makeViewModel(
+        apps: [MixerAppItem],
+        liveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging
+    ) -> MixerViewModel {
+        MixerViewModel(
+            applicationLister: FakeLiveControlApplicationLister(apps: apps),
+            audioController: FakeLiveControlAudioController(),
+            outputDeviceLister: FakeLiveControlOutputDeviceLister(),
+            outputDeviceController: FakeLiveControlOutputDeviceController(),
+            systemVolumeReader: FakeLiveControlSystemVolumeReader(volumeScalar: 0.5),
+            systemVolumeController: FakeLiveControlSystemVolumeController(),
+            processTapTester: FakeLiveControlProcessTapTester(),
+            processTapReplayProbe: FakeLiveControlReplayProbe(),
+            processTapLiveController: liveController,
+            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
+            helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
+            appAudioTargetResolver: FakeAppAudioTargetResolver(),
+            processLister: FakeLiveControlProcessLister(),
+            productRealStartSettleGate: ProductRealStartSettleGate(sleeper: { _ in }),
+            processTapEligibility: { processIdentifier in
+                guard processIdentifier != nil else {
+                    return .unavailable("Core Audio process unavailable")
+                }
+
+                return .eligible
+            }
+        )
     }
 
     private func makeControlledHarness(
@@ -3167,6 +3266,22 @@ private final class FakeLiveControlController: ProcessTapLiveControlling, Proces
             enqueueFailureCount: 0,
             copyFailureCount: 0
         )
+    }
+}
+
+/// Vends a fresh `FakeLiveControlController` for every session a real `ProcessTapLiveSessionManager`
+/// starts (the manager calls its factory once per `startSession`), and keeps them so a test can
+/// assert per-session start/stop bookkeeping. Thread-safe: the manager calls `make()` off the main actor.
+private final class PerSessionFakeLiveControllerFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [FakeLiveControlController] = []
+
+    var controllers: [FakeLiveControlController] { lock.withLock { storage } }
+
+    func make() -> ProcessTapLiveControlling {
+        let controller = FakeLiveControlController()
+        lock.withLock { storage.append(controller) }
+        return controller
     }
 }
 
