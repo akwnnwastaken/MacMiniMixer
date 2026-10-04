@@ -6,7 +6,7 @@ struct MacMiniMixerApp: App {
 
     init() {
         let applicationLister = WorkspaceApplicationLister()
-        let audioController = MockAudioController()
+        let audioController = PreviewAudioStateController()
         let outputDeviceLister = CoreAudioOutputDeviceLister()
         let outputDeviceController = CoreAudioOutputDeviceController()
         let systemVolumeReader = CoreAudioSystemVolumeReader()
