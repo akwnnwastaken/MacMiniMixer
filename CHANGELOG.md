@@ -13,6 +13,20 @@ so production-grade multi-app per-application control is not claimed. Older entr
 
 ## [Unreleased]
 
+### Checkpoint — direct output engine, real-hardware result (`c6a1338`, tag `checkpoint-direct-engine-48k`)
+Commits after the docs refresh (`222b652`) that are not itemized below: per-app audio processes found
+through the HAL process-object list and tapped together (`5a498c2`), attribution by resource coalition
+so Safari, Safari web apps, Chrome, Chrome PWAs and Canary each keep their own processes (`6d1d265`),
+the direct aggregate output engine (`377f1a8`), and packaging that keeps code-coverage
+instrumentation out of Release builds (`c6a1338`). Owner's test on one MacBook Pro, built-in speakers
+**set to 48 kHz**: Netflix (Safari web app), Safari, YouTube (Safari web app), Spotify and Music ran
+**five sessions at once, three rounds**, every start `output=direct rate=48000`, no fallbacks, no
+Core Audio overload/IOProc errors, and **no audible crackle** in repeated tests (previously the
+AudioQueue path crackled at random, typically when a second session started). At the default
+44.1 kHz the tap stream reports 48 kHz, so the direct engine falls back to the AudioQueue path —
+in-engine sample-rate conversion is the next step (owner decision: never change the user's device
+sample rate automatically).
+
 ### Added
 - **Queued Product Real start lane.** At most one Product Real helper resolution or product start is
   in flight at a time; a start requested meanwhile (slider, mute, or row toggle; direct-PID or helper

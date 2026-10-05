@@ -411,6 +411,12 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
   result bundle:
   `xcrun xcresulttool get test-results summary --path "$(ls -td ./.DerivedData/Logs/Test/*.xcresult | head -1)"`
 
+- **Real-hardware checkpoint (`c6a1338`, tag `checkpoint-direct-engine-48k`):** direct aggregate
+  output engine crackle-free with **5 concurrent sessions** (Netflix/YouTube Safari web apps, Safari,
+  Spotify, Music) on built-in speakers **at 48 kHz**; at 44.1 kHz the tap reports 48 kHz and the engine
+  falls back to the crackly AudioQueue path. Next: in-engine resampling (do **not** change the user's
+  device sample rate automatically — owner decision; that is only the fallback plan).
+
 ## 7. Known deferred / candidate items
 
 **Open with many sessions (needs real hardware; deliberately not changed yet — audio-adjacent):**
