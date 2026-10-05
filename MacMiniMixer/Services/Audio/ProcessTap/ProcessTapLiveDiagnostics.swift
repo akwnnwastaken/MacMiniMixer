@@ -22,6 +22,14 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
     /// rather than alarming Starv. Defaulted so existing diagnostics producers/tests need not
     /// supply it.
     let isWarmingUpOutput: Bool
+    /// Direct aggregate output with sample-rate conversion only (0 otherwise): measured average tap
+    /// frames delivered and output frames rendered per IOProc cycle. Their ratio shows whether the
+    /// HAL hands the tap over at its own rate (≈ tap rate / output rate) or already resampled (≈ 1).
+    /// In that mode the resampler's FIFO underruns are reported as `outputStarvationCount` and its
+    /// overflows (oldest frames dropped) as `droppedBufferCount`. Defaulted so existing producers
+    /// and tests need not supply them.
+    let averageTapFramesPerCycle: Double
+    let averageOutputFramesPerCycle: Double
 
     init(
         selectedGain: ProcessTapReplayGainOption,
@@ -35,7 +43,9 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
         maxCallbackGapMilliseconds: Double = 0,
         lateCallbackCount: Int = 0,
         outputStarvationCount: Int = 0,
-        isWarmingUpOutput: Bool = false
+        isWarmingUpOutput: Bool = false,
+        averageTapFramesPerCycle: Double = 0,
+        averageOutputFramesPerCycle: Double = 0
     ) {
         self.selectedGain = selectedGain
         self.callbackCount = callbackCount
@@ -49,6 +59,8 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
         self.lateCallbackCount = lateCallbackCount
         self.outputStarvationCount = outputStarvationCount
         self.isWarmingUpOutput = isWarmingUpOutput
+        self.averageTapFramesPerCycle = averageTapFramesPerCycle
+        self.averageOutputFramesPerCycle = averageOutputFramesPerCycle
     }
 
     var audioDetected: Bool {

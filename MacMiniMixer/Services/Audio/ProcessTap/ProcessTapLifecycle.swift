@@ -430,6 +430,11 @@ enum ProcessTapCoreAudio {
         return Int(dataSize) / MemoryLayout<AudioStreamID>.size
     }
 
+    /// The device's current IO buffer size in frames (`kAudioDevicePropertyBufferFrameSize`), or nil.
+    static func bufferFrameSize(for deviceID: AudioObjectID) -> UInt32? {
+        uint32Property(kAudioDevicePropertyBufferFrameSize, for: deviceID)
+    }
+
     static func isSupportedFloatPCMMonoOrStereo(_ streamDescription: AudioStreamBasicDescription) -> Bool {
         let channelCount = streamDescription.mChannelsPerFrame
         let isFloat = streamDescription.mFormatFlags & kAudioFormatFlagIsFloat != 0

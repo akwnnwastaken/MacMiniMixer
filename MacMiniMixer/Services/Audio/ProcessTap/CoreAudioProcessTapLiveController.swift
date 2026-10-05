@@ -7,11 +7,19 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
     private let sessionLock = NSLock()
     private var activeSession: ProcessTapLiveSession?
     private let outputMode: ProcessTapLiveOutputMode
+    private let directResampleMode: ProcessTapDirectResampleMode
 
-    /// `outputMode` defaults to the configured mode (`UserDefaults` override, else
-    /// `AppConstants.processTapLiveDefaultOutputMode`), read once here when the controller is made.
-    init(outputMode: ProcessTapLiveOutputMode = ProcessTapLiveOutputMode.configured()) {
+    /// Delay before the one-off "direct resample report" log of a converting direct session.
+    private static let directResampleReportDelay: TimeInterval = 2
+
+    /// `outputMode` / `directResampleMode` default to the configured modes (`UserDefaults`
+    /// overrides, else `AppConstants` defaults), read once here when the controller is made.
+    init(
+        outputMode: ProcessTapLiveOutputMode = ProcessTapLiveOutputMode.configured(),
+        directResampleMode: ProcessTapDirectResampleMode = ProcessTapDirectResampleMode.configured()
+    ) {
         self.outputMode = outputMode
+        self.directResampleMode = directResampleMode
     }
 
     func startLiveControl(
@@ -259,15 +267,41 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
         if let incompatibility = ProcessTapDirectOutputCopier.formatIncompatibility(
             input: inputFormat,
-            output: outputFormat
+            output: outputFormat,
+            allowsSampleRateConversion: directResampleMode == .on
         ) {
             return .fallBackToAudioQueue(reason: incompatibility)
+        }
+
+        // Equal rates keep the frame-for-frame copy (no resampler). Differing rates (e.g. tap
+        // 48 kHz, built-in speakers at 44.1 kHz) convert inside the IOProc; everything the
+        // converter needs is created here, off the audio thread.
+        let resampler: ProcessTapDirectOutputResampler?
+        if ProcessTapDirectOutputCopier.requiresSampleRateConversion(input: inputFormat, output: outputFormat) {
+            let bufferFrameSize = Int(ProcessTapCoreAudio.bufferFrameSize(for: aggregateDeviceID) ?? 0)
+            guard let createdResampler = ProcessTapDirectOutputResampler(
+                inputSampleRate: inputFormat.mSampleRate,
+                outputSampleRate: outputFormat.mSampleRate,
+                channelCount: Int(inputFormat.mChannelsPerFrame),
+                maxOutputFramesPerCycle: max(
+                    ProcessTapDirectOutputResampler.minimumOutputFrameCapacity,
+                    bufferFrameSize * 2
+                )
+            ) else {
+                return .fallBackToAudioQueue(
+                    reason: "could not create sample rate converter (tap \(inputFormat.mSampleRate) Hz, output \(outputFormat.mSampleRate) Hz)"
+                )
+            }
+            resampler = createdResampler
+        } else {
+            resampler = nil
         }
 
         let renderer = ProcessTapDirectOutputRenderer(
             sampleRate: outputFormat.mSampleRate,
             channelCount: Int(outputFormat.mChannelsPerFrame),
-            gain: gain.scalar
+            gain: gain.scalar,
+            resampler: resampler
         )
         let accumulator = ProcessTapDiagnosticsAccumulator()
         let timingAccumulator = ProcessTapCallbackTimingAccumulator()
@@ -318,7 +352,11 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         }
 
         didActivateSession = true
-        AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public) output=direct rate=\(outputFormat.mSampleRate, privacy: .public) outChannels=\(outputFormat.mChannelsPerFrame, privacy: .public)")
+        let isResampling = resampler != nil
+        AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public) output=direct rate=\(outputFormat.mSampleRate, privacy: .public) outChannels=\(outputFormat.mChannelsPerFrame, privacy: .public) tapRate=\(inputFormat.mSampleRate, privacy: .public) resample=\(isResampling, privacy: .public)")
+        if let resampler {
+            scheduleDirectResampleReport(resampler, appName: target.appName, processIdentifier: processIdentifier)
+        }
 
         return .finished(ProcessTapTestResult(
             outcome: .liveControlStarted,
@@ -519,6 +557,23 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         _ = session.publishGate.shouldPublish(initialDiagnostics, force: true)
         session.onDiagnostics(initialDiagnostics)
         return true
+    }
+
+    /// Logs once, `directResampleReportDelay` after start and off the audio thread, what a direct
+    /// session with differing tap/output rates measured: the reported rates, the path the resampler
+    /// chose, average tap/output frames per IOProc cycle and their ratio, and FIFO underruns /
+    /// overflows. measuredRatio ≈ expectedRatio means the HAL delivers tap frames at the tap's own
+    /// rate; ≈ 1 means it already resampled them. Logs even if the session stopped meanwhile.
+    /// Notice level (one line per session) so it is kept without `--info` log capture.
+    private func scheduleDirectResampleReport(
+        _ resampler: ProcessTapDirectOutputResampler,
+        appName: String,
+        processIdentifier: Int32
+    ) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.directResampleReportDelay) {
+            let snapshot = resampler.snapshot()
+            AppLogger.processTap.notice("Live control direct resample report app=\(appName, privacy: .public) pid=\(processIdentifier, privacy: .public) tapRate=\(snapshot.inputSampleRate, privacy: .public) outputRate=\(snapshot.outputSampleRate, privacy: .public) path=\(snapshot.path.rawValue, privacy: .public) avgTapFramesPerCycle=\(String(format: "%.2f", snapshot.averageInputFramesPerCycle), privacy: .public) avgOutputFramesPerCycle=\(String(format: "%.2f", snapshot.averageOutputFramesPerCycle), privacy: .public) measuredRatio=\(String(format: "%.5f", snapshot.measuredRatio), privacy: .public) expectedRatio=\(String(format: "%.5f", snapshot.expectedRatio), privacy: .public) cycles=\(snapshot.cycleCount, privacy: .public) underruns=\(snapshot.underrunCount, privacy: .public) overflows=\(snapshot.overflowCount, privacy: .public)")
+        }
     }
 
     /// Maps the target's processes to Core Audio process objects and creates the muted process
@@ -915,18 +970,22 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
     func diagnostics() -> ProcessTapLiveDiagnostics {
         let inputSnapshot = accumulator.snapshot()
         let outputSnapshot: ProcessTapLiveOutputSnapshot
+        var resampleSnapshot: ProcessTapDirectResampleSnapshot?
         switch output {
         case .audioQueue(let outputQueue):
             outputSnapshot = outputQueue.snapshot()
-        case .directAggregate:
-            // No queue in direct mode: the queue-only counters (enqueued/drops/failures/starvation)
-            // and the queue warmup state do not apply and report zero/false.
+        case .directAggregate(let renderer):
+            // No queue in direct mode: the queue-only counters (enqueued/failures) and the queue
+            // warmup state do not apply and report zero/false. With sample-rate conversion, the
+            // resampler's FIFO underruns report as starvation and its overflows as drops; both stay
+            // zero on the equal-rate path.
+            resampleSnapshot = renderer.resampleSnapshot()
             outputSnapshot = ProcessTapLiveOutputSnapshot(
                 enqueuedBufferCount: 0,
-                droppedBufferCount: 0,
+                droppedBufferCount: resampleSnapshot?.overflowCount ?? 0,
                 enqueueFailureCount: 0,
                 copyFailureCount: 0,
-                outputStarvationCount: 0,
+                outputStarvationCount: resampleSnapshot?.underrunCount ?? 0,
                 isWithinStartupWarmup: false
             )
         }
@@ -944,7 +1003,9 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
             maxCallbackGapMilliseconds: timingSnapshot.maxCallbackGapMilliseconds,
             lateCallbackCount: timingSnapshot.lateCallbackCount,
             outputStarvationCount: outputSnapshot.outputStarvationCount,
-            isWarmingUpOutput: outputSnapshot.isWithinStartupWarmup
+            isWarmingUpOutput: outputSnapshot.isWithinStartupWarmup,
+            averageTapFramesPerCycle: resampleSnapshot?.averageInputFramesPerCycle ?? 0,
+            averageOutputFramesPerCycle: resampleSnapshot?.averageOutputFramesPerCycle ?? 0
         )
     }
 }
@@ -1266,6 +1327,11 @@ private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
 /// values and picks the change up on the next cycle. So the callback never blocks, allocates or
 /// logs. Fade semantics are `ProcessTapLiveGainRamp`'s: fade-in from silence on start, fade-out
 /// before stop.
+///
+/// With a `resampler` (tap rate ≠ output rate), each cycle's tap frames go through it first and the
+/// copier renders its output (same channel mapping and per-output-frame gain); until it has audio
+/// to give (start-up prefill) the output is written silent without advancing the fade-in, so the
+/// fade-in still starts with the audio. Without one, the cycle is rendered exactly as before.
 private final class ProcessTapDirectOutputRenderer: @unchecked Sendable {
     /// Teardown waits at most this many extra polls (beyond the fade-out duration) for the IOProc
     /// to finish rendering the ramp — bounded so a stalled device cannot hang a stop.
@@ -1285,8 +1351,15 @@ private final class ProcessTapDirectOutputRenderer: @unchecked Sendable {
     private var fadeOutFramesRendered = 0
     private var hasPublishedFadeOutRendered = false
     private let fadeOutFrameCount: Int
+    private let resampler: ProcessTapDirectOutputResampler?
 
-    init(sampleRate: Double, channelCount: Int, gain: Float) {
+    /// `sampleRate` / `channelCount` are the output device's (the side the gain ramp runs on).
+    init(
+        sampleRate: Double,
+        channelCount: Int,
+        gain: Float,
+        resampler: ProcessTapDirectOutputResampler? = nil
+    ) {
         let format = ProcessTapLiveOutputFormat(sampleRate: sampleRate, channelCount: channelCount)
         let rampSampleRate = sampleRate > 0 ? sampleRate : AppConstants.processTapReplayFallbackSampleRate
         gainRamp = ProcessTapLiveGainRamp(format: format)
@@ -1294,6 +1367,12 @@ private final class ProcessTapDirectOutputRenderer: @unchecked Sendable {
         renderTargetGain = gain
         // Same frame count the ramp uses for its fade-out.
         fadeOutFrameCount = max(1, Int((AppConstants.processTapLiveFadeOutDuration * rampSampleRate).rounded()))
+        self.resampler = resampler
+    }
+
+    /// The resampler's published diagnostics, or nil on the equal-rate path. Any thread.
+    func resampleSnapshot() -> ProcessTapDirectResampleSnapshot? {
+        resampler?.snapshot()
     }
 
     func updateTargetGain(_ gain: Float) {
@@ -1338,11 +1417,25 @@ private final class ProcessTapDirectOutputRenderer: @unchecked Sendable {
             gainRamp: gainRamp,
             targetGain: renderTargetGain
         )
-        let result = ProcessTapDirectOutputCopier.render(
-            inputData,
-            into: outputData,
-            gainProvider: &gainProvider
-        )
+        let result: ProcessTapDirectOutputRenderResult
+        if let resampler {
+            let outputFrameCount = ProcessTapDirectOutputCopier.outputFrameCount(in: outputData)
+            if let resampledData = resampler.process(inputData, outputFrameCount: outputFrameCount) {
+                result = ProcessTapDirectOutputCopier.render(
+                    resampledData,
+                    into: outputData,
+                    gainProvider: &gainProvider
+                )
+            } else {
+                result = ProcessTapDirectOutputCopier.renderSilence(into: outputData)
+            }
+        } else {
+            result = ProcessTapDirectOutputCopier.render(
+                inputData,
+                into: outputData,
+                gainProvider: &gainProvider
+            )
+        }
         gainRamp = gainProvider.gainRamp
 
         guard isRenderingFadeOut, !hasPublishedFadeOutRendered else {

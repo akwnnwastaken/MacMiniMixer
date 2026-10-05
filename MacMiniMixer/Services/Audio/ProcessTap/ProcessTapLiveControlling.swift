@@ -45,6 +45,38 @@ enum ProcessTapLiveOutputMode: String, Equatable, Sendable {
     }
 }
 
+/// Whether the direct aggregate output path converts a tap whose sample rate differs from the output
+/// device's (`.on`, default), or falls back to the AudioQueue path on a rate mismatch (`.off`, the
+/// behavior before conversion existed). Safety valve without a rebuild:
+/// `defaults write <bundle id> MacMiniMixerDirectResample off` (read per controller).
+enum ProcessTapDirectResampleMode: String, Equatable, Sendable {
+    case on
+    case off
+
+    /// Parses a stored override (`AppConstants.processTapDirectResampleDefaultsKey`): "off" (also
+    /// "false", "no", "0"; trimmed, case-insensitive) disables conversion; anything else keeps the
+    /// default `.on`.
+    static func resolve(storedValue: String?) -> ProcessTapDirectResampleMode {
+        guard let storedValue else {
+            return AppConstants.processTapDirectResampleDefaultMode
+        }
+
+        switch storedValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "off", "false", "no", "0":
+            return .off
+        case "on", "true", "yes", "1":
+            return .on
+        default:
+            return AppConstants.processTapDirectResampleDefaultMode
+        }
+    }
+
+    /// The mode a live controller uses, read from `userDefaults` when the controller is created.
+    static func configured(userDefaults: UserDefaults = .standard) -> ProcessTapDirectResampleMode {
+        resolve(storedValue: userDefaults.string(forKey: AppConstants.processTapDirectResampleDefaultsKey))
+    }
+}
+
 protocol ProcessTapLiveControlling: Sendable {
     func startLiveControl(
         for target: ProcessTapTarget,

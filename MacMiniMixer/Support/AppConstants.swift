@@ -33,6 +33,11 @@ enum AppConstants {
     /// `defaults write <bundle id> MacMiniMixerLiveOutputMode audioQueue` (read per controller).
     static let processTapLiveDefaultOutputMode: ProcessTapLiveOutputMode = .directAggregateOutput
     static let processTapLiveOutputModeDefaultsKey = "MacMiniMixerLiveOutputMode"
+    /// Sample-rate conversion inside the direct path when the tap and output rates differ (e.g. tap
+    /// 48 kHz, built-in speakers at 44.1 kHz) instead of falling back to the AudioQueue path.
+    /// Safety valve: `defaults write <bundle id> MacMiniMixerDirectResample off` (read per controller).
+    static let processTapDirectResampleDefaultMode: ProcessTapDirectResampleMode = .on
+    static let processTapDirectResampleDefaultsKey = "MacMiniMixerDirectResample"
     static let processTapLivePrimingBufferCount = 2
     static let processTapReplayFallbackSampleRate: Double = 48_000
     static let processTapReplayBufferCount = 8
