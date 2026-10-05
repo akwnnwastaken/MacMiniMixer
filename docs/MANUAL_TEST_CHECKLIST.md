@@ -9,6 +9,15 @@ Mark pass (P), fail (F), or not applicable (N/A).
 Requirements: macOS 14.2+, an Xcode build or the packaged zip (§20), System Audio Recording
 permission granted. Use a **Release** build for anything that records CPU or audio-quality numbers.
 
+Panel and mode notes (owner decisions):
+- **Real app control is always on** — there is no toggle. A row becomes Real only after you interact
+  with it (move its slider or click its mute); nothing is captured before that.
+- `Show all apps` and `Quit MacMiniMixer` live in the header `⋯` menu.
+- **Developer mode.** The Advanced section (§7–§10 and every step that reads the Advanced
+  diagnostics card) exists only in developer mode:
+  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES`, then relaunch
+  (`defaults delete com.example.MacMiniMixer MacMiniMixerDeveloperMode` hides it again).
+
 ---
 
 ## 1. System Output Volume
@@ -106,10 +115,11 @@ permission granted. Use a **Release** build for anything that records CPU or aud
 
 ### 3.2 Non-audio apps are filtered
 - Open panel with Finder, Notes, Xcode, TextEdit running.
-- **Expected**: These do not appear in the default list (unless "Show all" is checked).
+- **Expected**: These do not appear in the default list (unless **Show all apps** is on in the
+  header `⋯` menu).
 
-### 3.3 Show all reveals hidden apps
-- Check "Show all".
+### 3.3 Show all apps reveals hidden apps
+- Turn on **Show all apps** in the header `⋯` menu.
 - **Expected**: All regular running apps including non-audio ones appear.
 
 ### 3.4 App exit removes it from list
@@ -121,7 +131,8 @@ permission granted. Use a **Release** build for anything that records CPU or aud
 
 ## 4. Spotify/Music Direct Real App Control
 
-Setup: Global "Real app control" ON. Spotify playing audio.
+Setup: Spotify playing audio. No toggle to turn on (real app control is always on); just interact
+with the row.
 
 ### 4.1 Slider starts live control for Spotify
 - Move Spotify's slider.
@@ -131,7 +142,7 @@ Setup: Global "Real app control" ON. Spotify playing audio.
 
 ### 4.2 Active slider controls gain in real time
 - While live control active, move slider.
-- **Expected**: Audible gain change. Diagnostics (in Advanced) show updated gain label.
+- **Expected**: Audible gain change. Diagnostics (in Advanced, developer mode) show updated gain label.
 
 ### 4.3 Mute maps to gain 0
 - Click Spotify's mute toggle while live control is active.
@@ -146,13 +157,13 @@ Setup: Global "Real app control" ON. Spotify playing audio.
 ### 4.5 Interacting with a second app starts a second session
 - Live control active for Spotify.
 - Move Music's slider.
-- **Expected**: Music starts its own Real session (no app-count limit); the banner shows both
-  names with **Stop All**; Spotify keeps playing undisturbed. No "Stop active live control first"
+- **Expected**: Music starts its own Real session (no app-count limit); the banner reads "2 apps controlled"
+  with **Stop All**; Spotify keeps playing undisturbed. No "Stop active live control first"
   warning.
 
 ### 4.5a A start requested during another start is queued, not rejected
-- Global "Real app control" ON, nothing Real yet. Move Spotify's slider and, immediately after,
-  Music's slider (or click Music's Real toggle) while Spotify is still starting.
+- Nothing Real yet (no toggle; interact with the row). Move Spotify's slider and, immediately
+  after, Music's slider (or click Music's mute) while Spotify is still starting.
 - **Expected**: Music's row shows the pending ("working") badge while Spotify starts, then Music
   starts on its own. No "Finish resolving app audio first", "Stop active live control first", or
   "Process Tap is already busy" warning. Moving the queued row's slider again does not queue a
@@ -170,7 +181,7 @@ Setup: Global "Real app control" ON. Spotify playing audio.
 
 ## 5. YouTube/Safari Helper Row Real App Control
 
-Setup: Safari open with YouTube playing. Global "Real app control" ON.
+Setup: Safari open with YouTube playing. No toggle; interact with the row.
 
 ### 5.1 Safari row triggers helper resolution
 - Move Safari's slider.
@@ -209,14 +220,15 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 - **Expected**: Full re-probe runs (cache miss, because visible PID changed on relaunch).
 
 ### 6.3 Cache is invalidated when Real App Control is turned OFF
-- Have a cached helper for Safari.
-- Turn off "Real app control" toggle.
-- Turn it back on. Move slider.
-- **Expected**: Full re-probe runs (cache was cleared when mode was disabled).
+- N/A in the shipped UI: there is no toggle any more, so this cannot be done by hand. The
+  clear-on-disable path (`setExperimentalRealAppControlEnabled(false)`) is covered by
+  `MixerViewModelLiveControlTests.testGlobalRealControlOffStopsActiveProductSessionAndInvalidatesCache`.
 
 ---
 
 ## 7. Advanced: Helper Process Discovery
+
+Setup: developer mode on (see the top of this file).
 
 ### 7.1 Scan finds helper candidates
 - Open Advanced. Select "Safari" in Helper Discovery app picker. Click "Scan".
@@ -242,6 +254,8 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 
 ## 8. Advanced: Find Audio Helper
 
+Setup: developer mode on (see the top of this file).
+
 ### 8.1 Auto-detect probes all eligible candidates
 - Scan for Safari helpers. Click "Find audio helper".
 - **Expected**: Progress "Testing 1/N, 2/N, …" shown. After all candidates probed, the
@@ -261,6 +275,8 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 
 ## 9. Advanced: Helper Replay Probe
 
+Setup: developer mode on (see the top of this file).
+
 ### 9.1 Replay Probe runs against selected app
 - In Advanced, select Spotify (direct PID). Choose 50% gain. Click "Replay Probe".
 - **Expected**: Spotify audio is temporarily suppressed and replayed at 50% for ~2.5s.
@@ -277,6 +293,8 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 ---
 
 ## 10. Advanced: Two-App Readiness
+
+Setup: developer mode on (see the top of this file).
 
 ### 10.1 Spotify + Music simultaneous readiness test
 - Select Spotify as App A, Music as App B. Choose 50% gain. Click "Start".
@@ -319,7 +337,7 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 - Covered in section 4.7.
 
 ### 11.5 Quit MacMiniMixer stops all active sessions
-- Start live control. Use "Quit MacMiniMixer" button.
+- Start live control. Use **Quit MacMiniMixer** in the header `⋯` menu.
 - **Expected**: App quits cleanly. No Core Audio resources left hanging (check Console
   for cleanup log messages).
 
@@ -335,7 +353,7 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 - **Expected**: Both sessions stop. "Two-app test stopped: output changed".
 
 ### 12.3 Output device change stops helper probe
-- Probe a helper candidate in Advanced. Change default output device during probe.
+- Probe a helper candidate in Advanced (developer mode). Change default output device during probe.
 - **Expected**: Probe stops. Result shows output-changed outcome.
 
 ---
@@ -343,7 +361,7 @@ Setup: Safari open with YouTube playing. Global "Real app control" ON.
 ## 13. Panel Close and Reopen
 
 ### 13.1 Panel close stops Two-App Readiness
-- Start two-app readiness test. Click outside panel to close it.
+- Start two-app readiness test (Advanced, developer mode). Click outside panel to close it.
 - **Expected**: `onDisappear` fires, `stopTwoAppReadinessForPanelClose()` stops the test.
 
 ### 13.2 Panel close does NOT stop live control
@@ -372,7 +390,7 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
 - Put the Mac to sleep (Apple menu → Sleep, or close the lid), wait a few seconds, then wake.
 - **Expected**: After wake, live control is no longer active (no banner, menu bar icon
   reverted). The app's audio plays at its normal volume. No crash, no hung Core Audio
-  resources (check Console for cleanup logs). The "Real app control" global toggle is still ON.
+  resources (check Console for cleanup logs). Real app control stays on (there is no toggle).
 
 ### 14.2 Sleep stops Two-App Readiness and Advanced work
 - Start a Two-App Readiness test (section 10) or Advanced manual live control. Sleep, wake.
@@ -405,13 +423,13 @@ Procedure:
 1. Launch the app from a **Release** build.
 2. Play audio in **2 direct + 1 helper** app (e.g. Music + Spotify + a YouTube/browser helper).
 3. Make all three Real.
-4. Confirm the banner reads "first two names +1 more" with **Stop All**.
+4. Confirm the banner reads "3 apps controlled" with **Stop All**.
 5. Close the panel.
 6. Put the Mac to sleep briefly (Apple menu → Sleep, or close the lid).
 7. Wake, then reopen the panel.
 
-- **Expected**: no Real session remains active; the banner is gone; the "Real app control"
-  toggle may stay ON; **all three apps' audio returns to normal without quitting/relaunching the
+- **Expected**: no Real session remains active; the banner is gone; real app control stays
+  on (no toggle); **all three apps' audio returns to normal without quitting/relaunching the
   app**; no cleanup warning / drop / failure; CPU returns to ~0%.
 - **Red flags**: after wake an app stays silent/muted; audio only recovers when MacMiniMixer is
   quit (orphan tap); a session still shows active (resurrection); any cleanup warning / drop /
@@ -478,13 +496,13 @@ Measured values, for comparison — not hard pass thresholds:
 - **Expected**: idle ≈ 0%; two-session ≲ 2× single, three-session within ~17–25%; CPU returns
   to ~0% within ~10 s of stop; no drops/failures/cleanup warnings; memory/threads stable across
   runs. The relative cost centre is Main Thread / SwiftUI / AppKit, not the audio callback path.
-  The banner should summarise 3 apps as "first two names +1 more" with "Stop All".
+  The banner should summarise 3 apps as "3 apps controlled" with "Stop All".
 - **Red flags**: idle CPU that stays high; two-session > 2× single or three-session well above
   ~25%; near a full core sustained in Release; audio callback threads still alive long after
   stop; memory/threads growing each run; any drop/failure/cleanup warning.
 
 ### 16.4 Callback jitter / output starvation live smoke (Phase 6c)
-With Real Control active, the live Advanced diagnostics card shows a second line
+With Real Control active (developer mode), the live Advanced diagnostics card shows a second line
 "Gap … · Late … · Starv …", and the stop-result detail begins with `maxGap …ms, late …, starv …`.
 Use this to check for glitches that the drop/failure counters miss.
 
@@ -519,7 +537,8 @@ Setup:
 - Release build, single process, as in 16.1 (Instruments is optional here; Activity Monitor
   plus the live diagnostics card is enough).
 - Start **2 direct + 1 helper** sessions and make all three Real, as in 14.6 steps 1–3.
-  Confirm the banner reads "first two names +1 more" with **Stop All**.
+  Confirm the banner reads "3 apps controlled" with **Stop All**. Developer mode must be on to read
+  the Advanced card below.
 - Use audio sources that keep playing for the full duration (long playlist, long video) so the
   helper input does not pause mid-run.
 - Close the panel. Keep Activity Monitor open on the MacMiniMixer row.
@@ -574,7 +593,8 @@ Notes:
 Manual smoke for the teardown/starvation hardening checkpoint (commit `88bbed5`; rationale in
 `docs/DECISIONS.md`, roadmap entry "Product Real teardown/starvation hardening"). Use a Release
 build with the panel closed for steady state; open the Advanced diagnostics card only briefly to
-read the counters. Enable global Real App Control first.
+read the counters (developer mode must be on). Real App Control needs no enabling — it is always
+on; just interact with each row.
 
 Run these steps in order:
 
@@ -607,8 +627,8 @@ detail), audible **clicks/crackle** (yes/no), and whether audio ever required
 ## 18. Product Real rapid-toggle guard smoke (Prompt 194)
 
 Verifies the per-app pending-operation guard (see `docs/DECISIONS.md` "Why rapid Product Real
-toggles are guarded…" and ROADMAP "Rapid Real-toggle protection"). Use a Release build with global
-Real App Control enabled.
+toggles are guarded…" and ROADMAP "Rapid Real-toggle protection"). Use a Release build (real app
+control is always on; no toggle).
 
 Single-row start spam:
 1. Start audio in one app (e.g. Music) and make it Real.
@@ -632,7 +652,7 @@ Aggressive normal clicking + no app-count limit:
      while another row is starting show the working badge (queued) and start one after another.
 6. With 3 apps already Real, make a **4th** app Real.
    - **Expected**: the 4th app starts its own session (no app-count limit); **no** "Real app control
-     supports 3 apps at a time" warning; the banner reads "first two names +2 more" with Stop All.
+     supports 3 apps at a time" warning; the banner reads "4 apps controlled" with Stop All.
      For more apps, continue with §19.
 
 For each step record: whether the "working" badge appears, audible **clicks/crackle** (yes/no),
@@ -642,8 +662,9 @@ For each step record: whether the "working" badge appears, audible **clicks/crac
 toggles are ignored until the operation completes; no duplicate-start churn; no crackle/Starv under
 normal aggressive clicking; no app-count warning. A deliberate behavior: a toggle **cannot cancel an
 in-flight start mid-flight** — the start finishes first, then the row can be stopped. A *queued*
-row's own toggle is ignored too (it counts as pending), but Stop All, turning Real App Control off,
-closing the panel, or quitting that app drops it before it starts.
+row's own toggle is ignored too (it counts as pending), but Stop All,
+closing the panel, or quitting that app drops it before it starts. (Turning Real App Control off
+is no longer possible from the UI.)
 
 **If severe audio loss occurs** (an app silent until the app is quit): quit MacMiniMixer, and only
 if audio is still broken, `sudo killall coreaudiod`. This should **not** be expected in the normal
@@ -667,7 +688,8 @@ Setup:
 - **5–8 apps playing audio continuously**: e.g. Music, Spotify, a browser/YouTube helper row, plus
   other tap-eligible players (VLC, IINA, a second browser, a game or meeting app, …). Include at
   least one browser/helper row so the queue has a slow resolution in it.
-- Global "Real app control" ON, nothing Real yet. Note idle CPU with the panel closed.
+- Nothing Real yet (real app control is always on; no toggle). Developer mode on, for the Advanced
+  card reads below. Note idle CPU with the panel closed.
 
 Steps:
 1. **Fast start via sliders.** Within a few seconds, move the slider of every app, one after
@@ -676,7 +698,7 @@ Steps:
      the pending ("working") badge, then start one after another (a browser/helper row may take a
      second or more to resolve and the rows behind it wait). **No** "Finish resolving app audio
      first" / "Stop active live control first" / "Process Tap is already busy" / "supports N apps at
-     a time" warnings. Each row ends Real; the banner reads "first two names +N more" with Stop All;
+     a time" warnings. Each row ends Real; the banner reads "N apps controlled" with Stop All;
      each queued row's gain matches its slider when it started.
    - Record: number of Real apps, time from first slider move until the last row is Real.
 2. **Steady state (panel closed, 5–10 min).** Close the panel.
@@ -699,8 +721,8 @@ Steps:
 6. **Stop All.** Make the apps Real again, then press Stop All in the banner.
    - **Expected**: every session stops and every app's audio returns. Stop All tears sessions down
      one after another, so note how long it takes until the last app is back and CPU is ~0%.
-7. **Queue cancellation.** While several rows are queued (repeat step 1), press Stop All / turn
-   "Real app control" off / close the panel (one per run).
+7. **Queue cancellation.** While several rows are queued (repeat step 1), press Stop All / close
+   the panel (one per run).
    - **Expected**: queued rows never start afterwards (no background helper probing after the panel
      closes); an in-flight helper resolution is cancelled by Stop All and does not start a session
      late.
@@ -717,7 +739,7 @@ audible glitch yes/no, timings asked for above, Console cleanup warnings, and wh
 required `sudo killall coreaudiod`.
 
 **Red flags** (record as regressions, with the Console log): an app silent/muted until MacMiniMixer
-quits (orphan tap); a queued row that never starts or starts after Stop All / Real off / panel close;
+quits (orphan tap); a queued row that never starts or starts after Stop All / panel close;
 other sessions stopping when one app quits; Drops/Fail > 0 or Starv rising together with an audible
 glitch; CPU drifting up over time or not returning to ~0% after stops; sleep or quit hanging for
 several seconds; any crash.
@@ -762,8 +784,8 @@ IOProc = output device + tap, writing straight to the device, no `AudioQueue`); 
 the macOS version and the Mac for every run.
 
 Setup:
-- A **Release** build (or the packaged zip, §20), System Audio Recording granted, global "Real app
-  control" ON.
+- A **Release** build (or the packaged zip, §20), System Audio Recording granted, developer
+  mode on (the steps read the Advanced card); real app control is always on (no toggle).
 - Two to six apps playing audio continuously (e.g. Spotify, Music, a browser/YouTube row, a Safari
   web app).
 - A Terminal for the log command (the live start line is `info` level, so `--info --debug` is

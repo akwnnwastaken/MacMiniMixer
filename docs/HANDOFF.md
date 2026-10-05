@@ -48,8 +48,13 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   facade). **Do not reintroduce a cap without asking the owner.** The remaining gates for many
   sessions are **real-hardware evidence** (CPU, Drops/Fail/Starv, output change, Stop All, sleep/quit
   with e.g. 5–8 apps) and the deferred engine-self-stop gating (§7), not a config value.
-- Real control stays **opt-in**: the global "Real app control" toggle defaults to OFF, and only user
-  interaction with a row starts a session.
+- Real app control is **always on, with no toggle** (owner decision, `4220c46`): `MacMiniMixerApp`
+  enables it at launch via `AppConstants.realAppControlEnabledAtLaunch` (the view model's own default
+  stays OFF for tests). Only user interaction with a row starts a session.
+- The **Advanced section is developer-only** (owner decision, `4220c46`): it is not built unless
+  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` was run (read once
+  when the panel is created; relaunch). `Show all apps` and `Quit` live in the header `⋯` menu.
+  Rationale: `docs/DECISIONS.md`.
 - **Audio callback path:** the direct renderer/IOProc (`ProcessTapDirectOutputRenderer`,
   `ProcessTapDirectOutputCopier`, `ProcessTapDirectOutputResampler`) is now the live audio path; the
   legacy `AudioQueue` output is a frozen fallback scheduled for removal. Don't change either without
@@ -147,7 +152,7 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   - `applyLiveControlStoppedDisplay` + `showLiveControlWarningIfNeeded` (**shared** display cleanup
     used by both product and advanced-manual stops — reached from the coordinator through the seam's
     `applyLiveControlStoppedDisplay` callback; do **not** move into the product coordinator).
-  - `setExperimentalRealAppControlEnabled` (global Real-off command), `stopActiveAudioWorkForOutputDeviceChange`
+  - `setExperimentalRealAppControlEnabled` (global Real-off command; no longer reachable from the UI), `stopActiveAudioWorkForOutputDeviceChange`
     (5-subsystem output-change fan-out), `tearDownAllProcessTapWork` (global sleep/termination teardown
     fan-out — delegates **only** its Product Real state-reset sub-block to
     `coordinator.tearDownProductStateForHardStop()`; the engine hard stop, resolver/helper/diagnostics
@@ -220,8 +225,8 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   share one coalition contend for the same helpers (first starter wins).
 - **No app-count limit (owner decision, `08d49bc`):** any number of Product Real sessions can run at
   once (`maxConcurrentLiveSessions = nil`; the product manager is built with `maxSessions: nil`). The
-  active banner summarizes 3+ apps as "first two names +N more" (full list in the accessibility
-  label) with "Stop All". Fake-backed tests cover 6–8 concurrent sessions; **real-hardware resource
+  active banner summarizes many apps (full list in the accessibility label) with "Stop All"; since
+  `4220c46` its one-line text reads "N apps controlled" for two or more apps. Fake-backed tests cover 6–8 concurrent sessions; **real-hardware resource
   characterization only goes up to 3** (up to 6 were listened to for crackle with the direct engine;
   see §6/§7/§10).
 - **Queued start lane (`774268a`):** at most one Product Real helper resolution or product start is
@@ -662,4 +667,4 @@ moving them into a product-scoped type would *increase* coupling:
    boundary emerges.
 
 Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION`; do **not** reintroduce an
-app-count cap without the owner's say-so; keep Real control opt-in.
+app-count cap without the owner's say-so; keep Real control starting only on explicit row interaction.

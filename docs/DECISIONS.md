@@ -72,8 +72,8 @@ to ask which app a helper process belongs to, or the flavor changes.
 ## Why helper discovery is user-triggered
 
 **Decision**: No background scanning for helper processes happens automatically. The user
-must click "Scan" in Advanced Helper Process Discovery, or interact with a browser row
-while global Real App Control is ON.
+must click "Scan" in Advanced Helper Process Discovery (developer mode only), or interact with a
+browser row (real app control is always on).
 
 **Reasoning**:
 - Scanning running processes and probing them with short audio taps has a measurable
@@ -335,8 +335,8 @@ deliberately does **not** restart any session or re-resolve any helper.
 - The pending-start guards already in place (request-token invalidation + session-ID-keyed
   teardown) mean any start that lands mid-sleep is rejected as stale and its orphan engine
   session is torn down by id — no resurrection.
-- The global Real App Control opt-in is a user *preference*, not session state, so it is left
-  ON across sleep/wake; the sessions are simply not restored. The user re-engages by touching
+- Real App Control being on (always on, no toggle) is app configuration, not session state, so it
+  stays ON across sleep/wake; the sessions are simply not restored. The user re-engages by touching
   a row slider again, which starts a fresh, freshly-resolved session.
 - The sleep/wake observers are owned by the app-lifetime `MixerViewModel` (alongside the
   existing termination observer), not the menu-bar panel, so the teardown happens whether or
@@ -358,6 +358,9 @@ risk. That research is deferred; refresh-only is the conservative default until 
 
 **Decision**: Process Tap Test, Replay Probe, Two-App Readiness, and Helper Process
 Discovery are in a collapsed "Advanced" section, hidden by default.
+
+> **Update:** the section is now built only in developer mode — see "Why real app control is always
+> on and Advanced is developer-only (owner decisions)" at the end of this file.
 
 **Reasoning**:
 - These features are experimental, user-triggered, and carry audio side effects (muting
@@ -694,14 +697,16 @@ active session".
 
 **Reasoning**:
 - It is the owner's product decision: like the Windows Volume Mixer, every app the user interacts
-  with (global "Real app control" ON) should be controllable at the same time. With a cap of 3, the
+  with should be controllable at the same time (at that time behind the global "Real app control"
+  toggle, which has since been removed — control is now always on). With a cap of 3, the
   fourth app the user touched simply refused, which contradicts the north-star goal.
 - The engine already scaled per session: each session has its own controller, process tap, private
   aggregate device, IOProc, and (at that time; today only on the legacy fallback path) `AudioQueue`,
   and the manager and `ProductRealControlState` track sessions as collections. Nothing in the audio
   path depends on a count.
 - Several of the "N > 3 needs…" items from the cap=3 entry were addressed in code around the
-  decision: the banner summarizes any N ("first two +N more", full list in the accessibility label),
+  decision: the banner summarizes any N ("first two +N more", full list in the accessibility label; since
+  `4220c46` the one-line banner reads "N apps controlled" for two or more apps),
   quitting one app no longer stops other sessions (`da2b06e`), the cached-helper retry works next to
   other sessions (`c57bf37`), the resolver lane became a real queue (`774268a`), and the shared
   diagnostics surface no longer multiplies by N (`5a78656`).
@@ -720,8 +725,9 @@ active session".
   evidence — N-session characterization (e.g. 5–8 apps) — and the deferred many-session hardening:
   engine self-stops that bypass the lifecycle/settle gates, the main-thread hard teardown at
   sleep/quit, and the sequential Stop All.
-- Real control stays opt-in: the global toggle is OFF by default and sessions start only on user
-  interaction with a row.
+- Real control starts only on user interaction with a row. (At the time it was also behind a global
+  toggle that was OFF by default; that toggle was removed later — see "Why real app control is
+  always on and Advanced is developer-only (owner decisions)".)
 
 **Would revisit if**: real-hardware N-session runs show resource exhaustion, orphaned mutes, or
 audible degradation that cannot be fixed in the teardown/gating path. Then the **owner** decides
@@ -895,3 +901,42 @@ lines), or a HAL starts delivering the tap at a different rate (`path=converting
 **Open question for the owner before the legacy path is removed:** what happens on devices with input
 streams — support them directly (that needs a reliable way to find the tap stream inside the
 aggregate's input list) or accept no live control there.
+
+---
+
+## Why real app control is always on and Advanced is developer-only (owner decisions)
+
+**Decision** (`4220c46`): Two owner decisions changed the panel.
+1. **Real app control is always on, with no toggle.** The "Real app control" strip and its "Exp"
+   badge are gone. `MacMiniMixerApp` enables Product Real Control when it builds the view model
+   (`AppConstants.realAppControlEnabledAtLaunch = true`).
+2. **Advanced is developer-only.** The Advanced section is not built unless the
+   `MacMiniMixerDeveloperMode` bool default is true (read once when the panel is created). Enable it
+   with `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` and relaunch;
+   `defaults delete com.example.MacMiniMixer MacMiniMixerDeveloperMode` hides it again.
+
+The same commit simplified the panel to: header (title, output-device button, and a `⋯` menu holding
+`Show all apps` and `Quit`), a compact one-line active banner ("N apps controlled" for two or more
+apps, with `Stop` / `Stop All`), status messages, System Output, and the Applications list. No
+audio-path changes.
+
+**Reasoning**:
+- Always-on does not mean automatic capture. A row still becomes Real only after the user moves its
+  slider or clicks its mute, and apps that are not tap-eligible stay UI state, so removing the toggle
+  adds no capture that did not already require interaction. It fits the no-app-count-limit decision
+  ("Why there is no Product Real app-count limit").
+- Not building Advanced outside developer mode means none of its code runs for normal users, which
+  extends "Why Advanced diagnostics are separated from the main UI" from "collapsed" to "absent".
+  As a consequence the Advanced-visible flag stays false there, so Product Real live diagnostics are
+  never published (see "Why live diagnostics publish only for the focused session…").
+- The commit records only the goal of a simpler panel; no measurement backs either decision.
+
+**What it does not mean**:
+- `MixerViewModel.setExperimentalRealAppControlEnabled` and its OFF default are kept, so the test
+  suite is unchanged and the "Real off" teardown paths still exist; they are just no longer reachable
+  from the UI.
+- Developer mode is read once, so changing the default needs a relaunch.
+
+**Would revisit if**: the owner wants an opt-out or a user-visible diagnostics entry back. Either is
+a UI change on top of the retained view-model API; agents should not re-add a toggle or expose
+Advanced by default on their own.

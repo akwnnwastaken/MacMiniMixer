@@ -13,7 +13,7 @@ GitHub Release.
 - `MacMiniMixer-<version>.zip` contains `MacMiniMixer.app`, a Release build that is **ad-hoc
   signed and not notarized**. It ships with `MacMiniMixer-<version>.zip.sha256`.
 - The app is **menu bar only**: `Info.plist` sets `LSUIElement`, so there is no Dock icon and no main
-  window. The app lives in the menu bar and quits from the panel's **Quit MacMiniMixer** button.
+  window. The app lives in the menu bar and quits from **Quit MacMiniMixer** in the panel header's `⋯` menu.
 - It runs on **macOS 13.0+**. Product Real Control and the other Process Tap features need
   **macOS 14.2+**. Product Real Control is **experimental**.
 - The bundle identifier is still the placeholder `com.example.MacMiniMixer`. That's fine for
@@ -37,8 +37,9 @@ GitHub Release.
       ```
 - [ ] The essentials from `docs/MANUAL_TEST_CHECKLIST.md` pass on a real Mac (macOS 14.2+) with the
       **packaged** app, not an Xcode run. Cover at least §1 system output volume, §2 output devices,
-      §3 app discovery, §4 Real App Control, §11 Stop / Stop All, §12 output-device change while
-      active, §14 sleep/wake, and the §17/§18 Product Real smokes. Audio must be normal after quitting,
+      §3 app discovery, §4 Real App Control (always on, no toggle), §11 Stop / Stop All, §12 output-device change while
+      active, §14 sleep/wake, and the §17/§18 Product Real smokes (steps that read the Advanced card need developer mode, see
+      the checklist's setup). Audio must be normal after quitting,
       with no `sudo killall coreaudiod` needed.
 - [ ] `CHANGELOG.md` is final. Rename the `## [vX.Y] - Unreleased` section to
       `## [vX.Y] - YYYY-MM-DD` and fold in the relevant `[Unreleased]` entries. The release workflow

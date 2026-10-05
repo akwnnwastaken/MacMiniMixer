@@ -113,23 +113,28 @@ A thin pass-through that renders `MixerPanelView`. No logic here.
 The full mixer panel. Fixed width 352pt, ultraThinMaterial background with rounded
 corners. Sections from top to bottom:
 
-1. **Header** — title + output device button toggle.
-2. **Active live control banner** — orange waveform banner, visible only when
-   `isProcessTapLiveControlActive`. Text and button come from `RealControlBannerPresenter`:
-   one app → "Real control: Name" + Stop; two → both names + "Stop All"; three or more →
-   "first two names +N more" + "Stop All" (the accessibility label lists every app).
+1. **Header** — title, output device button toggle, and a `⋯` menu (`moreMenu`) holding the
+   `Show all apps` toggle and `Quit MacMiniMixer`.
+2. **Active live control banner** — compact one-line orange waveform banner, visible only when
+   `isProcessTapLiveControlActive`. Text and button come from `RealControlBannerPresenter`
+   (unchanged): one app → "Real control: Name" + Stop; two or more → "N apps controlled" +
+   "Stop All" (`compactBannerText`; the accessibility label still lists every app).
 3. **Status message** — auto-clears after 2.5s. Warning, info, or success style (spoken with a
    severity prefix).
 4. **Output device selector** — `OutputDeviceSelectorView`, shown on button toggle.
 5. **System Output section** — mute button + slider + current output device name label, plus a
    "Read-only" badge when the device has no writable volume.
-6. **Applications section** — app rows, "Show all" checkbox, "Real app control" toggle.
-7. **Advanced section** — collapsible, contains `ProcessTapTestView`,
-   `HelperProcessDiscoveryView`, `TwoAppReadinessTestView`.
-8. **Quit button**.
+6. **Applications section** — app rows only. There is no "Real app control" toggle (Product
+   Real Control is always on) and no inline "Show all" checkbox (it lives in the header `⋯` menu).
+7. **Advanced section** — **developer mode only**: the section is not built at all unless the
+   `MacMiniMixerDeveloperMode` bool default is true (read once when the panel is created; enable with
+   `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` and relaunch).
+   When built it is collapsible and contains `ProcessTapTestView`, `HelperProcessDiscoveryView`,
+   `TwoAppReadinessTestView`.
 
 `onAppear` records whether the Advanced section is visible
-(`setLiveDiagnosticsDisplayVisible`), then refreshes apps, output devices, and system volume.
+(`setLiveDiagnosticsDisplayVisible`; always false outside developer mode), then refreshes apps,
+output devices, and system volume.
 The Advanced disclosure action updates the same flag (no `onChange`, for macOS 13).
 Two async `Task` loops run while the panel is visible: one refreshes system volume every
 1 second, another refreshes output devices every 2 seconds.
@@ -149,14 +154,15 @@ Each visible app gets one row. Contains:
 - App name (truncated, fixed width 66pt).
 - Volume slider (preview state, or real gain while the row is Real).
 - Mute toggle (same caveat).
-- Optional live control toggle button (shown only when the "Real app control" mode is ON
-  or when that row is the active experimental target).
+- Accessory slot: a "Real" badge button (stops Real control for the row) while the row is
+  active, a "Resolving" spinner, or a pending badge. There is no start button: moving the
+  slider or clicking mute is what starts Real control.
 
 Row state is "active" when `isExperimentalControlActive` is true for that app ID. Active
 rows show an orange waveform indicator. Resolving rows show a "Resolving" spinner. Rows with
 a start/stop in flight, or with a start queued behind the start lane, show a non-interactive
 pending ("working") badge (`isExperimentalControlPending`). Active, resolving, and queued rows
-stay visible even when "Show all" is off and the app is not otherwise considered
+stay visible even when "Show all apps" is off and the app is not otherwise considered
 audio-relevant (`MixerVisibleAppsFilter`).
 
 ### Advanced Section Views
@@ -250,16 +256,18 @@ filters to `.regular` activation policy apps, and maps each to a `MixerAppItem` 
 
 **Audio-relevance filtering**: `MixerAppItem.isLikelyAudioRelevant` matches name or
 bundle ID against allow-keywords (Spotify, Music, Safari, Chrome, Discord, Zoom, etc.)
-and deny-keywords (Finder, Notes, Xcode, Terminal, etc.). The "Show all" checkbox bypasses
-this filter.
+and deny-keywords (Finder, Notes, Xcode, Terminal, etc.). The "Show all apps" toggle in the header
+`⋯` menu bypasses this filter.
 
 ---
 
 ## Main Real App Control Flow
 
-The main product path can start real control for a row when the global
-`isExperimentalRealAppControlEnabled` toggle is ON and the user moves a slider or clicks
-mute on an eligible inactive row (or clicks the row's Real toggle). There is **no app-count
+The main product path can start real control for a row when the user moves a slider or clicks
+mute on an eligible inactive row. Product Real Control is **always on** (owner decision): there
+is no UI toggle, and `MacMiniMixerApp` sets `isExperimentalRealAppControlEnabled` at launch from
+`AppConstants.realAppControlEnabledAtLaunch` (the view model's own default stays OFF, which the
+tests rely on). Nothing is captured until the user interacts with a row. There is **no app-count
 limit**: `AppConstants.maxConcurrentLiveSessions` is `nil` (owner decision), so every
 interacted row can get its own session. The cap mechanism stays injectable
 (`maxConcurrentSessions` on the facade / start coordinator, `maxSessions` on the manager) and
@@ -274,7 +282,8 @@ is exercised only by tests.
   `startExperimentalControl(for:)`.
 
 **`requestAutomaticStart(for:)` order** (`ProductRealStartCoordinator`):
-1. Global mode must be enabled (silent return otherwise).
+1. `isExperimentalRealAppControlEnabled` must be set (silent return otherwise; the app sets it at
+   launch, so it only matters in tests).
 2. Two-App Readiness must not be running ("Stop two-app test first").
 3. The app must still be in `context.apps` and eligible (`isEligibleForExperimentalLiveControl`).
 4. Dedupe: already resolving, or pending (start/stop in flight or queued) → no-op.
@@ -885,7 +894,8 @@ The hard teardown also clears queued Product starts (via the hard-teardown state
 - **Per-app stop** (row toggle, app exit): `ProductRealStopCoordinator.stopExperimentalControl`
   invalidates only that app's start token and queued start, marks the row pending, and stops its
   session by id in a task registered with the settle gate.
-- **Stop All** (banner, Real off, output change): `stopProductLiveSessions` stops every session
+- **Stop All** (banner, Real off — `setExperimentalRealAppControlEnabled(false)`, no longer reachable
+  from the UI — output change): `stopProductLiveSessions` stops every session
   id **sequentially** in one settle-gate-registered task; the public `stopProcessTapLiveControl()`
   also cancels an in-flight helper resolution.
 - **App exit**: `stopRealControlForExitedTargetApps` stops only the exited apps' sessions, drops
@@ -977,8 +987,8 @@ On macOS < 14.2:
 ### Preview-Only / Fallbacks in Production Build
 
 - `PreviewAudioStateController` — per-app volume/mute state for rows without an active Product
-  Real session is UI state only, no system effect. When global "Real app control" is OFF, slider
-  moves do nothing to real audio.
+  Real session is UI state only, no system effect. Slider moves on a row that is not tap-eligible,
+  or has not become Real, do nothing to real audio.
 - `MockApplicationLister`, `MockOutputDeviceLister` — fallbacks inside
   `WorkspaceApplicationLister` / `CoreAudioOutputDeviceLister`, not the main app flow. The other
   former production mocks (`MockSystemVolumeController`, `MockSystemVolumeReader`,
@@ -1004,11 +1014,11 @@ On macOS < 14.2:
 - **App Store distribution**: not targeted; System Audio Recording permission and
   per-process tap require entitlements that may be incompatible with sandbox.
 - **Automatic control on app appearance**: no capture starts until the user explicitly
-  interacts with a row while global mode is ON.
+  interacts with a row (real app control is always on; there is no toggle).
 - **Tab-level browser mapping**: helper PIDs are not stable across tab reloads or browser
   restarts. Cached mappings are validation-first but not persistently tracked.
-- **General per-app volume for all apps by default**: only rows the user has made Real (with the
-  global toggle ON) are real. All others are preview/UI state.
+- **General per-app volume for all apps by default**: only rows the user has made Real (by
+  interacting with them) are real. All others are preview/UI state.
 - **Notarized distribution**: packaged zips (`scripts/package-app.sh`, CI artifact, draft
   releases) are ad-hoc signed only; Developer ID signing + notarization is documented in
   `docs/RELEASING.md` but not implemented.
