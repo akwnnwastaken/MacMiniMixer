@@ -13,6 +13,17 @@ so production-grade multi-app per-application control is not claimed. Older entr
 
 ## [Unreleased]
 
+### Checkpoint 2 — direct engine at the default 44.1 kHz (`da6ed70`, tag `checkpoint-direct-engine-44k`)
+The direct output engine now runs on built-in speakers at their default **44.1 kHz** without touching
+the device's sample rate. Real-hardware log: the tap stream *reports* 48 kHz, but inside the aggregate
+the HAL already delivers it at the aggregate's rate (512 tap frames per 512 output frames every cycle,
+`measuredRatio=1.00000`), so the engine detects this and copies straight through (`path=passthrough`);
+the earlier "sample rate mismatch" fallback was a false alarm. The in-engine `AudioConverter` path stays
+as a safety net for HALs that do deliver a different rate. Owner's test: up to **six concurrent sessions**
+(Safari, Spotify, YouTube and two Netflix Safari web apps, Music) with repeated stop/start rounds, every
+start `output=direct`, `underruns=0 overflows=0`, and **no crackle heard**. Output devices that also have
+input streams (e.g. some headsets, likely AirPods) still use the AudioQueue path.
+
 ### Checkpoint — direct output engine, real-hardware result (`c6a1338`, tag `checkpoint-direct-engine-48k`)
 Commits after the docs refresh (`222b652`) that are not itemized below: per-app audio processes found
 through the HAL process-object list and tapped together (`5a498c2`), attribution by resource coalition
