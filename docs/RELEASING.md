@@ -99,9 +99,8 @@ download the zip in a browser, from the draft release or the workflow artifact.
 ## 3. Tag → draft release
 
 ```bash
-git switch main && git pull --ff-only
-git tag v0.14        # lightweight on purpose, see "Manual release" below (GH007)
-git push origin v0.14
+git fetch origin
+git push origin origin/main:refs/tags/v0.14   # no local tag object on purpose, see "Manual release" below (GH007)
 gh run watch            # or watch the Release workflow in the Actions tab
 ```
 
@@ -139,13 +138,17 @@ When GitHub Actions can't run (for example out of macOS minutes), tag and publis
 Mac, after the checklist in section 1 (run the tests locally, bump the version, finalize the
 CHANGELOG, push the release commit to `main`):
 
-1. Push a **lightweight** tag on the pushed release commit:
+1. Create the tag on GitHub by pushing the release commit straight to a tag ref:
    ```bash
    git fetch origin
-   git tag v0.14 origin/main && git push origin v0.14
+   git push origin origin/main:refs/tags/v0.14
+   git fetch origin --tags            # optional: get the tag locally
    ```
-   Don't use `git tag -a`: an annotated tag embeds the tagger's email, which GitHub's private-email
-   push protection (GH007) rejects. The tag push also starts the `Release` workflow. With CI
+   Don't create the tag locally first. A tag object embeds the tagger's email, which GitHub's
+   private-email push protection (GH007) rejects. A plain `git tag v0.14` was rejected the same
+   way for v0.14 (the push wrote a tag object, likely because of a local tag setting). Pushing the
+   commit to `refs/tags/…` creates a lightweight tag with no email in it. If a rejected local tag is
+   left over, remove it with `git tag -d v0.14`. The tag push also starts the `Release` workflow. With CI
    unavailable that run fails and can be ignored; if it does run, it creates a draft release for the
    tag, so publish that draft ([section 4](#4-publish-the-draft)) instead of running
    `gh release create`.
