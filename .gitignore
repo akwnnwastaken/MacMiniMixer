@@ -6,6 +6,7 @@
 # Xcode build products and indexes
 DerivedData/
 .DerivedData/
+.DerivedData-release/
 build/
 Build/
 *.build/

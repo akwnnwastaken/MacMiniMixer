@@ -64,7 +64,7 @@ GitHub Release.
 
 ```bash
 scripts/package-app.sh                    # Release build → dist/MacMiniMixer-<version>.zip + .sha256
-scripts/package-app.sh --skip-build       # reuse the existing ./.DerivedData Release build
+scripts/package-app.sh --skip-build       # reuse the existing ./.DerivedData-release Release build
 scripts/package-app.sh --label rc1        # → dist/MacMiniMixer-<version>-rc1.zip
 DIST_DIR=/tmp/mmm scripts/package-app.sh  # different output directory
 ```
@@ -72,7 +72,7 @@ DIST_DIR=/tmp/mmm scripts/package-app.sh  # different output directory
 The script does the following:
 
 1. Builds with `xcodebuild build -configuration Release … CODE_SIGNING_ALLOWED=NO` into
-   `./.DerivedData`.
+   `./.DerivedData-release` (kept separate from the test build so code-coverage instrumentation never reaches the shipped binary).
 2. Copies `MacMiniMixer.app` to a temporary folder, so the DerivedData product is left unchanged.
 3. Reads the version from the built `Info.plist`.
 4. Ad-hoc signs the copy (`codesign --force --deep --sign -`) and verifies it with

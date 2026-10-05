@@ -34,7 +34,9 @@ APP_NAME="MacMiniMixer"
 PROJECT="MacMiniMixer.xcodeproj"
 SCHEME="MacMiniMixer"
 CONFIGURATION="Release"
-DERIVED_DATA_PATH="./.DerivedData"
+# Separate from the test/debug ./.DerivedData so settings from an earlier `xcodebuild test`
+# (e.g. code-coverage instrumentation) can never leak into the shipped Release binary.
+DERIVED_DATA_PATH="./.DerivedData-release"
 PLISTBUDDY="/usr/libexec/PlistBuddy"
 
 usage() {
@@ -110,7 +112,9 @@ else
     -configuration "$CONFIGURATION" \
     -destination 'platform=macOS' \
     -derivedDataPath "$DERIVED_DATA_PATH" \
-    CODE_SIGNING_ALLOWED=NO
+    CODE_SIGNING_ALLOWED=NO \
+    CLANG_ENABLE_CODE_COVERAGE=NO \
+    CLANG_COVERAGE_MAPPING=NO
 fi
 
 [ -d "$APP_PATH" ] || die "built app not found at $APP_PATH (run without --skip-build, or check the xcodebuild output above)"
