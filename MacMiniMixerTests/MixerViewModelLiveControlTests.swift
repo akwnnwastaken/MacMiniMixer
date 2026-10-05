@@ -55,6 +55,95 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.activeLiveControlAppName, "Music")
     }
 
+    // Chrome-like app end to end through the real resolver: the visible main process is a Core Audio
+    // client (eligible), but the audio comes from its helper child. A slider move starts ONE product
+    // session whose single tap target covers both processes.
+    func testProductStartTapsChromeLikeAppTogetherWithItsAudioHelper() async {
+        let chrome = MixerAppItem(id: "bundle:com.google.Chrome", name: "Google Chrome", icon: .systemSymbol("globe"), processIdentifier: 101, volume: 50)
+        let liveController = FakeLiveControlController()
+        let resolver = HelperAudioTargetResolver(
+            processLister: FakeLiveControlProcessLister(processes: [
+                SystemProcessInfo(processIdentifier: 101, parentProcessIdentifier: 1, name: "Google Chrome", executablePath: nil),
+                SystemProcessInfo(processIdentifier: 301, parentProcessIdentifier: 101, name: "Google Chrome Helper", executablePath: nil)
+            ]),
+            helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
+            processTapEligibility: { _ in .eligible },
+            audioProcessObjectLister: FakeLiveControlAudioProcessObjectLister(objects: [
+                AudioProcessObjectInfo(objectID: 11, processIdentifier: 101, bundleIdentifier: "com.google.Chrome", isRunningOutput: false),
+                AudioProcessObjectInfo(objectID: 31, processIdentifier: 301, bundleIdentifier: nil, isRunningOutput: true),
+                AudioProcessObjectInfo(objectID: 71, processIdentifier: 701, bundleIdentifier: "com.spotify.client", isRunningOutput: true)
+            ]),
+            ownProcessIdentifier: 99_999
+        )
+        let viewModel = makeViewModel(apps: [chrome], liveController: liveController, appAudioTargetResolver: resolver)
+        viewModel.setExperimentalRealAppControlEnabled(true)
+
+        viewModel.setAppVolume(40, for: chrome.id)
+        await waitFor {
+            viewModel.isExperimentalControlActive(for: chrome.id)
+                && !viewModel.isExperimentalControlPending(for: chrome.id)
+        }
+
+        XCTAssertEqual(
+            liveController.startedTargets,
+            [
+                ProcessTapTarget(
+                    appID: chrome.id,
+                    appName: "Google Chrome",
+                    processIdentifier: 101,
+                    additionalProcessIdentifiers: [301]
+                )
+            ]
+        )
+        XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, 1)
+        XCTAssertEqual(viewModel.activeLiveControlAppName, "Google Chrome")
+    }
+
+    // Two rows whose matched processes overlap (Chrome's bundle prefix also matches Chrome Canary's
+    // `com.google.Chrome.canary*` processes): the later session leaves out every process the earlier
+    // session already taps, so no process is tapped twice.
+    func testProductStartDoesNotDoubleTapProcessesOwnedByAnotherSession() async {
+        let canary = MixerAppItem(id: "bundle:com.google.Chrome.canary", name: "Google Chrome Canary", icon: .systemSymbol("globe"), processIdentifier: 102, volume: 50)
+        let chrome = MixerAppItem(id: "bundle:com.google.Chrome", name: "Google Chrome", icon: .systemSymbol("globe"), processIdentifier: 101, volume: 50)
+        let liveController = FakeLiveControlController()
+        let resolver = HelperAudioTargetResolver(
+            processLister: FakeLiveControlProcessLister(processes: [
+                SystemProcessInfo(processIdentifier: 101, parentProcessIdentifier: 1, name: "Google Chrome", executablePath: nil),
+                SystemProcessInfo(processIdentifier: 301, parentProcessIdentifier: 101, name: "Google Chrome Helper", executablePath: nil),
+                SystemProcessInfo(processIdentifier: 102, parentProcessIdentifier: 1, name: "Google Chrome Canary", executablePath: nil),
+                SystemProcessInfo(processIdentifier: 302, parentProcessIdentifier: 102, name: "Google Chrome Canary Helper", executablePath: nil)
+            ]),
+            helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
+            processTapEligibility: { _ in .eligible },
+            audioProcessObjectLister: FakeLiveControlAudioProcessObjectLister(objects: [
+                AudioProcessObjectInfo(objectID: 11, processIdentifier: 101, bundleIdentifier: "com.google.Chrome", isRunningOutput: false),
+                AudioProcessObjectInfo(objectID: 31, processIdentifier: 301, bundleIdentifier: "com.google.Chrome.helper", isRunningOutput: true),
+                AudioProcessObjectInfo(objectID: 12, processIdentifier: 102, bundleIdentifier: "com.google.Chrome.canary", isRunningOutput: false),
+                AudioProcessObjectInfo(objectID: 32, processIdentifier: 302, bundleIdentifier: "com.google.Chrome.canary.helper", isRunningOutput: true)
+            ]),
+            ownProcessIdentifier: 99_999
+        )
+        let viewModel = makeViewModel(apps: [canary, chrome], liveController: liveController, appAudioTargetResolver: resolver)
+        viewModel.setExperimentalRealAppControlEnabled(true)
+
+        viewModel.setAppVolume(40, for: canary.id)
+        viewModel.setAppVolume(40, for: chrome.id)
+        await waitFor {
+            viewModel.isExperimentalControlActive(for: canary.id)
+                && viewModel.isExperimentalControlActive(for: chrome.id)
+                && !viewModel.isExperimentalControlPending(for: chrome.id)
+        }
+
+        XCTAssertEqual(
+            liveController.startedTargets,
+            [
+                ProcessTapTarget(appID: canary.id, appName: "Google Chrome Canary", processIdentifier: 102, additionalProcessIdentifiers: [302]),
+                ProcessTapTarget(appID: chrome.id, appName: "Google Chrome", processIdentifier: 101, additionalProcessIdentifiers: [301])
+            ]
+        )
+        XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, 2)
+    }
+
     func testProductHelperResolverStartUsesResolvedHelperPIDAndVisibleRowName() async {
         let resolver = FakeAppAudioTargetResolver(results: [
             .resolved(
@@ -3105,7 +3194,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     /// no-op settle sleeper, and all-eligible PID policy as `makeHarness`.
     private func makeViewModel(
         apps: [MixerAppItem],
-        liveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging
+        liveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging,
+        appAudioTargetResolver: AppAudioTargetResolving = FakeAppAudioTargetResolver()
     ) -> MixerViewModel {
         MixerViewModel(
             applicationLister: FakeLiveControlApplicationLister(apps: apps),
@@ -3119,7 +3209,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             processTapLiveController: liveController,
             twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
             helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
-            appAudioTargetResolver: FakeAppAudioTargetResolver(),
+            appAudioTargetResolver: appAudioTargetResolver,
             processLister: FakeLiveControlProcessLister(),
             productRealStartSettleGate: ProductRealStartSettleGate(sleeper: { _ in }),
             processTapEligibility: { processIdentifier in
@@ -3926,6 +4016,19 @@ private final class FakeLiveControlTwoAppReadinessTester: ProcessTapTwoAppReadin
         stopAllNowReasonsStorage.append(reason)
         lock.unlock()
         return .idle
+    }
+}
+
+/// Fake HAL process-object list for tests that run the real `HelperAudioTargetResolver`.
+private final class FakeLiveControlAudioProcessObjectLister: AudioProcessObjectListing, @unchecked Sendable {
+    let objects: [AudioProcessObjectInfo]
+
+    init(objects: [AudioProcessObjectInfo]) {
+        self.objects = objects
+    }
+
+    func listAudioProcessObjects() -> [AudioProcessObjectInfo] {
+        objects
     }
 }
 

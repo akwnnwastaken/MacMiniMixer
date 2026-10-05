@@ -139,20 +139,22 @@ final class ProductRealStartCoordinator {
     // `onWillChange` still fires.
 
     /// Starts Product Real for `app`, resolving an audio-helper target first when the visible process
-    /// is not directly eligible. Preserves the previous eligibility/permission/helper checks and
-    /// status messages verbatim.
+    /// is not directly eligible. An eligible visible process is widened to the app's other audio
+    /// processes (`expandedVisibleAppTarget`), so a Chromium/Electron main process is tapped
+    /// together with the helper that actually renders its audio. Any other app goes through the
+    /// resolver, which matches the HAL process list first and only then falls back to probing
+    /// browser helpers (or asks the user to play audio first). Preserves the previous
+    /// permission/platform checks and status messages verbatim.
     func startResolvedExperimentalControl(for app: MixerAppItem, allowsCachedLookup: Bool = true) {
         let request = app.appAudioTargetRequest
         let visibleEligibility = processTapEligibility(app.processIdentifier)
 
         if visibleEligibility.isEligible {
+            let target = expandedVisibleAppTarget(for: app)
             startExperimentalControl(
                 for: app,
-                target: ProcessTapTarget(
-                    appID: app.id,
-                    appName: app.name,
-                    processIdentifier: app.processIdentifier
-                )
+                target: target,
+                resolutionSource: target.additionalProcessIdentifiers.isEmpty ? nil : .matchedAudioProcesses
             )
             return
         }
@@ -170,11 +172,9 @@ final class ProductRealStartCoordinator {
             return
         }
 
-        guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget) else {
-            sideEffects?.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
-            return
-        }
-
+        // No browser-keyword gate here any more: the resolver matches the app against the HAL's
+        // process list first (any multi-process app — Discord, Slack, Teams, VS Code, Firefox), and
+        // reports "play audio first" itself for a non-browser app with no audio process yet.
         productRealControlState.beginResolution(for: app.id)
         appAudioResolutionTask?.cancel()
         // The resolution holds the start lane until this task physically finishes (even when it was
@@ -445,21 +445,94 @@ final class ProductRealStartCoordinator {
             return
         }
 
-        let target = ProcessTapTarget(
+        // Widen the visible process to the app's other audio processes (helpers, WebKit GPU
+        // process). When nothing matched and the visible process is not a Core Audio tap target
+        // either, a direct start could only fail, so route through resolution instead (helper probe
+        // for browsers, "play audio first" for other apps). The lane is free here, so a resolution
+        // may start.
+        let target = expandedVisibleAppTarget(for: app)
+        if target.additionalProcessIdentifiers.isEmpty,
+           !processTapEligibility(app.processIdentifier).isEligible {
+            startResolvedExperimentalControl(for: app)
+            return
+        }
+
+        startExperimentalControl(
+            for: app,
+            target: target,
+            resolutionSource: target.additionalProcessIdentifiers.isEmpty ? nil : .matchedAudioProcesses
+        )
+    }
+
+    /// The direct target for `app`'s visible process, widened to every other Core Audio process
+    /// object the resolver matches to the app (synchronous, no probing; see
+    /// `AppAudioProcessMatcher`). Falls back to the plain visible-PID target when nothing matches.
+    private func expandedVisibleAppTarget(for app: MixerAppItem) -> ProcessTapTarget {
+        let request = app.appAudioTargetRequest
+        let matchedProcessIdentifiers = appAudioTargetResolver.matchedAudioProcessIdentifiers(for: request)
+        return AppAudioProcessMatcher.target(
+            for: request,
+            matchedProcessIdentifiers: matchedProcessIdentifiers
+        ) ?? ProcessTapTarget(
             appID: app.id,
             appName: app.name,
             processIdentifier: app.processIdentifier
         )
-        startExperimentalControl(for: app, target: target)
+    }
+
+    /// Drops from `target` every process another app's Product Real session (optimistic or
+    /// confirmed) already taps, so no process is ever tapped twice — two `.mutedWhenTapped` taps over
+    /// one process would replay its audio twice. Keeps the primary process when it survives,
+    /// otherwise promotes the first surviving additional one. Returns nil when nothing survives.
+    /// Unchanged (same value) when nothing overlaps.
+    private func removingProcessesControlledByOtherSessions(
+        from target: ProcessTapTarget,
+        appID: MixerAppItem.ID
+    ) -> ProcessTapTarget? {
+        let controlledElsewhere = productRealControlState.processIdentifiersControlledByOtherSessions(than: appID)
+        let allProcessIdentifiers = target.allProcessIdentifiers
+        guard !controlledElsewhere.isEmpty,
+              allProcessIdentifiers.contains(where: { controlledElsewhere.contains($0) }) else {
+            return target
+        }
+
+        let remaining = allProcessIdentifiers.filter { !controlledElsewhere.contains($0) }
+        guard let firstRemaining = remaining.first else {
+            return nil
+        }
+
+        let primary: Int32
+        if let targetPrimary = target.processIdentifier, remaining.contains(targetPrimary) {
+            primary = targetPrimary
+        } else {
+            primary = firstRemaining
+        }
+
+        AppLogger.processTap.info("Product Real start skipped processes already controlled by another session app=\(target.appName, privacy: .public) skipped=\(allProcessIdentifiers.count - remaining.count, privacy: .public)")
+        return ProcessTapTarget(
+            appID: target.appID,
+            appName: target.appName,
+            processIdentifier: primary,
+            additionalProcessIdentifiers: remaining.filter { $0 != primary }
+        )
     }
 
     func startExperimentalControl(
         for app: MixerAppItem,
-        target: ProcessTapTarget,
+        target requestedTarget: ProcessTapTarget,
         resolutionSource: ResolvedAppAudioTarget.Source? = nil
     ) {
-        guard target.processIdentifier.map({ $0 > 0 }) == true else {
+        guard requestedTarget.processIdentifier.map({ $0 > 0 }) == true else {
             sideEffects?.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
+            return
+        }
+
+        guard let target = removingProcessesControlledByOtherSessions(from: requestedTarget, appID: app.id) else {
+            sideEffects?.showProductRealStatus(
+                "This app's audio is already under real control in another row",
+                style: .warning,
+                action: nil
+            )
             return
         }
 
@@ -478,6 +551,7 @@ final class ProductRealStartCoordinator {
             visibleAppID: app.id,
             displayName: app.name,
             controlledProcessIdentifier: target.processIdentifier,
+            additionalControlledProcessIdentifiers: target.additionalProcessIdentifiers,
             source: ProductRealControlStartSource(resolutionSource: resolutionSource),
             startRequestID: startRequestID
         )
@@ -590,6 +664,7 @@ final class ProductRealStartCoordinator {
                         visibleAppID: app.id,
                         displayName: app.name,
                         controlledProcessIdentifier: target.processIdentifier,
+                        additionalControlledProcessIdentifiers: target.additionalProcessIdentifiers,
                         source: ProductRealControlStartSource(resolutionSource: resolutionSource),
                         liveSessionID: startResult.sessionID,
                         startRequestID: startRequestID

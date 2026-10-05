@@ -893,6 +893,22 @@ final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked
     }
     func invalidateAllCachedTargets() {}
 
+    // MARK: Process-object matching (multi-process start tests)
+    //
+    // Empty by default, so every existing test keeps single-process targets. A test configures the
+    // pids the HAL-list matcher would return for an app id.
+
+    private var matchedAudioProcessIdentifiersByAppIDStorage: [String: [Int32]] = [:]
+
+    var matchedAudioProcessIdentifiersByAppID: [String: [Int32]] {
+        get { lock.withLock { matchedAudioProcessIdentifiersByAppIDStorage } }
+        set { lock.withLock { matchedAudioProcessIdentifiersByAppIDStorage = newValue } }
+    }
+
+    func matchedAudioProcessIdentifiers(for request: AppAudioTargetRequest) -> [Int32] {
+        lock.withLock { matchedAudioProcessIdentifiersByAppIDStorage[request.appID] ?? [] }
+    }
+
     // MARK: Suspended-resolution mode (queued start-lane tests)
     //
     // Off by default: `resolveTarget` records the request and returns `.cancelled` immediately, as

@@ -34,6 +34,35 @@ struct SystemProcessLister: ProcessListing {
             }
     }
 
+    /// Walks only the parent chains of `processIdentifiers` (one `proc_pidinfo` per hop, bounded and
+    /// cycle-safe) instead of listing every process, so the synchronous product start path can check
+    /// descendants cheaply. Names are best-effort (`proc_name`, else empty).
+    func listProcessAncestry(of processIdentifiers: [Int32]) -> [SystemProcessInfo] {
+        var processByPID: [Int32: SystemProcessInfo] = [:]
+
+        for processIdentifier in processIdentifiers where processIdentifier > 0 {
+            var currentPID: Int32? = processIdentifier
+            for _ in 0..<64 {
+                guard let pid = currentPID, pid > 0, processByPID[pid] == nil else {
+                    break
+                }
+
+                let parentPID = parentProcessIdentifier(for: pid_t(pid))
+                processByPID[pid] = SystemProcessInfo(
+                    processIdentifier: pid,
+                    parentProcessIdentifier: parentPID,
+                    name: processName(for: pid_t(pid)) ?? "",
+                    executablePath: nil
+                )
+                currentPID = parentPID
+            }
+        }
+
+        return processByPID.values.sorted { first, second in
+            first.processIdentifier < second.processIdentifier
+        }
+    }
+
     private func processInfo(for pid: pid_t) -> SystemProcessInfo? {
         let name = processName(for: pid)
         let executablePath = processPath(for: pid)

@@ -2,6 +2,17 @@ import Foundation
 
 protocol ProcessListing: Sendable {
     func listProcesses() -> [SystemProcessInfo]
+
+    /// Enough processes to walk the parent chain of every pid in `processIdentifiers`: each of
+    /// those processes plus all of its ancestors (name/path may be left empty). Used for cheap
+    /// "is this pid a descendant of the app?" checks. The default lists every process.
+    func listProcessAncestry(of processIdentifiers: [Int32]) -> [SystemProcessInfo]
+}
+
+extension ProcessListing {
+    func listProcessAncestry(of processIdentifiers: [Int32]) -> [SystemProcessInfo] {
+        listProcesses()
+    }
 }
 
 struct SystemProcessInfo: Identifiable, Equatable, Sendable {

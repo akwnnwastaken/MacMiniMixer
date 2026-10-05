@@ -69,6 +69,8 @@ enum ProductRealControlStartSource: Equatable, Sendable {
     case directVisiblePID
     case discoveredHelper
     case cachedHelper
+    /// The visible app plus its other audio processes, matched from the HAL process object list.
+    case matchedAudioProcesses
 
     init(resolutionSource: ResolvedAppAudioTarget.Source?) {
         switch resolutionSource {
@@ -76,6 +78,8 @@ enum ProductRealControlStartSource: Equatable, Sendable {
             self = .cachedHelper
         case .discoveredHelper:
             self = .discoveredHelper
+        case .matchedAudioProcesses:
+            self = .matchedAudioProcesses
         case .directVisibleApp, nil:
             self = .directVisiblePID
         }
@@ -118,6 +122,14 @@ struct ProductRealControlActiveSession: Equatable, Sendable {
     /// The start request that produced this session, so a later callback can confirm it is
     /// still the one that owns this app's session.
     var startRequestID: ProductRealControlStartRequestID?
+    /// Further processes this session's single multi-process tap covers (the app's audio helpers),
+    /// besides `controlledProcessIdentifier`. Empty for a single-process session.
+    var additionalControlledProcessIdentifiers: [Int32] = []
+
+    /// Every process this session taps (primary first), excluding the `-1` "no process" placeholder.
+    var controlledProcessIdentifiers: [Int32] {
+        ([controlledProcessIdentifier] + additionalControlledProcessIdentifiers).filter { $0 > 0 }
+    }
 }
 
 struct ProductRealControlState: Equatable, Sendable {
@@ -185,6 +197,7 @@ struct ProductRealControlState: Equatable, Sendable {
         visibleAppID: MixerAppItem.ID,
         displayName: String,
         controlledProcessIdentifier: Int32?,
+        additionalControlledProcessIdentifiers: [Int32] = [],
         source: ProductRealControlStartSource,
         liveSessionID: ProcessTapLiveSessionID? = nil,
         startRequestID: ProductRealControlStartRequestID? = nil
@@ -195,8 +208,19 @@ struct ProductRealControlState: Equatable, Sendable {
             controlledProcessIdentifier: controlledProcessIdentifier ?? -1,
             source: source,
             liveSessionID: liveSessionID,
-            startRequestID: startRequestID
+            startRequestID: startRequestID,
+            additionalControlledProcessIdentifiers: additionalControlledProcessIdentifiers
         )
+    }
+
+    /// Every process tapped by a session (optimistic or confirmed) of an app other than `appID`, so
+    /// a new start for `appID` never taps a process another Product Real session already taps.
+    func processIdentifiersControlledByOtherSessions(than appID: MixerAppItem.ID) -> Set<Int32> {
+        var processIdentifiers = Set<Int32>()
+        for (sessionAppID, session) in activeSessionsByAppID where sessionAppID != appID {
+            processIdentifiers.formUnion(session.controlledProcessIdentifiers)
+        }
+        return processIdentifiers
     }
 
     mutating func clearActiveSession() {

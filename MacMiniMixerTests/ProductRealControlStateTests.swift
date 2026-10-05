@@ -306,6 +306,56 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .directVisibleApp), .directVisiblePID)
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .discoveredHelper), .discoveredHelper)
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .cachedHelper), .cachedHelper)
+        XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .matchedAudioProcesses), .matchedAudioProcesses)
+    }
+
+    // MARK: - Multi-process sessions
+
+    func testSessionRecordsEveryControlledProcess() {
+        var state = ProductRealControlState()
+
+        state.beginSession(
+            visibleAppID: "chrome",
+            displayName: "Google Chrome",
+            controlledProcessIdentifier: 100,
+            additionalControlledProcessIdentifiers: [300, 301],
+            source: .matchedAudioProcesses
+        )
+
+        let session = state.activeSessionsByAppID["chrome"]
+        XCTAssertEqual(session?.controlledProcessIdentifier, 100)
+        XCTAssertEqual(session?.additionalControlledProcessIdentifiers, [300, 301])
+        XCTAssertEqual(session?.controlledProcessIdentifiers, [100, 300, 301])
+        XCTAssertEqual(session?.source, .matchedAudioProcesses)
+    }
+
+    func testSingleProcessSessionDefaultsToNoAdditionalProcesses() {
+        var state = ProductRealControlState()
+
+        state.beginSession(visibleAppID: "music", displayName: "Music", controlledProcessIdentifier: 102, source: .directVisiblePID)
+        state.beginSession(visibleAppID: "ghost", displayName: "Ghost", controlledProcessIdentifier: nil, source: .directVisiblePID)
+
+        XCTAssertEqual(state.activeSessionsByAppID["music"]?.additionalControlledProcessIdentifiers, [])
+        XCTAssertEqual(state.activeSessionsByAppID["music"]?.controlledProcessIdentifiers, [102])
+        // The `-1` "no process" placeholder is never reported as a controlled process.
+        XCTAssertEqual(state.activeSessionsByAppID["ghost"]?.controlledProcessIdentifiers, [])
+    }
+
+    func testProcessIdentifiersControlledByOtherSessionsExcludesTheAskingApp() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "chrome",
+            displayName: "Google Chrome",
+            controlledProcessIdentifier: 100,
+            additionalControlledProcessIdentifiers: [300],
+            source: .matchedAudioProcesses
+        )
+        state.beginSession(visibleAppID: "music", displayName: "Music", controlledProcessIdentifier: 102, source: .directVisiblePID)
+
+        XCTAssertEqual(state.processIdentifiersControlledByOtherSessions(than: "chrome"), [102])
+        XCTAssertEqual(state.processIdentifiersControlledByOtherSessions(than: "music"), [100, 300])
+        XCTAssertEqual(state.processIdentifiersControlledByOtherSessions(than: "safari"), [100, 102, 300])
+        XCTAssertEqual(ProductRealControlState().processIdentifiersControlledByOtherSessions(than: "chrome"), [])
     }
 
     // MARK: - shouldAcceptCallback

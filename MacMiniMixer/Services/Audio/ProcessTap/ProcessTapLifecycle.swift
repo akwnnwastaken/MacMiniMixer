@@ -116,6 +116,35 @@ enum ProcessTapPermissionMessage {
     )
 }
 
+/// One Core Audio process object (a client process connected to the HAL), as read from
+/// `kAudioHardwarePropertyProcessObjectList` + `kAudioProcessPropertyPID` /
+/// `kAudioProcessPropertyBundleID` / `kAudioProcessPropertyIsRunningOutput`. Plain value so the
+/// per-app matching (`AppAudioProcessMatcher`) can be unit-tested without Core Audio.
+struct AudioProcessObjectInfo: Equatable, Sendable {
+    let objectID: AudioObjectID
+    let processIdentifier: Int32
+    let bundleIdentifier: String?
+    /// The process is running IO with at least one active output stream (i.e. playing right now).
+    let isRunningOutput: Bool
+}
+
+/// Source of the HAL's audio-producing process list. Faked in tests.
+protocol AudioProcessObjectListing: Sendable {
+    func listAudioProcessObjects() -> [AudioProcessObjectInfo]
+}
+
+/// Production `AudioProcessObjectListing`: reads the HAL process object list on macOS 14.2+ (the
+/// same availability gate as every Process Tap API here), and returns nothing on older systems.
+struct CoreAudioProcessObjectLister: AudioProcessObjectListing {
+    func listAudioProcessObjects() -> [AudioProcessObjectInfo] {
+        guard #available(macOS 14.2, *) else {
+            return []
+        }
+
+        return ProcessTapCoreAudio.audioProcessObjects()
+    }
+}
+
 enum ProcessTapCoreAudio {
     static var isProcessTapAvailable: Bool {
         if #available(macOS 14.2, *) {
@@ -166,6 +195,112 @@ enum ProcessTapCoreAudio {
         }
 
         return processObjectID
+    }
+
+    /// Every Core Audio process object the HAL currently knows (`kAudioHardwarePropertyProcessObjectList`,
+    /// "client processes currently connected to the system"), with the pid, bundle id and
+    /// running-output state of each. A process only appears here once it has used Core Audio, so an
+    /// app that has not played anything since launch has no entry yet. Objects whose pid cannot be
+    /// read are skipped. Synchronous HAL reads (one list read plus three small reads per object).
+    @available(macOS 14.2, *)
+    static func audioProcessObjects() -> [AudioProcessObjectInfo] {
+        processObjectIDList().compactMap { objectID -> AudioProcessObjectInfo? in
+            guard let processIdentifier = processPID(for: objectID), processIdentifier > 0 else {
+                return nil
+            }
+
+            return AudioProcessObjectInfo(
+                objectID: objectID,
+                processIdentifier: Int32(processIdentifier),
+                bundleIdentifier: stringProperty(kAudioProcessPropertyBundleID, for: objectID),
+                isRunningOutput: (uint32Property(kAudioProcessPropertyIsRunningOutput, for: objectID) ?? 0) != 0
+            )
+        }
+    }
+
+    @available(macOS 14.2, *)
+    private static func processObjectIDList() -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+
+        let sizeStatus = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize
+        )
+
+        guard sizeStatus == noErr, dataSize > 0 else {
+            return []
+        }
+
+        let objectCount = Int(dataSize) / MemoryLayout<AudioObjectID>.stride
+        guard objectCount > 0 else {
+            return []
+        }
+
+        var objectIDs = [AudioObjectID](repeating: AudioObjectID(kAudioObjectUnknown), count: objectCount)
+        let dataStatus = objectIDs.withUnsafeMutableBufferPointer { buffer -> OSStatus in
+            guard let baseAddress = buffer.baseAddress else {
+                return kAudio_ParamError
+            }
+            return AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &dataSize,
+                baseAddress
+            )
+        }
+
+        guard dataStatus == noErr else {
+            return []
+        }
+
+        // The list can shrink between the size and data reads; only the returned bytes are valid.
+        let returnedCount = min(objectCount, Int(dataSize) / MemoryLayout<AudioObjectID>.stride)
+        return objectIDs.prefix(returnedCount).filter { $0 != AudioObjectID(kAudioObjectUnknown) }
+    }
+
+    @available(macOS 14.2, *)
+    private static func processPID(for processObjectID: AudioObjectID) -> pid_t? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyPID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var processIdentifier = pid_t(0)
+        var dataSize = UInt32(MemoryLayout<pid_t>.size)
+
+        let status = AudioObjectGetPropertyData(processObjectID, &address, 0, nil, &dataSize, &processIdentifier)
+        guard status == noErr else {
+            return nil
+        }
+
+        return processIdentifier
+    }
+
+    private static func uint32Property(_ selector: AudioObjectPropertySelector, for objectID: AudioObjectID) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = UInt32(0)
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+
+        let status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &value)
+        guard status == noErr else {
+            return nil
+        }
+
+        return value
     }
 
     static func processTapEligibility(for processIdentifier: Int32?) -> ProcessTapProcessEligibility {
@@ -324,7 +459,23 @@ final class ProcessTapResourceContext {
         name: String,
         muteBehavior: CATapMuteBehavior
     ) -> OSStatus {
-        let tapDescription = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
+        createProcessTap(
+            processObjectIDs: [processObjectID],
+            name: name,
+            muteBehavior: muteBehavior
+        )
+    }
+
+    /// Creates one stereo-mixdown tap over several process objects of the same app (e.g. a
+    /// browser's main process plus its audio helper), so the app's whole output is captured — and,
+    /// with `.mutedWhenTapped`, muted — by a single tap/aggregate/IOProc.
+    @available(macOS 14.2, *)
+    func createProcessTap(
+        processObjectIDs: [AudioObjectID],
+        name: String,
+        muteBehavior: CATapMuteBehavior
+    ) -> OSStatus {
+        let tapDescription = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
         tapDescription.name = name
         tapDescription.isPrivate = true
         tapDescription.muteBehavior = muteBehavior

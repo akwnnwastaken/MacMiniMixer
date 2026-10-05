@@ -18,12 +18,17 @@ struct ResolvedAppAudioTarget: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case visibleApp
         case helper
+        /// The app's visible process plus its other audio processes (helpers, WebKit GPU process,
+        /// children), tapped together in one multi-process tap.
+        case audioProcessGroup
     }
 
     enum Source: Equatable, Sendable {
         case directVisibleApp
         case discoveredHelper
         case cachedHelper
+        /// Matched from the HAL's own process object list (`AppAudioProcessMatcher`), no probing.
+        case matchedAudioProcesses
     }
 
     let visibleAppID: String
@@ -58,12 +63,179 @@ protocol AppAudioTargetResolving: Sendable {
     func cancelCurrentResolution(reason: ProcessTapCandidateProbeStopReason)
     func invalidateCachedTarget(for request: AppAudioTargetRequest)
     func invalidateAllCachedTargets()
+
+    /// Synchronous and probe-free: the pids of every Core Audio process object that belongs to the
+    /// app in `request` (see `AppAudioProcessMatcher`), best match first; empty when none does. Used
+    /// by the Product Real start path to widen a visible-PID target to the app's audio helpers.
+    func matchedAudioProcessIdentifiers(for request: AppAudioTargetRequest) -> [Int32]
+}
+
+extension AppAudioTargetResolving {
+    /// Default: no process-object matching (keeps simple resolvers and test fakes single-process).
+    func matchedAudioProcessIdentifiers(for request: AppAudioTargetRequest) -> [Int32] {
+        []
+    }
+}
+
+/// Pure (no Core Audio, no syscalls) matcher from a visible app row to the Core Audio process
+/// objects that render its audio, using the HAL's own list of client processes. An object belongs
+/// to the app when:
+///   - its pid is the app's pid;
+///   - its pid descends from the app's pid (parent chain, cycle-safe) — Chromium / Electron /
+///     Firefox helpers are children of the main process;
+///   - its bundle id equals the app's bundle id (from a `bundle:<id>` row id) or extends it with a
+///     dot (`com.google.Chrome.helper`, `com.microsoft.edgemac.helper`, `com.hnc.Discord.helper`);
+///     a shared prefix without the dot (`com.google.ChromeX`) does not count;
+///   - for Safari / Safari Technology Preview only: its bundle id starts with `com.apple.WebKit.`
+///     (GPU / WebContent processes).
+/// Caveat: the WebKit GPU process is launched by launchd, not by Safari, and public APIs cannot
+/// attribute it to Safari, so another WebKit-based app playing audio at the same time could be
+/// included in Safari's tap. Likewise a bundle-prefix match can include a sibling app whose bundle id
+/// extends this one (e.g. `com.google.Chrome.canary` for `com.google.Chrome`).
+/// MacMiniMixer's own pid is never included. Results are sorted running-output first, then by pid,
+/// and deduplicated by pid.
+enum AppAudioProcessMatcher {
+    static let safariBundleIdentifiers: Set<String> = [
+        "com.apple.safari",
+        "com.apple.safaritechnologypreview"
+    ]
+
+    static let webKitBundleIdentifierPrefix = "com.apple.webkit."
+
+    private static let bundleAppIDPrefix = "bundle:"
+
+    /// The bundle identifier encoded in a `WorkspaceApplicationLister` row id (`bundle:<id>`), or nil
+    /// for executable/pid-based ids.
+    static func bundleIdentifier(forAppID appID: String) -> String? {
+        guard appID.hasPrefix(bundleAppIDPrefix) else {
+            return nil
+        }
+
+        let bundleIdentifier = String(appID.dropFirst(bundleAppIDPrefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return bundleIdentifier.isEmpty ? nil : bundleIdentifier
+    }
+
+    static func matchingProcessObjects(
+        for request: AppAudioTargetRequest,
+        processObjects: [AudioProcessObjectInfo],
+        processes: [SystemProcessInfo],
+        ownProcessIdentifier: Int32
+    ) -> [AudioProcessObjectInfo] {
+        let appProcessIdentifier = request.processIdentifier.flatMap { $0 > 0 ? $0 : nil }
+        let appBundleIdentifier = bundleIdentifier(forAppID: request.appID)?.lowercased()
+        guard appProcessIdentifier != nil || appBundleIdentifier != nil else {
+            return []
+        }
+
+        let includesWebKitProcesses = appBundleIdentifier.map { safariBundleIdentifiers.contains($0) } ?? false
+        let processByPID = Dictionary(
+            processes.map { ($0.processIdentifier, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        let matches = processObjects.filter { object in
+            let objectPID = object.processIdentifier
+            guard objectPID > 0, objectPID != ownProcessIdentifier else {
+                return false
+            }
+
+            if let appProcessIdentifier {
+                if objectPID == appProcessIdentifier {
+                    return true
+                }
+
+                if let process = processByPID[objectPID],
+                   HelperProcessCandidateDiscovery.isDescendant(
+                    process,
+                    of: appProcessIdentifier,
+                    processByPID: processByPID
+                   ) {
+                    return true
+                }
+            }
+
+            if let appBundleIdentifier,
+               let objectBundleIdentifier = object.bundleIdentifier?.lowercased() {
+                if objectBundleIdentifier == appBundleIdentifier ||
+                    objectBundleIdentifier.hasPrefix(appBundleIdentifier + ".") {
+                    return true
+                }
+
+                if includesWebKitProcesses,
+                   objectBundleIdentifier.hasPrefix(webKitBundleIdentifierPrefix) {
+                    return true
+                }
+            }
+
+            return false
+        }
+
+        let sortedMatches = matches.sorted { lhs, rhs in
+            if lhs.isRunningOutput != rhs.isRunningOutput {
+                return lhs.isRunningOutput
+            }
+
+            return lhs.processIdentifier < rhs.processIdentifier
+        }
+
+        var seenProcessIdentifiers = Set<Int32>()
+        var uniqueMatches: [AudioProcessObjectInfo] = []
+        for match in sortedMatches {
+            if seenProcessIdentifiers.insert(match.processIdentifier).inserted {
+                uniqueMatches.append(match)
+            }
+        }
+        return uniqueMatches
+    }
+
+    /// The multi-process target for `request` over `matchedProcessIdentifiers`, or nil when nothing
+    /// matched. The visible app's pid stays the primary process whenever it is valid — the live
+    /// controller watches the primary pid for app exit, and a browser can restart its audio helper —
+    /// and every other matched pid is additional. Without a valid visible pid the first match is
+    /// primary.
+    static func target(
+        for request: AppAudioTargetRequest,
+        matchedProcessIdentifiers: [Int32]
+    ) -> ProcessTapTarget? {
+        let validMatches = matchedProcessIdentifiers.filter { $0 > 0 }
+        guard let firstMatch = validMatches.first else {
+            return nil
+        }
+
+        let primary: Int32
+        if let visibleProcessIdentifier = request.processIdentifier, visibleProcessIdentifier > 0 {
+            primary = visibleProcessIdentifier
+        } else {
+            primary = firstMatch
+        }
+
+        var additional: [Int32] = []
+        for processIdentifier in validMatches where processIdentifier != primary && !additional.contains(processIdentifier) {
+            additional.append(processIdentifier)
+        }
+
+        return ProcessTapTarget(
+            appID: request.appID,
+            appName: request.appName,
+            processIdentifier: primary,
+            additionalProcessIdentifiers: additional
+        )
+    }
+
+    /// Shown when an app has no Core Audio process object yet and is not a known browser: a process
+    /// only joins the HAL's list after it has used audio.
+    static func playAudioFirstMessage(appName: String) -> String {
+        "No audio from \(appName) yet. Start playing audio in it, then try again."
+    }
 }
 
 final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Sendable {
     private let processLister: ProcessListing
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
+    private let audioProcessObjectLister: AudioProcessObjectListing
+    private let ownProcessIdentifier: Int32
     private let lock = NSLock()
     private var currentResolutionID: UUID?
     private var cachedHelpersByKey: [AppAudioHelperResolutionCacheKey: AppAudioHelperResolutionCacheEntry] = [:]
@@ -73,11 +245,35 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
             ProcessTapCoreAudio.processTapEligibility(for: $0)
-        }
+        },
+        audioProcessObjectLister: AudioProcessObjectListing = CoreAudioProcessObjectLister(),
+        ownProcessIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier
     ) {
         self.processLister = processLister
         self.helperProcessAudioProbe = helperProcessAudioProbe
         self.processTapEligibility = processTapEligibility
+        self.audioProcessObjectLister = audioProcessObjectLister
+        self.ownProcessIdentifier = ownProcessIdentifier
+    }
+
+    func matchedAudioProcessIdentifiers(for request: AppAudioTargetRequest) -> [Int32] {
+        let processObjects = audioProcessObjectLister.listAudioProcessObjects()
+        guard !processObjects.isEmpty else {
+            return []
+        }
+
+        let processes = processLister.listProcessAncestry(of: processObjects.map(\.processIdentifier))
+        let matches = AppAudioProcessMatcher.matchingProcessObjects(
+            for: request,
+            processObjects: processObjects,
+            processes: processes,
+            ownProcessIdentifier: ownProcessIdentifier
+        )
+        if !matches.isEmpty {
+            let matchedPIDs = matches.map { String($0.processIdentifier) }.joined(separator: ",")
+            AppLogger.helperResolution.info("Audio process objects matched app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) matchedPIDs=\(matchedPIDs, privacy: .public) halObjects=\(processObjects.count, privacy: .public)")
+        }
+        return matches.map(\.processIdentifier)
     }
 
     func resolveTarget(
@@ -97,6 +293,53 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
         }
 
         let visibleEligibility = processTapEligibility(request.processIdentifier)
+
+        // Platform/configuration problems block every Process Tap, matched or not. (An eligible
+        // visible PID never carries one of these reasons, so checking them first changes nothing
+        // for the direct path.)
+        if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
+            visibleEligibility.reason == ProcessTapPermissionMessage.missingUsageDescriptionReason {
+            AppLogger.helperResolution.warning("Visible app PID unavailable for platform/config app=\(request.appName, privacy: .public) reason=\(visibleEligibility.reason ?? "unknown", privacy: .public)")
+            return .unavailable(
+                ProcessTapPermissionMessage.message(
+                    forEligibilityReason: visibleEligibility.reason,
+                    fallback: visibleEligibility.reason ?? "Process Tap is unavailable"
+                )
+            )
+        }
+
+        // First ask the HAL which of its client processes belong to this app (main process, helper
+        // children, `<bundle id>.*` helpers, Safari's WebKit processes). A match resolves at once,
+        // without probing, and also wins over an eligible visible PID: a Chromium/Electron main
+        // process can be a Core Audio client while its helper renders the actual audio.
+        // Deliberately not cached: re-matching is cheap and avoids stale helper PIDs.
+        let matchedProcessIdentifiers = await Task.detached(priority: .userInitiated) {
+            self.matchedAudioProcessIdentifiers(for: request)
+        }.value
+
+        guard isCurrentResolution(resolutionID) else {
+            AppLogger.helperResolution.info("Helper resolution cancelled after audio process matching app=\(request.appName, privacy: .public)")
+            return .cancelled
+        }
+
+        if let matchedTarget = AppAudioProcessMatcher.target(
+            for: request,
+            matchedProcessIdentifiers: matchedProcessIdentifiers
+        ) {
+            let isVisibleProcessOnly = matchedTarget.additionalProcessIdentifiers.isEmpty &&
+                matchedTarget.processIdentifier == request.processIdentifier
+            AppLogger.helperResolution.info("Helper resolution matched audio processes app=\(request.appName, privacy: .public) primaryPID=\(matchedTarget.processIdentifier ?? -1, privacy: .public) additionalCount=\(matchedTarget.additionalProcessIdentifiers.count, privacy: .public)")
+            return .resolved(
+                ResolvedAppAudioTarget(
+                    visibleAppID: request.appID,
+                    visibleAppName: request.appName,
+                    target: matchedTarget,
+                    kind: isVisibleProcessOnly ? .visibleApp : .audioProcessGroup,
+                    source: isVisibleProcessOnly ? .directVisibleApp : .matchedAudioProcesses
+                )
+            )
+        }
+
         if visibleEligibility.isEligible {
             AppLogger.helperResolution.info("Visible app PID is Process Tap eligible app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public)")
             return .resolved(
@@ -114,20 +357,12 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
             )
         }
 
-        if visibleEligibility.reason == ProcessTapCoreAudio.unsupportedOSMessage ||
-            visibleEligibility.reason == ProcessTapPermissionMessage.missingUsageDescriptionReason {
-            AppLogger.helperResolution.warning("Visible app PID unavailable for platform/config app=\(request.appName, privacy: .public) reason=\(visibleEligibility.reason ?? "unknown", privacy: .public)")
-            return .unavailable(
-                ProcessTapPermissionMessage.message(
-                    forEligibilityReason: visibleEligibility.reason,
-                    fallback: visibleEligibility.reason ?? "Process Tap is unavailable"
-                )
-            )
-        }
-
+        // Nothing in the HAL list belongs to this app yet. Known browsers still get the probe-based
+        // helper search below; any other app simply has not used audio since it launched (a process
+        // only joins the HAL list once it has), so ask the user to play something first.
         guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(request.helperDiscoveryTarget) else {
-            AppLogger.helperResolution.warning("App is not helper-resolvable app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) reason=\(visibleEligibility.reason ?? "unknown", privacy: .public)")
-            return .unavailable(visibleEligibility.reason ?? "Core Audio process unavailable")
+            AppLogger.helperResolution.warning("App has no matched audio process and is not helper-resolvable app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) reason=\(visibleEligibility.reason ?? "unknown", privacy: .public)")
+            return .unavailable(AppAudioProcessMatcher.playAudioFirstMessage(appName: request.appName))
         }
 
         guard isCurrentResolution(resolutionID) else {

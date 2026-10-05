@@ -97,6 +97,227 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         XCTAssertTrue(harness.resolver.cancelReasons.isEmpty)
     }
 
+    // MARK: - Multi-process targets (HAL process-object matching)
+
+    // Chrome-like app: the visible main process is eligible, but the audio is rendered by a helper
+    // child. The start widens the visible target to the matched helper — one session, one tap over
+    // both processes — without entering helper resolution.
+    func testEligibleChromeLikeAppStartsOneSessionOverMainAndHelperProcesses() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let chrome = makeApp(id: "bundle:com.google.Chrome", name: "Google Chrome", pid: 100)
+        harness.context.apps = [chrome]
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [chrome.id: [300, 100]]
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+
+        harness.coordinator.startResolvedExperimentalControl(for: chrome)
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[chrome.id]?.liveSessionID == sessionID
+        }
+
+        XCTAssertEqual(
+            harness.liveSessionManager.startSessionTargetHistory,
+            [
+                ProcessTapTarget(
+                    appID: chrome.id,
+                    appName: chrome.name,
+                    processIdentifier: 100,
+                    additionalProcessIdentifiers: [300]
+                )
+            ]
+        )
+        let session = harness.stateStore.productRealControlState.activeSessionsByAppID[chrome.id]
+        XCTAssertEqual(session?.controlledProcessIdentifier, 100)
+        XCTAssertEqual(session?.controlledProcessIdentifiers, [100, 300])
+        XCTAssertEqual(session?.source, .matchedAudioProcesses)
+        XCTAssertFalse(harness.stateStore.productRealControlState.isResolving)
+        XCTAssertTrue(harness.resolver.resolveRequests.isEmpty)
+    }
+
+    // Without any matched process the eligible direct start is the classic single-process target.
+    func testEligibleAppWithoutMatchedProcessesKeepsSingleProcessTarget() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let music = makeApp(id: "bundle:com.apple.Music", name: "Music", pid: 102)
+        harness.context.apps = [music]
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+
+        harness.coordinator.startResolvedExperimentalControl(for: music)
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[music.id]?.liveSessionID == sessionID
+        }
+
+        XCTAssertEqual(harness.liveSessionManager.startSessionTargetHistory, [makeTarget(for: music)])
+        XCTAssertEqual(
+            harness.stateStore.productRealControlState.activeSessionsByAppID[music.id]?.source,
+            .directVisiblePID
+        )
+    }
+
+    // Row toggle (Safari-like): the visible process is not a Core Audio client, but a matched WebKit
+    // process is, so the toggle starts directly over the matched processes instead of failing.
+    // (The test runner's own pid stands in for the app so the toggle's NSRunningApplication check passes.)
+    func testToggleStartUsesMatchedProcessesWhenVisibleProcessIsNotEligible() async {
+        let harness = makeStartHarness()
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let safari = makeApp(id: "bundle:com.apple.Safari", name: "Safari", pid: ownPID)
+        harness.context.apps = [safari]
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [safari.id: [500]]
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+
+        harness.coordinator.startExperimentalControl(for: safari.id)
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[safari.id]?.liveSessionID == sessionID
+        }
+
+        XCTAssertEqual(
+            harness.liveSessionManager.startSessionTargetHistory,
+            [ProcessTapTarget(appID: safari.id, appName: "Safari", processIdentifier: ownPID, additionalProcessIdentifiers: [500])]
+        )
+        XCTAssertTrue(harness.resolver.resolveRequests.isEmpty)
+    }
+
+    // Row toggle with nothing matched and an ineligible visible process: a direct start could only
+    // fail, so the toggle goes through resolution (helper probe / "play audio first") instead.
+    func testToggleStartWithoutMatchAndIneligibleVisibleProcessResolves() async {
+        let harness = makeStartHarness()
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let discord = makeApp(id: "bundle:com.hnc.Discord", name: "Discord", pid: ownPID)
+        harness.context.apps = [discord]
+
+        harness.coordinator.startExperimentalControl(for: discord.id)
+
+        XCTAssertTrue(harness.stateStore.productRealControlState.isResolving(appID: discord.id))
+        await waitUntil { harness.resolver.resolveRequests.count == 1 }
+        XCTAssertEqual(harness.resolver.resolveRequests.first?.appID, discord.id)
+        XCTAssertTrue(harness.liveSessionManager.startSessionTargetHistory.isEmpty)
+        XCTAssertTrue(harness.sideEffects.statusMessages.isEmpty)
+    }
+
+    // The browser-keyword gate no longer rejects non-browser apps up front: an ineligible Discord-like
+    // row enters resolution, where the resolver matches its helpers (or asks to play audio first).
+    func testIneligibleNonBrowserAppEntersResolutionInsteadOfBeingRejected() async {
+        let harness = makeStartHarness()
+        let discord = makeApp(id: "bundle:com.hnc.Discord", name: "Discord", pid: 100)
+        harness.context.apps = [discord]
+
+        harness.coordinator.startResolvedExperimentalControl(for: discord)
+
+        XCTAssertTrue(harness.stateStore.productRealControlState.isResolving(appID: discord.id))
+        XCTAssertFalse(harness.sideEffects.statusMessages.contains("This app is not available for real app control"))
+        await waitUntil { harness.resolver.resolveRequests.count == 1 }
+        XCTAssertEqual(harness.resolver.resolveRequests.first?.appID, discord.id)
+    }
+
+    // A resolved multi-process target starts as one session that records every tapped process.
+    func testResolvedMatchedTargetStartsWithAllProcesses() {
+        let harness = makeStartHarness()
+        let safari = makeApp(id: "bundle:com.apple.Safari", name: "Safari", pid: 100)
+        harness.context.apps = [safari]
+        harness.stateStore.productRealControlState.beginResolution(for: safari.id)
+        let target = ProcessTapTarget(appID: safari.id, appName: safari.name, processIdentifier: 100, additionalProcessIdentifiers: [500, 501])
+
+        harness.coordinator.handleAppAudioTargetResolution(
+            .resolved(ResolvedAppAudioTarget(
+                visibleAppID: safari.id,
+                visibleAppName: safari.name,
+                target: target,
+                kind: .audioProcessGroup,
+                source: .matchedAudioProcesses
+            )),
+            for: safari.id
+        )
+
+        let session = harness.stateStore.productRealControlState.activeSessionsByAppID[safari.id]
+        XCTAssertEqual(session?.source, .matchedAudioProcesses)
+        XCTAssertEqual(session?.controlledProcessIdentifiers, [100, 500, 501])
+    }
+
+    // No double tap: processes another app's session already taps are left out of a new session.
+    func testStartSkipsProcessesAlreadyControlledByAnotherSession() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let chrome = makeApp(id: "bundle:com.google.Chrome", name: "Google Chrome", pid: 100)
+        harness.context.apps = [chrome]
+        harness.stateStore.productRealControlState.beginSession(
+            visibleAppID: "bundle:com.google.Chrome.canary",
+            displayName: "Google Chrome Canary",
+            controlledProcessIdentifier: 200,
+            additionalControlledProcessIdentifiers: [300],
+            source: .matchedAudioProcesses,
+            liveSessionID: ProcessTapLiveSessionID()
+        )
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [chrome.id: [300, 301, 200, 100]]
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+
+        harness.coordinator.startResolvedExperimentalControl(for: chrome)
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[chrome.id]?.liveSessionID == sessionID
+        }
+
+        XCTAssertEqual(
+            harness.liveSessionManager.startSessionTargetHistory,
+            [ProcessTapTarget(appID: chrome.id, appName: chrome.name, processIdentifier: 100, additionalProcessIdentifiers: [301])]
+        )
+        XCTAssertEqual(
+            harness.stateStore.productRealControlState.activeSessionsByAppID[chrome.id]?.controlledProcessIdentifiers,
+            [100, 301]
+        )
+        // The other session is untouched.
+        XCTAssertEqual(
+            harness.stateStore.productRealControlState.activeSessionsByAppID["bundle:com.google.Chrome.canary"]?.controlledProcessIdentifiers,
+            [200, 300]
+        )
+    }
+
+    // Every process of the new target is already tapped by another session: nothing starts.
+    func testStartIsRejectedWhenEveryProcessIsControlledByAnotherSession() {
+        let harness = makeStartHarness()
+        let app = makeApp(id: "child", name: "Child App", pid: 100)
+        harness.context.apps = [app]
+        harness.stateStore.productRealControlState.beginSession(
+            visibleAppID: "parent",
+            displayName: "Parent App",
+            controlledProcessIdentifier: 90,
+            additionalControlledProcessIdentifiers: [100],
+            source: .matchedAudioProcesses,
+            liveSessionID: ProcessTapLiveSessionID()
+        )
+
+        harness.coordinator.startExperimentalControl(for: app, target: makeTarget(for: app))
+
+        XCTAssertEqual(harness.sideEffects.statusMessages, ["This app's audio is already under real control in another row"])
+        XCTAssertNil(harness.stateStore.productRealControlState.activeSessionsByAppID[app.id])
+        XCTAssertFalse(harness.stateStore.productRealControlState.isOperationPending(for: app.id))
+        XCTAssertFalse(harness.coordinator.isStartLaneBusy)
+        XCTAssertTrue(harness.liveSessionManager.startSessionTargetHistory.isEmpty)
+    }
+
+    // An app's own earlier session never excludes its own processes (restart keeps the full target).
+    func testOwnExistingSessionDoesNotExcludeItsProcesses() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let chrome = makeApp(id: "bundle:com.google.Chrome", name: "Google Chrome", pid: 100)
+        harness.context.apps = [chrome]
+        harness.stateStore.productRealControlState.beginSession(
+            visibleAppID: chrome.id,
+            displayName: chrome.name,
+            controlledProcessIdentifier: 100,
+            additionalControlledProcessIdentifiers: [300],
+            source: .matchedAudioProcesses
+        )
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [chrome.id: [300, 100]]
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+
+        harness.coordinator.startResolvedExperimentalControl(for: chrome)
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[chrome.id]?.liveSessionID == sessionID
+        }
+
+        XCTAssertEqual(harness.liveSessionManager.startSessionTargetHistory.first?.allProcessIdentifiers, [100, 300])
+    }
+
     // MARK: - Task lifecycle
 
     func testCancelResolutionTaskCancelsOnlyTheOwnedTask() {
@@ -662,13 +883,15 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
     }
 
     /// Seeds one confirmed (engine session id set) Product Real session per app id, directly in the
-    /// shared state store, so the start preflight sees that many concurrent sessions.
+    /// shared state store, so the start preflight sees that many concurrent sessions. The seeded
+    /// controlled pids (10000+) never collide with the fixture apps' pids, so the start path's
+    /// "never tap a process another session already taps" exclusion leaves the started app alone.
     private func beginConfirmedSessions(_ appIDs: [MixerAppItem.ID], in harness: StartHarness) {
         for (index, appID) in appIDs.enumerated() {
             harness.stateStore.productRealControlState.beginSession(
                 visibleAppID: appID,
                 displayName: appID,
-                controlledProcessIdentifier: Int32(100 + index),
+                controlledProcessIdentifier: Int32(10_000 + index),
                 source: .directVisiblePID,
                 liveSessionID: ProcessTapLiveSessionID()
             )

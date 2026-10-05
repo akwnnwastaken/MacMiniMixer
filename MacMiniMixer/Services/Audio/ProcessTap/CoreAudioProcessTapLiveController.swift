@@ -154,18 +154,44 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             )
         }
 
-        guard let processObjectID = ProcessTapCoreAudio.processObjectID(for: pid) else {
-            AppLogger.processTap.warning("Live control setup failed: Core Audio process not found app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
+        // A multi-process target (the app plus its audio helpers) becomes one tap over every process
+        // that still maps to a Core Audio process object. Processes that do not (e.g. a browser's
+        // main process that never used audio, or a helper that just exited) are skipped; the start
+        // only fails when none of them maps. A single-process target behaves exactly as before.
+        let requestedProcessIdentifiers = target.allProcessIdentifiers
+        var processObjectIDs: [AudioObjectID] = []
+        var unmappedProcessIdentifiers: [Int32] = []
+        for requestedProcessIdentifier in requestedProcessIdentifiers {
+            guard let processObjectID = ProcessTapCoreAudio.processObjectID(for: pid_t(requestedProcessIdentifier)) else {
+                unmappedProcessIdentifiers.append(requestedProcessIdentifier)
+                continue
+            }
+
+            if !processObjectIDs.contains(processObjectID) {
+                processObjectIDs.append(processObjectID)
+            }
+        }
+
+        guard !processObjectIDs.isEmpty else {
+            AppLogger.processTap.warning("Live control setup failed: Core Audio process not found app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) requestedCount=\(requestedProcessIdentifiers.count, privacy: .public)")
+            let detail = requestedProcessIdentifiers.count > 1
+                ? "None of PIDs \(requestedProcessIdentifiers.map { String($0) }.joined(separator: ", ")) mapped to a Core Audio process object."
+                : "PID \(processIdentifier) did not map to a Core Audio process object."
             return ProcessTapTestResult(
                 outcome: .processNotFound,
                 message: "Could not find Core Audio process",
-                detail: "PID \(processIdentifier) did not map to a Core Audio process object.",
+                detail: detail,
                 severity: .warning
             )
         }
 
+        if requestedProcessIdentifiers.count > 1 {
+            let unmappedDescription = unmappedProcessIdentifiers.map { String($0) }.joined(separator: ",")
+            AppLogger.processTap.info("Live control multi-process tap app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) requested=\(requestedProcessIdentifiers.count, privacy: .public) mapped=\(processObjectIDs.count, privacy: .public) unmappedPIDs=\(unmappedDescription, privacy: .public)")
+        }
+
         let createStatus = resources.createProcessTap(
-            processObjectID: processObjectID,
+            processObjectIDs: processObjectIDs,
             name: "MacMiniMixer Live Control - \(target.appName)",
             muteBehavior: .mutedWhenTapped
         )
