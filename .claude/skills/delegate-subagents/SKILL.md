@@ -46,6 +46,8 @@ Then give only:
 4. **Rules specific to this task:** what must not change; what another parallel agent owns.
 5. **Done when:** the tests to add/update by name or behavior.
 6. **Report:** "≤ 15 lines: SHA, files, behavior, tests, compile risks." (Long reports cost you context.)
+7. **Commit trailer:** paste this session's exact attribution lines (from your system reminder) —
+   subagents cannot see them, and they change per session.
 
 Long design notes → write them to a scratchpad file once and pass the path; never paste them
 into several prompts.

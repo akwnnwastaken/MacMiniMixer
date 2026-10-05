@@ -38,7 +38,7 @@ Run `git reset --hard <base given in your prompt>` first and confirm with `git l
   `ProductRealControlSideEffects.swift`; `MixerViewModel` is the cross-subsystem router.
 
 ## Finish
-- Commit with a clear message ending with the attribution lines from the session's system
-  reminder (Co-Authored-By / Claude-Session). Do not push unless told to.
+- Commit with a clear message ending with exactly the attribution lines given in your prompt
+  (Co-Authored-By / Claude-Session); do not invent or reword them. Do not push unless told to.
 - Report in ≤ 15 lines: worktree path, branch, commit SHA, files changed, behavior summary,
   tests added/changed, and any spot you are not sure compiles.
