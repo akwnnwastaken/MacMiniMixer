@@ -27,6 +27,12 @@ enum AppConstants {
     static let maxConcurrentLiveSessions: Int? = nil
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
+    /// Live output path for Process Tap live control (Product Real and Advanced live). The direct
+    /// aggregate path renders the tap straight into the output device on one clock (no AudioQueue),
+    /// which removes the two-clock hand-off behind random crackle. A/B fallback without a rebuild:
+    /// `defaults write <bundle id> MacMiniMixerLiveOutputMode audioQueue` (read per controller).
+    static let processTapLiveDefaultOutputMode: ProcessTapLiveOutputMode = .directAggregateOutput
+    static let processTapLiveOutputModeDefaultsKey = "MacMiniMixerLiveOutputMode"
     static let processTapLivePrimingBufferCount = 2
     static let processTapReplayFallbackSampleRate: Double = 48_000
     static let processTapReplayBufferCount = 8

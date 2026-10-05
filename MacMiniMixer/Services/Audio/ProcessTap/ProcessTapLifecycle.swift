@@ -375,33 +375,59 @@ enum ProcessTapCoreAudio {
         ]
 
         for scope in scopes {
-            var address = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyStreamFormat,
-                mScope: scope,
-                mElement: kAudioObjectPropertyElementMain
-            )
-
-            guard AudioObjectHasProperty(deviceID, &address) else {
-                continue
-            }
-
-            var streamDescription = AudioStreamBasicDescription()
-            var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-            let status = AudioObjectGetPropertyData(
-                deviceID,
-                &address,
-                0,
-                nil,
-                &dataSize,
-                &streamDescription
-            )
-
-            if status == noErr {
-                return streamDescription
+            if let scopedStreamDescription = ProcessTapCoreAudio.streamDescription(for: deviceID, scope: scope) {
+                return scopedStreamDescription
             }
         }
 
         return nil
+    }
+
+    /// The device's stream format in exactly `scope` (no fallback to other scopes), or nil.
+    static func streamDescription(
+        for deviceID: AudioObjectID,
+        scope: AudioObjectPropertyScope
+    ) -> AudioStreamBasicDescription? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamFormat,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        guard AudioObjectHasProperty(deviceID, &address) else {
+            return nil
+        }
+
+        var streamDescription = AudioStreamBasicDescription()
+        var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &streamDescription
+        )
+
+        return status == noErr ? streamDescription : nil
+    }
+
+    /// Number of streams the device exposes in `scope` (`kAudioDevicePropertyStreams`), or nil when
+    /// it cannot be read.
+    static func streamCount(for deviceID: AudioObjectID, scope: AudioObjectPropertyScope) -> Int? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+
+        let status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize)
+        guard status == noErr else {
+            return nil
+        }
+
+        return Int(dataSize) / MemoryLayout<AudioStreamID>.size
     }
 
     static func isSupportedFloatPCMMonoOrStereo(_ streamDescription: AudioStreamBasicDescription) -> Bool {
@@ -494,6 +520,43 @@ final class ProcessTapResourceContext {
             kAudioAggregateDeviceNameKey: name,
             kAudioAggregateDeviceUIDKey: "\(uidPrefix).\(uniqueID)",
             kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceTapListKey: [
+                [
+                    kAudioSubTapUIDKey: tapUID,
+                    kAudioSubTapDriftCompensationKey: true
+                ]
+            ]
+        ]
+
+        return AudioHardwareCreateAggregateDevice(
+            aggregateDescription as CFDictionary,
+            &aggregateDeviceID
+        )
+    }
+
+    /// Apple's recommended tap playback structure: a private aggregate whose main (clock)
+    /// sub-device is the output device and whose only sub-tap is the process tap, so a single
+    /// IOProc reads the tap from its input and writes the device from its output on one clock.
+    /// The tap-only `createPrivateAggregateDevice` stays for the AudioQueue path and the probes.
+    @available(macOS 14.2, *)
+    func createPrivateOutputAggregateDevice(
+        name: String,
+        uidPrefix: String,
+        tapUID: String,
+        outputDeviceUID: String,
+        uniqueID: String = UUID().uuidString
+    ) -> OSStatus {
+        let aggregateDescription: [String: Any] = [
+            kAudioAggregateDeviceNameKey: name,
+            kAudioAggregateDeviceUIDKey: "\(uidPrefix).\(uniqueID)",
+            kAudioAggregateDeviceMainSubDeviceKey: outputDeviceUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            kAudioAggregateDeviceSubDeviceListKey: [
+                [
+                    kAudioSubDeviceUIDKey: outputDeviceUID
+                ]
+            ],
             kAudioAggregateDeviceTapListKey: [
                 [
                     kAudioSubTapUIDKey: tapUID,
