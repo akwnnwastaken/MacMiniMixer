@@ -99,10 +99,13 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(viewModel.activeLiveControlAppName, "Google Chrome")
     }
 
-    // Two rows whose matched processes overlap (Chrome's bundle prefix also matches Chrome Canary's
-    // `com.google.Chrome.canary*` processes): the later session leaves out every process the earlier
-    // session already taps, so no process is tapped twice.
-    func testProductStartDoesNotDoubleTapProcessesOwnedByAnotherSession() async {
+    // Chrome and Chrome Canary rows, Chrome started FIRST, with no coalition info (bundle-id
+    // fallback). The old `<bundle id>.` prefix rule gave the Chrome row every
+    // `com.google.Chrome.canary*` process too, so the Canary row then found all of its processes
+    // already tapped ("already under real control in another row"). Now `.canary` is not a helper
+    // suffix and the Canary row's pid is another row's, so each row taps only its own processes —
+    // disjoint, without needing the double-tap exclusion.
+    func testChromeAndChromeCanaryRowsEachTapOnlyTheirOwnProcesses() async {
         let canary = MixerAppItem(id: "bundle:com.google.Chrome.canary", name: "Google Chrome Canary", icon: .systemSymbol("globe"), processIdentifier: 102, volume: 50)
         let chrome = MixerAppItem(id: "bundle:com.google.Chrome", name: "Google Chrome", icon: .systemSymbol("globe"), processIdentifier: 101, volume: 50)
         let liveController = FakeLiveControlController()
@@ -126,22 +129,80 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         let viewModel = makeViewModel(apps: [canary, chrome], liveController: liveController, appAudioTargetResolver: resolver)
         viewModel.setExperimentalRealAppControlEnabled(true)
 
-        viewModel.setAppVolume(40, for: canary.id)
         viewModel.setAppVolume(40, for: chrome.id)
+        viewModel.setAppVolume(40, for: canary.id)
         await waitFor {
-            viewModel.isExperimentalControlActive(for: canary.id)
-                && viewModel.isExperimentalControlActive(for: chrome.id)
+            viewModel.isExperimentalControlActive(for: chrome.id)
+                && viewModel.isExperimentalControlActive(for: canary.id)
                 && !viewModel.isExperimentalControlPending(for: chrome.id)
+                && !viewModel.isExperimentalControlPending(for: canary.id)
         }
 
         XCTAssertEqual(
             liveController.startedTargets,
             [
-                ProcessTapTarget(appID: canary.id, appName: "Google Chrome Canary", processIdentifier: 102, additionalProcessIdentifiers: [302]),
-                ProcessTapTarget(appID: chrome.id, appName: "Google Chrome", processIdentifier: 101, additionalProcessIdentifiers: [301])
+                ProcessTapTarget(appID: chrome.id, appName: "Google Chrome", processIdentifier: 101, additionalProcessIdentifiers: [301]),
+                ProcessTapTarget(appID: canary.id, appName: "Google Chrome Canary", processIdentifier: 102, additionalProcessIdentifiers: [302])
             ]
         )
         XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, 2)
+        XCTAssertNotEqual(viewModel.statusMessage?.text, "This app's audio is already under real control in another row")
+    }
+
+    // The real-hardware report: a Safari row and a "YouTube" Safari web app row
+    // (`com.apple.Safari.WebApp.<UUID>`, its own app process and its own WebKit GPU process). Each
+    // WebKit GPU process sits in its owner's resource coalition, so each row gets exactly its own
+    // processes and BOTH rows start, whichever starts first. (Previously the Safari row took every
+    // `com.apple.WebKit.*` process plus the web app's own process via the `com.apple.Safari.` prefix,
+    // and the second row reported "already under real control in another row".)
+    func testSafariAndSafariWebAppRowsEachTapTheirOwnWebKitProcessesSafariFirst() async {
+        let fixture = makeSafariAndWebAppFixture()
+        let liveController = FakeLiveControlController()
+        let viewModel = makeViewModel(
+            apps: [fixture.safari, fixture.webApp],
+            liveController: liveController,
+            appAudioTargetResolver: fixture.resolver
+        )
+        viewModel.setExperimentalRealAppControlEnabled(true)
+
+        viewModel.setAppVolume(40, for: fixture.safari.id)
+        viewModel.setAppVolume(40, for: fixture.webApp.id)
+        await waitFor {
+            viewModel.isExperimentalControlActive(for: fixture.safari.id)
+                && viewModel.isExperimentalControlActive(for: fixture.webApp.id)
+                && !viewModel.isExperimentalControlPending(for: fixture.safari.id)
+                && !viewModel.isExperimentalControlPending(for: fixture.webApp.id)
+        }
+
+        XCTAssertEqual(liveController.startedTargets, [fixture.safariTarget, fixture.webAppTarget])
+        let startedProcessSets = liveController.startedTargets.map { Set($0.allProcessIdentifiers) }
+        XCTAssertTrue(startedProcessSets.count == 2 && startedProcessSets[0].isDisjoint(with: startedProcessSets[1]))
+        XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, 2)
+        XCTAssertNotEqual(viewModel.statusMessage?.text, "This app's audio is already under real control in another row")
+    }
+
+    func testSafariAndSafariWebAppRowsEachTapTheirOwnWebKitProcessesWebAppFirst() async {
+        let fixture = makeSafariAndWebAppFixture()
+        let liveController = FakeLiveControlController()
+        let viewModel = makeViewModel(
+            apps: [fixture.safari, fixture.webApp],
+            liveController: liveController,
+            appAudioTargetResolver: fixture.resolver
+        )
+        viewModel.setExperimentalRealAppControlEnabled(true)
+
+        viewModel.setAppVolume(40, for: fixture.webApp.id)
+        viewModel.setAppVolume(40, for: fixture.safari.id)
+        await waitFor {
+            viewModel.isExperimentalControlActive(for: fixture.safari.id)
+                && viewModel.isExperimentalControlActive(for: fixture.webApp.id)
+                && !viewModel.isExperimentalControlPending(for: fixture.safari.id)
+                && !viewModel.isExperimentalControlPending(for: fixture.webApp.id)
+        }
+
+        XCTAssertEqual(liveController.startedTargets, [fixture.webAppTarget, fixture.safariTarget])
+        XCTAssertEqual(viewModel.confirmedProductRealControlSessionCount, 2)
+        XCTAssertNotEqual(viewModel.statusMessage?.text, "This app's audio is already under real control in another row")
     }
 
     func testProductHelperResolverStartUsesResolvedHelperPIDAndVisibleRowName() async {
@@ -3219,6 +3280,53 @@ final class MixerViewModelLiveControlTests: XCTestCase {
 
                 return .eligible
             }
+        )
+    }
+
+    /// Safari (pid 101, resource coalition 1_001) and a "YouTube" Safari web app (pid 102,
+    /// `com.apple.Safari.WebApp.<UUID>`, coalition 1_002), each with its own launchd-parented WebKit
+    /// processes in its own coalition, behind a real `HelperAudioTargetResolver`. The web app's own
+    /// process is a HAL client too; an unrelated Spotify object (no process info) is also listed.
+    private struct SafariAndWebAppFixture {
+        let safari: MixerAppItem
+        let webApp: MixerAppItem
+        let resolver: HelperAudioTargetResolver
+        /// What each row must tap: only its own processes.
+        let safariTarget: ProcessTapTarget
+        let webAppTarget: ProcessTapTarget
+    }
+
+    private func makeSafariAndWebAppFixture() -> SafariAndWebAppFixture {
+        let webAppBundleIdentifier = "com.apple.Safari.WebApp.7F3A2B10-1C2D-4E5F-8A9B-0C1D2E3F4A5B"
+        let safari = MixerAppItem(id: "bundle:com.apple.Safari", name: "Safari", icon: .systemSymbol("safari"), processIdentifier: 101, volume: 50)
+        let webApp = MixerAppItem(id: "bundle:\(webAppBundleIdentifier)", name: "YouTube", icon: .systemSymbol("play.rectangle"), processIdentifier: 102, volume: 50)
+        let resolver = HelperAudioTargetResolver(
+            processLister: FakeLiveControlProcessLister(processes: [
+                SystemProcessInfo(processIdentifier: 101, parentProcessIdentifier: 1, name: "Safari", executablePath: nil, resourceCoalitionID: 1_001),
+                SystemProcessInfo(processIdentifier: 102, parentProcessIdentifier: 1, name: "YouTube", executablePath: nil, resourceCoalitionID: 1_002),
+                SystemProcessInfo(processIdentifier: 501, parentProcessIdentifier: 1, name: "com.apple.WebKit.GPU", executablePath: nil, resourceCoalitionID: 1_001),
+                SystemProcessInfo(processIdentifier: 502, parentProcessIdentifier: 1, name: "com.apple.WebKit.GPU", executablePath: nil, resourceCoalitionID: 1_002),
+                SystemProcessInfo(processIdentifier: 503, parentProcessIdentifier: 1, name: "com.apple.WebKit.WebContent", executablePath: nil, resourceCoalitionID: 1_002)
+            ]),
+            helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
+            processTapEligibility: { _ in .eligible },
+            audioProcessObjectLister: FakeLiveControlAudioProcessObjectLister(objects: [
+                AudioProcessObjectInfo(objectID: 12, processIdentifier: 102, bundleIdentifier: webAppBundleIdentifier, isRunningOutput: false),
+                AudioProcessObjectInfo(objectID: 51, processIdentifier: 501, bundleIdentifier: "com.apple.WebKit.GPU", isRunningOutput: true),
+                AudioProcessObjectInfo(objectID: 52, processIdentifier: 502, bundleIdentifier: "com.apple.WebKit.GPU", isRunningOutput: true),
+                AudioProcessObjectInfo(objectID: 53, processIdentifier: 503, bundleIdentifier: "com.apple.WebKit.WebContent", isRunningOutput: false),
+                AudioProcessObjectInfo(objectID: 71, processIdentifier: 701, bundleIdentifier: "com.spotify.client", isRunningOutput: true)
+            ]),
+            ownProcessIdentifier: 99_999
+        )
+
+        return SafariAndWebAppFixture(
+            safari: safari,
+            webApp: webApp,
+            resolver: resolver,
+            safariTarget: ProcessTapTarget(appID: safari.id, appName: "Safari", processIdentifier: 101, additionalProcessIdentifiers: [501]),
+            // Running output first (502), then by pid (503); the visible pid 102 stays primary.
+            webAppTarget: ProcessTapTarget(appID: webApp.id, appName: "YouTube", processIdentifier: 102, additionalProcessIdentifiers: [502, 503])
         )
     }
 

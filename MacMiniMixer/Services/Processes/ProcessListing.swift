@@ -22,6 +22,12 @@ struct SystemProcessInfo: Identifiable, Equatable, Sendable {
     let parentProcessIdentifier: Int32?
     let name: String
     let executablePath: String?
+    /// The process's **resource coalition** id, or nil when unknown (not read, the read failed, or
+    /// the kernel reported 0). macOS puts an app and the XPC services / helpers launched on its behalf
+    /// (WebKit GPU / WebContent / Networking, Chromium and Electron helpers) into the app's resource
+    /// coalition — the grouping Activity Monitor's Energy tab shows — so equal ids mean "same app".
+    /// See `SystemProcessLister.resourceCoalitionID(for:)` and `AppAudioProcessMatcher`.
+    var resourceCoalitionID: UInt64? = nil
 }
 
 enum HelperProcessRelation: String, Equatable, Sendable {

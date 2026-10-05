@@ -899,14 +899,23 @@ final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked
     // pids the HAL-list matcher would return for an app id.
 
     private var matchedAudioProcessIdentifiersByAppIDStorage: [String: [Int32]] = [:]
+    private var recordedMatchRequests: [AppAudioTargetRequest] = []
 
     var matchedAudioProcessIdentifiersByAppID: [String: [Int32]] {
         get { lock.withLock { matchedAudioProcessIdentifiersByAppIDStorage } }
         set { lock.withLock { matchedAudioProcessIdentifiersByAppIDStorage = newValue } }
     }
 
+    /// Every request `matchedAudioProcessIdentifiers(for:)` received, in call order.
+    var matchRequests: [AppAudioTargetRequest] {
+        lock.withLock { recordedMatchRequests }
+    }
+
     func matchedAudioProcessIdentifiers(for request: AppAudioTargetRequest) -> [Int32] {
-        lock.withLock { matchedAudioProcessIdentifiersByAppIDStorage[request.appID] ?? [] }
+        lock.withLock { () -> [Int32] in
+            recordedMatchRequests.append(request)
+            return matchedAudioProcessIdentifiersByAppIDStorage[request.appID] ?? []
+        }
     }
 
     // MARK: Suspended-resolution mode (queued start-lane tests)

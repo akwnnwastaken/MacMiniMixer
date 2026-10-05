@@ -52,7 +52,8 @@ struct SystemProcessLister: ProcessListing {
                     processIdentifier: pid,
                     parentProcessIdentifier: parentPID,
                     name: processName(for: pid_t(pid)) ?? "",
-                    executablePath: nil
+                    executablePath: nil,
+                    resourceCoalitionID: resourceCoalitionID(for: pid_t(pid))
                 )
                 currentPID = parentPID
             }
@@ -76,7 +77,8 @@ struct SystemProcessLister: ProcessListing {
             processIdentifier: Int32(pid),
             parentProcessIdentifier: parentProcessIdentifier(for: pid),
             name: displayName,
-            executablePath: executablePath
+            executablePath: executablePath,
+            resourceCoalitionID: resourceCoalitionID(for: pid)
         )
     }
 
@@ -126,6 +128,65 @@ struct SystemProcessLister: ProcessListing {
         }
 
         return Int32(info.pbi_ppid)
+    }
+
+    // MARK: - Resource coalition
+    //
+    // `proc_pidinfo` (public libproc) with flavor `PROC_PIDCOALITIONINFO` returns
+    // `struct proc_pidcoalitioninfo { uint64_t coalition_id[COALITION_NUM_TYPES]; uint64_t reserved1,
+    // reserved2, reserved3; }`. Verified against XNU (apple-oss-distributions/xnu):
+    //   - `bsd/sys/proc_info_private.h`: `#define PROC_PIDCOALITIONINFO 20` and the struct above;
+    //   - `osfmk/mach/coalition.h`: `COALITION_TYPE_RESOURCE (0)`, `COALITION_TYPE_JETSAM (1)`,
+    //     `COALITION_NUM_TYPES (COALITION_TYPE_MAX + 1)` = 2 — so the struct is 5 x uint64_t = 40 bytes;
+    //   - `bsd/kern/proc_info.c`: the flavor needs no same-user check, zero-fills the struct, fills
+    //     `coalition_id` from the process's coalitions, and returns `sizeof(struct
+    //     proc_pidcoalitioninfo)` (40) on success.
+    // The flavor and struct live in XNU's *private* proc_info header, so the macOS SDK's Swift overlay
+    // does not expose them; the raw flavor value and a 5-word buffer mirror them here instead. A
+    // failed or short read, or a 0 id, yields nil (unknown), and process matching then falls back to
+    // the bundle-id rules.
+
+    /// `PROC_PIDCOALITIONINFO` (XNU `bsd/sys/proc_info_private.h`).
+    private static let coalitionInfoFlavor: Int32 = 20
+    /// `struct proc_pidcoalitioninfo`: `coalition_id[2]` + three reserved words, all `uint64_t`.
+    static let coalitionInfoWordCount = 5
+    /// `COALITION_TYPE_RESOURCE` (XNU `osfmk/mach/coalition.h`): index into `coalition_id`.
+    private static let resourceCoalitionTypeIndex = 0
+
+    private func resourceCoalitionID(for pid: pid_t) -> UInt64? {
+        var words = [UInt64](repeating: 0, count: SystemProcessLister.coalitionInfoWordCount)
+        let bufferSize = Int32(SystemProcessLister.coalitionInfoWordCount * MemoryLayout<UInt64>.size)
+        let resultSize = words.withUnsafeMutableBytes { buffer in
+            proc_pidinfo(
+                pid,
+                SystemProcessLister.coalitionInfoFlavor,
+                0,
+                buffer.baseAddress,
+                bufferSize
+            )
+        }
+
+        return SystemProcessLister.resourceCoalitionID(
+            fromCoalitionInfoWords: words,
+            returnedByteCount: resultSize
+        )
+    }
+
+    /// Parses a `proc_pidcoalitioninfo` read: the resource coalition id, or nil when the read failed
+    /// or was short (`returnedByteCount` below the 40-byte struct size), or when the id is 0 (no
+    /// coalition). Pure, so it is unit-tested.
+    static func resourceCoalitionID(
+        fromCoalitionInfoWords words: [UInt64],
+        returnedByteCount: Int32
+    ) -> UInt64? {
+        let expectedByteCount = coalitionInfoWordCount * MemoryLayout<UInt64>.size
+        guard Int(returnedByteCount) >= expectedByteCount,
+              words.count > resourceCoalitionTypeIndex else {
+            return nil
+        }
+
+        let coalitionID = words[resourceCoalitionTypeIndex]
+        return coalitionID == 0 ? nil : coalitionID
     }
 }
 

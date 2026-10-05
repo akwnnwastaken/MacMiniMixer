@@ -1,9 +1,21 @@
 import Foundation
 
 struct AppAudioTargetRequest: Equatable, Sendable {
+    /// Another running app row, reduced to what per-app process matching needs.
+    struct OtherRunningApp: Equatable, Sendable {
+        let processIdentifier: Int32?
+        /// From a `bundle:<id>` row id; nil for executable/pid-based rows.
+        let bundleIdentifier: String?
+    }
+
     let appID: String
     let appName: String
     let processIdentifier: Int32?
+    /// Every *other* running app row (never this one), so `AppAudioProcessMatcher` never hands this
+    /// row a process that plainly belongs to another row and holds back Safari's WebKit fallback
+    /// while a Safari web app runs. Empty by default (no such exclusions). Not part of the helper
+    /// cache key.
+    var otherRunningApps: [OtherRunningApp] = []
 
     var helperDiscoveryTarget: HelperProcessDiscoveryTarget {
         HelperProcessDiscoveryTarget(
@@ -78,22 +90,34 @@ extension AppAudioTargetResolving {
 }
 
 /// Pure (no Core Audio, no syscalls) matcher from a visible app row to the Core Audio process
-/// objects that render its audio, using the HAL's own list of client processes. An object belongs
-/// to the app when:
-///   - its pid is the app's pid;
-///   - its pid descends from the app's pid (parent chain, cycle-safe) — Chromium / Electron /
-///     Firefox helpers are children of the main process;
-///   - its bundle id equals the app's bundle id (from a `bundle:<id>` row id) or extends it with a
-///     dot (`com.google.Chrome.helper`, `com.microsoft.edgemac.helper`, `com.hnc.Discord.helper`);
-///     a shared prefix without the dot (`com.google.ChromeX`) does not count;
-///   - for Safari / Safari Technology Preview only: its bundle id starts with `com.apple.WebKit.`
-///     (GPU / WebContent processes).
-/// Caveat: the WebKit GPU process is launched by launchd, not by Safari, and public APIs cannot
-/// attribute it to Safari, so another WebKit-based app playing audio at the same time could be
-/// included in Safari's tap. Likewise a bundle-prefix match can include a sibling app whose bundle id
-/// extends this one (e.g. `com.google.Chrome.canary` for `com.google.Chrome`).
+/// objects that render its audio, using the HAL's own list of client processes plus each process's
+/// parent and resource coalition (`SystemProcessInfo`). The first rule that applies decides:
+///   1. its pid is the app's pid → match;
+///   -  its pid is another running row's own app pid (`AppAudioTargetRequest.otherRunningApps`) →
+///      never a match (that process is the other row's, even as a child or coalition member);
+///   2. its pid descends from the app's pid (parent chain, cycle-safe) → match — Chromium /
+///      Electron / Firefox helpers are children of the main process;
+///   3. **resource coalition**, when both the app process's and the object's ids are known: match
+///      iff they are equal. macOS runs the XPC services an app uses (WebKit GPU / WebContent /
+///      Networking) and the helpers it spawns in the app's resource coalition, so Safari's WebKit
+///      GPU process goes to Safari and a Safari web app's (`com.apple.Safari.WebApp.<UUID>`) to that
+///      web app; Chrome, a Chrome PWA shim and Chrome Canary each keep their own. Authoritative: no
+///      bundle-id rule is consulted in this mode;
+///   4. bundle-id fallback, only when a coalition id is unknown (for the app or the object), and
+///      never for an object whose bundle id is exactly another running row's:
+///      - its bundle id equals the app's (from a `bundle:<id>` row id) or names one of its helpers
+///        (`isHelperBundleIdentifier`: `<app>.helper`, `<app>.helper.*`, `<app>.framework.*`); a
+///        sub-app (`<app>.app.*`, `<app>.WebApp.*`) or sibling channel (`<app>.canary`, `.beta`,
+///        `.dev`) is not a helper;
+///      - Safari / Safari Technology Preview only: a `com.apple.WebKit.*` process (launched by
+///        launchd, so neither descendant nor helper-named), unless another running row owns WebKit
+///        processes of its own (`isKnownWebKitProcessOwner`: a Safari web app or the other Safari
+///        flavor) — then they could be that row's, so they are withheld (and logged).
 /// MacMiniMixer's own pid is never included. Results are sorted running-output first, then by pid,
 /// and deduplicated by pid.
+/// Known limit: two rows whose apps share one coalition (e.g. an app started from Terminal, or a
+/// game spawned by its launcher) both match that coalition's helpers; the start path's "never tap a
+/// process twice" exclusion then gives each helper to whichever row starts first.
 enum AppAudioProcessMatcher {
     static let safariBundleIdentifiers: Set<String> = [
         "com.apple.safari",
@@ -102,7 +126,62 @@ enum AppAudioProcessMatcher {
 
     static let webKitBundleIdentifierPrefix = "com.apple.webkit."
 
+    /// Safari web apps (macOS 14+ "Add to Dock"), lowercased: `com.apple.Safari.WebApp.<UUID>`, each
+    /// its own app process with its own WebKit GPU / WebContent / Networking processes.
+    static let safariWebAppBundleIdentifierPrefix = "com.apple.safari.webapp."
+
     private static let bundleAppIDPrefix = "bundle:"
+
+    /// Whether `candidateBundleIdentifier` names a helper process of the app `appBundleIdentifier`
+    /// (case-insensitive): `<app>.helper` and `<app>.helper.<kind>` — the Chromium (Chrome, Edge,
+    /// Brave, Arc, Opera, Vivaldi) and Electron (Discord, Slack, VS Code, Spotify) helper naming,
+    /// e.g. `.helper.renderer` / `.helper.gpu` / `.helper.plugin` / `.helper.alerts` — or
+    /// `<app>.framework.<service>` (Chrome's `framework.AlertNotificationService`). A bare shared
+    /// prefix (`com.google.ChromeRemoteDesktop`), a sub-app (`com.google.Chrome.app.<id>` PWA shims,
+    /// `com.apple.Safari.WebApp.<UUID>`) and a sibling channel (`com.google.Chrome.canary`, `.beta`,
+    /// `.dev`, `com.brave.Browser.nightly`) are not helpers.
+    static func isHelperBundleIdentifier(_ candidateBundleIdentifier: String, ofApp appBundleIdentifier: String) -> Bool {
+        let candidate = candidateBundleIdentifier.lowercased()
+        let appPrefix = appBundleIdentifier.lowercased() + "."
+        guard candidate.hasPrefix(appPrefix) else {
+            return false
+        }
+
+        let components = candidate
+            .dropFirst(appPrefix.count)
+            .split(separator: ".", omittingEmptySubsequences: false)
+            .map { String($0) }
+        guard let firstComponent = components.first else {
+            return false
+        }
+
+        switch firstComponent {
+        case "helper":
+            return true
+        case "framework":
+            return components.count > 1
+        default:
+            return false
+        }
+    }
+
+    /// Whether a running app with this bundle id (case-insensitive) owns WebKit processes of its own
+    /// that a Safari row's bundle-id fallback could otherwise take: a Safari web app, or a Safari
+    /// flavor (Safari / Safari Technology Preview, i.e. the other one when both run).
+    static func isKnownWebKitProcessOwner(_ bundleIdentifier: String) -> Bool {
+        let normalizedBundleIdentifier = bundleIdentifier.lowercased()
+        return normalizedBundleIdentifier.hasPrefix(safariWebAppBundleIdentifierPrefix) ||
+            safariBundleIdentifiers.contains(normalizedBundleIdentifier)
+    }
+
+    /// The process's resource coalition id, treating a missing process, nil and 0 as unknown.
+    private static func knownResourceCoalitionID(of process: SystemProcessInfo?) -> UInt64? {
+        guard let coalitionID = process?.resourceCoalitionID, coalitionID != 0 else {
+            return nil
+        }
+
+        return coalitionID
+    }
 
     /// The bundle identifier encoded in a `WorkspaceApplicationLister` row id (`bundle:<id>`), or nil
     /// for executable/pid-based ids.
@@ -128,47 +207,105 @@ enum AppAudioProcessMatcher {
             return []
         }
 
-        let includesWebKitProcesses = appBundleIdentifier.map { safariBundleIdentifiers.contains($0) } ?? false
         let processByPID = Dictionary(
             processes.map { ($0.processIdentifier, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        let appCoalitionID = appProcessIdentifier.flatMap { knownResourceCoalitionID(of: processByPID[$0]) }
 
-        let matches = processObjects.filter { object in
+        // Other rows' own app pids and exact bundle ids. An entry for this very app (same pid or
+        // bundle id, e.g. a duplicate row) is ignored, so it can never exclude the app's own processes.
+        var otherAppProcessIdentifiers = Set<Int32>()
+        var otherAppBundleIdentifiers = Set<String>()
+        for otherApp in request.otherRunningApps {
+            if let otherProcessIdentifier = otherApp.processIdentifier,
+               otherProcessIdentifier > 0,
+               otherProcessIdentifier != appProcessIdentifier {
+                otherAppProcessIdentifiers.insert(otherProcessIdentifier)
+            }
+
+            if let otherBundleIdentifier = otherApp.bundleIdentifier?.lowercased(),
+               !otherBundleIdentifier.isEmpty,
+               otherBundleIdentifier != appBundleIdentifier {
+                otherAppBundleIdentifiers.insert(otherBundleIdentifier)
+            }
+        }
+
+        let isSafari = appBundleIdentifier.map { safariBundleIdentifiers.contains($0) } ?? false
+        // Fallback-only guard: another running row with WebKit processes of its own (a Safari web
+        // app, the other Safari flavor) means a WebKit process cannot be assumed to be Safari's.
+        let webKitOwningOtherAppBundleIdentifier = isSafari
+            ? otherAppBundleIdentifiers.sorted().first(where: { isKnownWebKitProcessOwner($0) })
+            : nil
+
+        var matches: [AudioProcessObjectInfo] = []
+        var withheldWebKitProcessIdentifiers: [Int32] = []
+        for object in processObjects {
             let objectPID = object.processIdentifier
             guard objectPID > 0, objectPID != ownProcessIdentifier else {
-                return false
+                continue
             }
 
-            if let appProcessIdentifier {
-                if objectPID == appProcessIdentifier {
-                    return true
-                }
-
-                if let process = processByPID[objectPID],
-                   HelperProcessCandidateDiscovery.isDescendant(
-                    process,
-                    of: appProcessIdentifier,
-                    processByPID: processByPID
-                   ) {
-                    return true
-                }
+            // 1. The app's own process.
+            if objectPID == appProcessIdentifier {
+                matches.append(object)
+                continue
             }
 
-            if let appBundleIdentifier,
-               let objectBundleIdentifier = object.bundleIdentifier?.lowercased() {
-                if objectBundleIdentifier == appBundleIdentifier ||
-                    objectBundleIdentifier.hasPrefix(appBundleIdentifier + ".") {
-                    return true
-                }
-
-                if includesWebKitProcesses,
-                   objectBundleIdentifier.hasPrefix(webKitBundleIdentifierPrefix) {
-                    return true
-                }
+            // Another row's own app process belongs to that row, whatever the rules below say (a
+            // child app, or a coalition shared with a launcher).
+            if otherAppProcessIdentifiers.contains(objectPID) {
+                continue
             }
 
-            return false
+            let objectProcess = processByPID[objectPID]
+
+            // 2. Descendants of the app's process.
+            if let appProcessIdentifier,
+               let objectProcess,
+               HelperProcessCandidateDiscovery.isDescendant(
+                objectProcess,
+                of: appProcessIdentifier,
+                processByPID: processByPID
+               ) {
+                matches.append(object)
+                continue
+            }
+
+            // 3. Resource coalition: authoritative whenever both ids are known.
+            if let appCoalitionID,
+               let objectCoalitionID = knownResourceCoalitionID(of: objectProcess) {
+                if objectCoalitionID == appCoalitionID {
+                    matches.append(object)
+                }
+                continue
+            }
+
+            // 4. Bundle-id fallback (a coalition id is unknown). Never another row's exact bundle id.
+            guard let appBundleIdentifier,
+                  let objectBundleIdentifier = object.bundleIdentifier?.lowercased(),
+                  !otherAppBundleIdentifiers.contains(objectBundleIdentifier) else {
+                continue
+            }
+
+            if objectBundleIdentifier == appBundleIdentifier ||
+                isHelperBundleIdentifier(objectBundleIdentifier, ofApp: appBundleIdentifier) {
+                matches.append(object)
+                continue
+            }
+
+            if isSafari, objectBundleIdentifier.hasPrefix(webKitBundleIdentifierPrefix) {
+                if webKitOwningOtherAppBundleIdentifier == nil {
+                    matches.append(object)
+                } else {
+                    withheldWebKitProcessIdentifiers.append(objectPID)
+                }
+            }
+        }
+
+        if let webKitOwningOtherAppBundleIdentifier, !withheldWebKitProcessIdentifiers.isEmpty {
+            let withheldPIDs = withheldWebKitProcessIdentifiers.map { String($0) }.joined(separator: ",")
+            AppLogger.helperResolution.info("Safari WebKit fallback withheld processes app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) withheldPIDs=\(withheldPIDs, privacy: .public) otherWebKitOwner=\(webKitOwningOtherAppBundleIdentifier, privacy: .public) reason=coalitionUnknown")
         }
 
         let sortedMatches = matches.sorted { lhs, rhs in
@@ -262,7 +399,13 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
             return []
         }
 
-        let processes = processLister.listProcessAncestry(of: processObjects.map(\.processIdentifier))
+        // The app's own pid is listed too, so its resource coalition is known even when the app
+        // process itself is not a HAL client (Safari: only its WebKit processes are).
+        var listedProcessIdentifiers = processObjects.map(\.processIdentifier)
+        if let appProcessIdentifier = request.processIdentifier, appProcessIdentifier > 0 {
+            listedProcessIdentifiers.append(appProcessIdentifier)
+        }
+        let processes = processLister.listProcessAncestry(of: listedProcessIdentifiers)
         let matches = AppAudioProcessMatcher.matchingProcessObjects(
             for: request,
             processObjects: processObjects,
@@ -270,8 +413,20 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
             ownProcessIdentifier: ownProcessIdentifier
         )
         if !matches.isEmpty {
-            let matchedPIDs = matches.map { String($0.processIdentifier) }.joined(separator: ",")
-            AppLogger.helperResolution.info("Audio process objects matched app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) matchedPIDs=\(matchedPIDs, privacy: .public) halObjects=\(processObjects.count, privacy: .public)")
+            // pid/bundle id/resource coalition of every match, so a field log shows why each process
+            // was attributed to this app (coalition "?" = unknown, i.e. the bundle-id fallback).
+            let processByPID = Dictionary(
+                processes.map { ($0.processIdentifier, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let matchedDescription = matches.map { match -> String in
+                let coalition = processByPID[match.processIdentifier]?.resourceCoalitionID.map { String($0) } ?? "?"
+                return "\(match.processIdentifier):\(match.bundleIdentifier ?? "-"):\(coalition)"
+            }.joined(separator: ",")
+            let appCoalition = request.processIdentifier
+                .flatMap { processByPID[$0]?.resourceCoalitionID }
+                .map { String($0) } ?? "?"
+            AppLogger.helperResolution.info("Audio process objects matched app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) appCoalition=\(appCoalition, privacy: .public) matched=\(matchedDescription, privacy: .public) halObjects=\(processObjects.count, privacy: .public) otherApps=\(request.otherRunningApps.count, privacy: .public)")
         }
         return matches.map(\.processIdentifier)
     }
@@ -309,9 +464,11 @@ final class HelperAudioTargetResolver: AppAudioTargetResolving, @unchecked Senda
         }
 
         // First ask the HAL which of its client processes belong to this app (main process, helper
-        // children, `<bundle id>.*` helpers, Safari's WebKit processes). A match resolves at once,
-        // without probing, and also wins over an eligible visible PID: a Chromium/Electron main
-        // process can be a Core Audio client while its helper renders the actual audio.
+        // children, the app's resource coalition — its WebKit / helper processes — or, when a
+        // coalition is unknown, its bundle-id helpers; see `AppAudioProcessMatcher`). A match
+        // resolves at once, without probing, and also wins over an eligible visible PID: a
+        // Chromium/Electron main process can be a Core Audio client while its helper renders the
+        // actual audio.
         // Deliberately not cached: re-matching is cheap and avoids stale helper PIDs.
         let matchedProcessIdentifiers = await Task.detached(priority: .userInitiated) {
             self.matchedAudioProcessIdentifiers(for: request)

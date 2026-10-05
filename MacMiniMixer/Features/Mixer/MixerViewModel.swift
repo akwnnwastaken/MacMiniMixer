@@ -1056,4 +1056,20 @@ extension MixerAppItem {
             processIdentifier: processIdentifier
         )
     }
+
+    /// `appAudioTargetRequest` carrying every *other* app in `runningApps` (its pid and bundle id),
+    /// so the per-app audio process matcher never hands this row a process that plainly belongs to
+    /// another row. Used by the Product Real start path, which has the current app list.
+    func audioTargetRequest(amongRunningApps runningApps: [MixerAppItem]) -> AppAudioTargetRequest {
+        var request = appAudioTargetRequest
+        request.otherRunningApps = runningApps
+            .filter { $0.id != id }
+            .map { otherApp in
+                AppAudioTargetRequest.OtherRunningApp(
+                    processIdentifier: otherApp.processIdentifier,
+                    bundleIdentifier: AppAudioProcessMatcher.bundleIdentifier(forAppID: otherApp.id)
+                )
+            }
+        return request
+    }
 }

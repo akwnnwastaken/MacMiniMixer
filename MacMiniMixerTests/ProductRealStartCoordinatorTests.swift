@@ -318,6 +318,49 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.liveSessionManager.startSessionTargetHistory.first?.allProcessIdentifiers, [100, 300])
     }
 
+    // The process matcher is told about every OTHER current row (pid + bundle id from a `bundle:` id,
+    // nil otherwise), so it can keep e.g. a Safari web app's processes out of the Safari row.
+    func testDirectStartPassesTheOtherRunningAppsToTheProcessMatcher() async {
+        let harness = makeStartHarness(visibleProcessEligible: true)
+        let safari = makeApp(id: "bundle:com.apple.Safari", name: "Safari", pid: 100)
+        let webApp = makeApp(id: "bundle:com.apple.Safari.WebApp.7F3A2B10", name: "YouTube", pid: 200)
+        let other = makeApp(id: "executable:/Applications/Other.app/Contents/MacOS/Other", name: "Other", pid: 300)
+        harness.context.apps = [safari, webApp, other]
+        let sessionID = ProcessTapLiveSessionID()
+        harness.liveSessionManager.configureStart(result: startedResult(sessionID))
+
+        harness.coordinator.startResolvedExperimentalControl(for: safari)
+        await waitUntil {
+            harness.stateStore.productRealControlState.activeSessionsByAppID[safari.id]?.liveSessionID == sessionID
+        }
+
+        XCTAssertEqual(harness.resolver.matchRequests.map(\.appID), [safari.id])
+        XCTAssertEqual(
+            harness.resolver.matchRequests.first?.otherRunningApps,
+            [
+                AppAudioTargetRequest.OtherRunningApp(processIdentifier: 200, bundleIdentifier: "com.apple.Safari.WebApp.7F3A2B10"),
+                AppAudioTargetRequest.OtherRunningApp(processIdentifier: 300, bundleIdentifier: nil)
+            ]
+        )
+    }
+
+    // The resolution path (visible process not eligible) carries the same other-row list.
+    func testResolutionRequestCarriesTheOtherRunningApps() async {
+        let harness = makeStartHarness()
+        let safari = makeApp(id: "bundle:com.apple.Safari", name: "Safari", pid: 100)
+        let webApp = makeApp(id: "bundle:com.apple.Safari.WebApp.7F3A2B10", name: "YouTube", pid: 200)
+        harness.context.apps = [webApp, safari]
+
+        harness.coordinator.startResolvedExperimentalControl(for: safari)
+        await waitUntil { harness.resolver.resolveRequests.count == 1 }
+
+        XCTAssertEqual(harness.resolver.resolveRequests.first?.appID, safari.id)
+        XCTAssertEqual(
+            harness.resolver.resolveRequests.first?.otherRunningApps,
+            [AppAudioTargetRequest.OtherRunningApp(processIdentifier: 200, bundleIdentifier: "com.apple.Safari.WebApp.7F3A2B10")]
+        )
+    }
+
     // MARK: - Task lifecycle
 
     func testCancelResolutionTaskCancelsOnlyTheOwnedTask() {

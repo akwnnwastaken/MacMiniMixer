@@ -146,7 +146,7 @@ final class ProductRealStartCoordinator {
     /// browser helpers (or asks the user to play audio first). Preserves the previous
     /// permission/platform checks and status messages verbatim.
     func startResolvedExperimentalControl(for app: MixerAppItem, allowsCachedLookup: Bool = true) {
-        let request = app.appAudioTargetRequest
+        let request = audioTargetRequest(for: app)
         let visibleEligibility = processTapEligibility(app.processIdentifier)
 
         if visibleEligibility.isEligible {
@@ -468,7 +468,7 @@ final class ProductRealStartCoordinator {
     /// object the resolver matches to the app (synchronous, no probing; see
     /// `AppAudioProcessMatcher`). Falls back to the plain visible-PID target when nothing matches.
     private func expandedVisibleAppTarget(for app: MixerAppItem) -> ProcessTapTarget {
-        let request = app.appAudioTargetRequest
+        let request = audioTargetRequest(for: app)
         let matchedProcessIdentifiers = appAudioTargetResolver.matchedAudioProcessIdentifiers(for: request)
         return AppAudioProcessMatcher.target(
             for: request,
@@ -478,6 +478,13 @@ final class ProductRealStartCoordinator {
             appName: app.name,
             processIdentifier: app.processIdentifier
         )
+    }
+
+    /// `app`'s audio-target request carrying every other current app row (pid + bundle id), so the
+    /// resolver's process matcher never attributes another row's processes to `app` (e.g. a Safari
+    /// web app's WebKit processes to Safari, Chrome Canary's helpers to Chrome).
+    private func audioTargetRequest(for app: MixerAppItem) -> AppAudioTargetRequest {
+        app.audioTargetRequest(amongRunningApps: context?.apps ?? [])
     }
 
     /// Drops from `target` every process another app's Product Real session (optimistic or
@@ -498,6 +505,13 @@ final class ProductRealStartCoordinator {
 
         let remaining = allProcessIdentifiers.filter { !controlledElsewhere.contains($0) }
         guard let firstRemaining = remaining.first else {
+            // Field diagnostics for "already under real control in another row": which of this
+            // app's pids are taken, and by which session (its app id carries the bundle id). The
+            // resolver's "Audio process objects matched" log lines give each pid's bundle id and
+            // resource coalition.
+            let requestedPIDs = ProductRealStartCoordinator.processIdentifierList(allProcessIdentifiers)
+            let conflicts = conflictingSessionsDescription(for: allProcessIdentifiers, appID: appID)
+            AppLogger.helperResolution.warning("Product Real start blocked: every process already controlled by another session appID=\(appID, privacy: .public) app=\(target.appName, privacy: .public) requestedPIDs=\(requestedPIDs, privacy: .public) conflicts=\(conflicts, privacy: .public)")
             return nil
         }
 
@@ -508,13 +522,39 @@ final class ProductRealStartCoordinator {
             primary = firstRemaining
         }
 
-        AppLogger.processTap.info("Product Real start skipped processes already controlled by another session app=\(target.appName, privacy: .public) skipped=\(allProcessIdentifiers.count - remaining.count, privacy: .public)")
+        let conflicts = conflictingSessionsDescription(for: allProcessIdentifiers, appID: appID)
+        AppLogger.processTap.info("Product Real start skipped processes already controlled by another session app=\(target.appName, privacy: .public) skipped=\(allProcessIdentifiers.count - remaining.count, privacy: .public) conflicts=\(conflicts, privacy: .public)")
         return ProcessTapTarget(
             appID: target.appID,
             appName: target.appName,
             processIdentifier: primary,
             additionalProcessIdentifiers: remaining.filter { $0 != primary }
         )
+    }
+
+    /// Log-only: `<session app id> (<name>, starting|live)=<pids>` for every other app's session that
+    /// taps any of `processIdentifiers`, sorted; `none` when no session does.
+    private func conflictingSessionsDescription(
+        for processIdentifiers: [Int32],
+        appID: MixerAppItem.ID
+    ) -> String {
+        var conflicts: [String] = []
+        for (sessionAppID, session) in productRealControlState.activeSessionsByAppID where sessionAppID != appID {
+            let overlapping = session.controlledProcessIdentifiers.filter { processIdentifiers.contains($0) }
+            guard !overlapping.isEmpty else {
+                continue
+            }
+
+            let state = session.liveSessionID == nil ? "starting" : "live"
+            let overlappingPIDs = ProductRealStartCoordinator.processIdentifierList(overlapping)
+            conflicts.append("\(sessionAppID) (\(session.displayName), \(state))=\(overlappingPIDs)")
+        }
+
+        return conflicts.isEmpty ? "none" : conflicts.sorted().joined(separator: "; ")
+    }
+
+    private static func processIdentifierList(_ processIdentifiers: [Int32]) -> String {
+        processIdentifiers.map { String($0) }.joined(separator: ",")
     }
 
     func startExperimentalControl(
