@@ -3,17 +3,40 @@
 All notable changes to MacMiniMixer are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This project is experimental and pre-1.0; version numbers track internal milestones
-rather than tagged public releases. MacMiniMixer is not a finished Windows Volume Mixer
-replacement: app-row sliders are UI-state/preview until you interact with an eligible row, and Product
-Real Control is experimental. Since the `[Unreleased]` owner decisions below it is always on (a row
-only becomes Real after you interact with it) and has no app-count limit. Real-hardware resource characterization (CPU, teardown timing) only covers up to
-three concurrent sessions; the direct output engine was additionally listened to (no crackle,
+This project is experimental and pre-1.0. v0.14 is the first public release (an ad-hoc signed,
+not notarized `.zip`, published as a GitHub pre-release); v0.10 to v0.13 were internal milestones,
+not tagged public releases. MacMiniMixer is not a finished Windows Volume Mixer replacement:
+app-row sliders are UI-state/preview until you interact with an eligible row, and Product Real
+Control is experimental. It is always on (a row only becomes Real after you interact with it) and
+has no app-count limit. Real-hardware resource characterization (CPU, teardown timing) only covers
+up to three concurrent sessions; the direct output engine was additionally listened to (no crackle,
 underruns 0) with up to six, but not measured for CPU/memory/sleep/Stop All, so production-grade
 multi-app per-application control is not claimed. Older entries that say "capped at three" /
 "`N > 3` deferred" describe the state at that time.
 
 ## [Unreleased]
+
+## [v0.14] - 2026-10-06
+
+### Highlights
+- **No app-count limit.** Every app you touch can have its own real volume control at the same time.
+- **Real control is always on.** There is no toggle; nothing is captured until you move an app's
+  slider or mute it.
+- **Safari, Chrome and web apps work.** All of a browser's audio processes are controlled together,
+  and Safari web apps, Chrome PWAs and Chrome Canary no longer steal each other's audio.
+- **Crackle-free output.** A new direct output engine plays at the device's own sample rate (48 kHz
+  and the built-in speakers' 44.1 kHz) and never changes it.
+- **A simpler panel.** Header with the output-device button and a `⋯` menu (Show all apps, Quit),
+  a compact "N apps controlled" banner, then the System Output row and your apps.
+- **Advanced is for developers.** The diagnostics section only appears in developer mode.
+- **Queued starts.** Start several apps in a row and they start one after another, with a pending
+  badge while they wait.
+- **Sturdier stop and start.** Safer teardown, a settle gate between stop and start, and a calm
+  "Waiting for app audio" state for silent apps.
+- **Better accessibility.** VoiceOver labels across the panel, and the "Read-only" badge for outputs
+  without volume control shows before you touch the slider.
+- **Ad-hoc signed `.zip` download** with a SHA-256 checksum. Needs macOS 13.0+, and macOS 14.2+ for
+  per-app control.
 
 ### Checkpoint 2 — direct engine at the default 44.1 kHz (`da6ed70`, tag `checkpoint-direct-engine-44k`)
 The direct output engine now runs on built-in speakers at their default **44.1 kHz** without touching
@@ -145,8 +168,8 @@ sample rate automatically).
   workflow gained a `package` job that uploads the zip as the `MacMiniMixer-app` artifact (14 days),
   plus `permissions: contents: read` and a cancel-in-progress concurrency group. A new `Release`
   workflow runs on `v*` tags (tests → package → tag must equal `v` + `MARKETING_VERSION` → **draft**
-  GitHub Release) and on manual dispatch (artifact only). Maintainer guide in `docs/RELEASING.md`.
-  No release or tag has been cut (`e0a60b4`).
+  GitHub Release) and on manual dispatch (artifact only). Maintainer guide in `docs/RELEASING.md`
+  (`e0a60b4`).
 - **Per-session starvation attribution logging.** Product Real starvation escalations are logged
   with the session id and app, rate-shaped per session (first nonzero Starv, then each 100-count
   bucket, and any Drops/Fail increase immediately) so a spike cannot flood the log. Diagnostics only:
@@ -226,8 +249,7 @@ sample rate automatically).
   closures (no sibling ownership, no retain cycle). The facade **public API and initializer signature
   are unchanged** and **`MixerViewModel` is byte-for-byte unchanged**. Start/resolution tests moved to
   `ProductRealStartCoordinatorTests` (facade forwarding + cross-edge integration tests retained). Full
-  suite green (**414 passed / 0 failed / 0 skipped**). Cap stays **3**; `N > 3` deferred;
-  `MARKETING_VERSION` unchanged; no tag/release.
+  suite green (**414 passed / 0 failed / 0 skipped**). Cap stays **3**; `N > 3` deferred.
 - **Product Real coordinator internal split: `ProductRealControlStateStore` + `ProductRealStopCoordinator`**
   (internal refactor, no behavior change). `ProductRealControlCoordinator` is now a thin facade that
   composes two internal sub-objects behind its **unchanged public API**: `ProductRealControlStateStore`
@@ -237,8 +259,7 @@ sample rate automatically).
   reset, active-name helper). `MixerViewModel` is **unchanged** and still knows only the facade;
   start/resolution logic remains in the facade for now; the Start↔Stop cross-edges are narrow closures
   (no ownership cycle). Focused `ProductRealControlStateStoreTests` and `ProductRealStopCoordinatorTests`
-  added. Full suite green (**407 passed / 0 failed / 0 skipped**). Cap stays **3**; `N > 3` deferred;
-  `MARKETING_VERSION` unchanged; no tag/release.
+  added. Full suite green (**407 passed / 0 failed / 0 skipped**). Cap stays **3**; `N > 3` deferred.
 - **Product Real Control stop path extracted into `ProductRealControlCoordinator`** (internal
   refactor, no behavior change). Following the start-path extraction, the coordinator now also owns
   the full Product Real **stop** path: the per-app stop leaf (`stopExperimentalControl(for:reason:)`),
@@ -254,7 +275,7 @@ sample rate automatically).
   independently-tested steps (per-app leaf → Stop All core + stop callback → app-exit slice →
   hard-teardown state reset) rather than one large refactor. Full suite green
   (387 passed / 0 failed / 0 skipped). Product Real Control remains capped at **three** concurrent
-  sessions; `N > 3` stays deferred. `MARKETING_VERSION` unchanged; no tag/release.
+  sessions; `N > 3` stays deferred.
 - **Product Real Control start path extracted into `ProductRealControlCoordinator`** (internal
   refactor, no behavior change). The coordinator now owns `ProductRealControlState`, the app-audio
   resolution task and resolution handling, stale-start cleanup, and the async Product Real start
@@ -263,7 +284,6 @@ sample rate automatically).
   `ProductRealControlContext` seam. Migrated in small, independently-tested steps (seam → state
   ownership → resolution slice → stale cleanup → async start body) rather than one large refactor.
   Product Real Control remains capped at **three** concurrent sessions; `N > 3` stays deferred.
-  `MARKETING_VERSION` unchanged; no tag/release.
 
 ### Fixed
 - **Random crackle in Product Real Control** came from the live path running two clocks (tap IOProc →
@@ -291,17 +311,12 @@ sample rate automatically).
 - Stop All now also cancels an in-flight helper resolution, so its late result can no longer start a
   session after the user stopped everything (`774268a`).
 
-## [v0.14] - Unreleased
+### Earlier v0.14 checkpoint
+The first v0.14 baseline, focused on **Product Real Control** teardown and starvation handling and
+driven by real-hardware feedback, before the work above. Where it mentions three simultaneous
+sessions or a cap, the entries above supersede it. Requires macOS 14.2+ for Process Tap support.
 
-**Internal stability checkpoint — not a public release.** This is an unreleased v0.14 baseline
-focused on **Product Real Control** teardown and starvation handling, driven by real-hardware
-feedback. It is not shipped: `MARKETING_VERSION` is unchanged, no tag/release is cut, and the app
-is not yet finished enough for a public release (the README may still describe the earlier
-one-session state and Product Real UX still has caveats). Product Real Control remains experimental
-and capped at **three** simultaneous sessions; going beyond three (`N > 3`) is still deferred.
-Requires macOS 14.2+ for Process Tap support.
-
-### Changed
+#### Changed
 - **Product Real teardown hardening.** Process-tap destruction now retries on transient failure and
   reports a persistent failure as a fault instead of a clean stop. This makes cleanup safer when a
   `.mutedWhenTapped` tap has trouble tearing down — a leaked muted tap could otherwise leave apps
@@ -325,20 +340,20 @@ Requires macOS 14.2+ for Process Tap support.
   lifecycle-serialization gates so a burst of rapid on/off clicks cannot pile up Core Audio
   create/destroy churn (crackle/Starv). The audio callback is unchanged; cap stays 3.
 
-### Fixed
+#### Fixed
 - Swift 6 language-mode test failure: `NSLock.lock()/unlock()` called from an async context is
   replaced with scoped `withLock` (async-safe locking).
 - Full-suite test flake: live-control test waits are now bounded by a wall-clock deadline instead of
   a fixed `Task.yield()` budget, so they no longer time out spuriously under parallel-suite load.
 
-### Validated
+#### Validated
 - Real-hardware normal-use testing (one Mac): three Product Real sessions ran cleanly; per-app
   stop/start during use was clean; Drops/Fail/Starv stayed 0 during normal usage; CPU settled
   roughly in the 20–35% range depending on panel / Activity Monitor state; **no
   `sudo killall coreaudiod`** was needed in the final normal-use retest.
 - The 30–60 minute three-session long-run smoke **PASSED (with caveat)** — see below.
 
-### Known limitations / caveats
+#### Known limitations / caveats
 - **Rapid manual toggling.** Extremely rapid repeated Real on/off toggling can still cause
   crackle/Starv if spammed aggressively. The intended flow is Real Control staying enabled during
   use, not rapid manual toggling, so this is not a normal-use blocker. Tracked for v0.15 as a

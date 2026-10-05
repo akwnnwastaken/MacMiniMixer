@@ -2,7 +2,8 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v0.14 is an internal, unreleased checkpoint.
+changes. It is **not** a public release document — v0.14 was released on 2026-10-06 (see
+`CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
 > [§9 Verification commands](#9-verification-commands) first. Commit hashes and test counts below
@@ -36,8 +37,9 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
-- **Do not bump `MARKETING_VERSION`** — it stays **`0.13`** because v0.14 is an internal/unreleased
-  checkpoint, not a public release.
+- **v0.14 is released (2026-10-06):** `MARKETING_VERSION` is **`0.14`** and `CURRENT_PROJECT_VERSION`
+  is `2` (all 4 build configurations). Do not bump the version again until the owner asks for the
+  next release; new work goes under a new `[Unreleased]` CHANGELOG section.
 - **Do not reintroduce** the unsafe default-output Core Audio property listener / output-device
   observer. A prior one caused silent system audio that survived app quit and required
   `sudo killall coreaudiod`.
@@ -279,9 +281,10 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   in-flight start mid-flight — the start finishes first.
 - **Real-device stress testing should continue** (the guard's real-world effect is not yet
   hardware-verified). See `docs/MANUAL_TEST_CHECKLIST.md` §18 and the many-app section §19.
-- **Release packaging exists but no release is cut:** `scripts/package-app.sh`, the `Build`
-  workflow's `package` job (`MacMiniMixer-app` artifact), and `release.yml` (draft release on `v*`
-  tags) — see `docs/RELEASING.md` (`e0a60b4`). `MARKETING_VERSION` is still `0.13`.
+- **Release packaging:** `scripts/package-app.sh`, the `Build` workflow's `package` job
+  (`MacMiniMixer-app` artifact), `release.yml` (draft release on `v*` tags, notes from
+  `scripts/release-notes.sh`), and the manual release steps for when CI is unavailable — see
+  `docs/RELEASING.md` (`e0a60b4`). v0.14 was cut from here; `MARKETING_VERSION` is `0.14`.
   `scripts/package-app.sh` builds into its own `./.DerivedData-release` with coverage explicitly off,
   because a Release build made after `xcodebuild test` in the shared derived data folder had been
   compiled with code-coverage instrumentation (including the audio IOProc) (`c6a1338`).
@@ -549,8 +552,9 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 **Other deferred items:**
 
-- **`MARKETING_VERSION` bump / tag / public release** — deferred (stays `0.13`). Packaging scaffolding
-  is ready (`docs/RELEASING.md`); Developer ID signing + notarization is documented only.
+- **Next `MARKETING_VERSION` bump / tag / release** — only when the owner asks (v0.14 is released,
+  2026-10-06). Packaging is in place (`docs/RELEASING.md`); Developer ID signing + notarization is
+  documented only.
 - **Core Audio property-listener (polling → HAL) migration** — deferred / research-only.
 - **Broad `MixerViewModel` / `ProductRealControlCoordinator` extraction** — deferred.
 - Candidates, not urgent: **localization**; **keyboard navigation**; **view/snapshot** and
@@ -580,8 +584,8 @@ git log -12 --oneline
 git diff --name-only
 git diff --name-only -- '*.xcodeproj' '*.pbxproj'
 git grep -n "maxConcurrentLiveSessions" -- MacMiniMixer          # expect `Int? = nil` (unlimited)
-git grep -n "MARKETING_VERSION = 0.13" -- '*.pbxproj'            # expect present (unchanged)
-git tag --list 'v*'                                              # expect empty (no release cut)
+git grep -n "MARKETING_VERSION = 0.14" -- '*.pbxproj'            # expect 4 matches (v0.14 released)
+git tag --list 'v*'                                              # expect v0.14 once the owner has tagged it
 ```
 
 Full test + Release build (when code changes):
@@ -666,5 +670,5 @@ moving them into a product-scoped type would *increase* coupling:
    responsibilities into a Product Real coordinator**; extract only if a clean, self-contained
    boundary emerges.
 
-Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION`; do **not** reintroduce an
+Whatever the next step: do **not** release/tag or bump `MARKETING_VERSION` again unless asked; do **not** reintroduce an
 app-count cap without the owner's say-so; keep Real control starting only on explicit row interaction.

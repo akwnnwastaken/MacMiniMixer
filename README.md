@@ -6,13 +6,13 @@ The app is not targeting the Mac App Store. It uses native macOS APIs directly, 
 
 ## Current Status
 
-MacMiniMixer is at an **internal v0.14 Product Real stability checkpoint**, plus further unreleased
-work tracked under `[Unreleased]` in `CHANGELOG.md` (no app-count limit, a queued start lane,
-every audio process of an app tapped together and attributed by resource coalition, a **direct
-aggregate output engine** that removed the random crackle, release packaging, accessibility). None
-of this is a public release: no tag has been cut and the
-app's marketing version is unchanged (`0.13`). It remains experimental and is not a finished Windows
-Volume Mixer replacement.
+**v0.14 is released (2026-10-06)** as an ad-hoc signed, not notarized `.zip` (a GitHub pre-release);
+the app's marketing version is `0.14`. It includes the Product Real stability work plus no app-count
+limit, always-on real control, a queued start lane, every audio process of an app tapped together and
+attributed by resource coalition (Safari, Chrome, web apps), a **direct aggregate output engine** that
+removed the random crackle, a simpler panel with developer-mode Advanced, release packaging, and
+accessibility. See `CHANGELOG.md` (`[v0.14] - 2026-10-06`). It remains experimental and is not a
+finished Windows Volume Mixer replacement.
 
 What works today:
 
@@ -51,7 +51,7 @@ Stability checkpoint status:
   reporting, output-queue disposal after IOProc stop/destroy, a stop→start settle gate, Core Audio
   lifecycle serialization, and starvation gating so silent apps show a neutral "Waiting for app
   audio" state and a freshly (re)started queue's startup transient is not reported as a real
-  underrun. See `CHANGELOG.md` (`[v0.14] - Unreleased`) for details.
+  underrun. See `CHANGELOG.md` (`[v0.14] - 2026-10-06`, "Earlier v0.14 checkpoint") for details.
 - A normal-use three-session long-run smoke **passed (with caveat)** on one Mac: Drops/Fail/Starv
   stayed 0 during normal use and no `sudo killall coreaudiod` was needed.
 - **Direct output engine, owner's listening tests on one Mac:** crackle-free (no crackle heard,
@@ -355,8 +355,8 @@ The current project is a native macOS Xcode project. It does not use Flutter and
 - Packaged builds are **ad-hoc signed, not notarized**, so Gatekeeper blocks the first launch (see
   [How to Run](#how-to-run)). System Audio Recording permission may need to be granted again after
   installing a new build.
-- **v0.14 is an internal, unreleased stability checkpoint** — no public release/tag has been cut and
-  the marketing version is unchanged. See `CHANGELOG.md` (`[v0.14] - Unreleased` and `[Unreleased]`).
+- **v0.14 is released (2026-10-06)** as an experimental, ad-hoc signed pre-release; the marketing
+  version is `0.14`. See `CHANGELOG.md` (`[v0.14] - 2026-10-06`).
 
 ## How to Run
 

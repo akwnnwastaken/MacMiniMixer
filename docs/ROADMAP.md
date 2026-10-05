@@ -1,9 +1,9 @@
 # MacMiniMixer Roadmap
 
-Current repository state: the internal **v0.14 Product Real stability checkpoint** is complete
-(the P177–P182 teardown/starvation hardening baseline, Advanced diagnostics, fake-backed tests, and
-the Product Real facade/store/start/stop split), and the `[Unreleased]` work on top of it has
-landed: **Product Real App Control has no app-count limit** (owner decision), starts are serialized
+Current repository state: **v0.14 is released (2026-10-06)**. It contains the **Product Real
+stability checkpoint** (the P177–P182 teardown/starvation hardening baseline, Advanced diagnostics,
+fake-backed tests, and the Product Real facade/store/start/stop split) and the work on top of it:
+**Product Real App Control has no app-count limit** (owner decision), starts are serialized
 through a **queued start lane**, live diagnostics are published only for the focused session while
 the Advanced section is visible, the system-output "Read-only" badge is probed proactively,
 accessibility coverage is complete, and release packaging (ad-hoc zip, CI artifact, draft-release
@@ -14,8 +14,8 @@ owner's Mac (48 kHz and 44.1 kHz, up to six sessions, a second output device); t
 path is a legacy fallback scheduled for removal. What is **not** done is real-hardware resource
 evidence (CPU, memory, Stop All, sleep) beyond three concurrent sessions, and wider device coverage
 of the direct engine.
-This is still unreleased, **not** a public v0.14 release: `MARKETING_VERSION` is unchanged (`0.13`)
-and no tag is cut. See `CHANGELOG.md` (`[v0.14] - Unreleased` and `[Unreleased]`).
+`MARKETING_VERSION` is `0.14` (ad-hoc signed, not notarized, published as a GitHub pre-release). See
+`CHANGELOG.md` (`[v0.14] - 2026-10-06`).
 
 This roadmap separates stable foundation, near-term low-risk work, later research, and
 explicitly deferred large-scope ideas. It is intentionally conservative: MacMiniMixer is
