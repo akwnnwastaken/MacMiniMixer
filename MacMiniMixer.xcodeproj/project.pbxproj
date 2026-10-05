@@ -56,6 +56,7 @@
 		9B7D1A802C8F4A9A8B2D0101 /* ProcessTapLiveState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */; };
 		9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */; };
 		9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */; };
+		9B7D1B202C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */; };
 		9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */; };
 		9B7D1A882C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */; };
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
@@ -161,6 +162,7 @@
 		9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveState.swift; sourceTree = "<group>"; };
 		9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveControlling.swift; sourceTree = "<group>"; };
 		9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapLiveController.swift; sourceTree = "<group>"; };
+		9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLegacyAudioQueueOutput.swift; sourceTree = "<group>"; };
 		9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLifecycle.swift; sourceTree = "<group>"; };
 		9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionState.swift; sourceTree = "<group>"; };
 		9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManager.swift; sourceTree = "<group>"; };
@@ -369,6 +371,7 @@
 				9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */,
 				9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */,
 				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
+				9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */,
 				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
 				9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */,
 				9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */,
@@ -584,6 +587,7 @@
 				9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */,
 				9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */,
 				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
+				9B7D1B202C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift in Sources */,
 				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
 				9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */,
 				9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */,
