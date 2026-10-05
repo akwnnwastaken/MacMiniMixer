@@ -3,17 +3,16 @@
 Maintainer guide for packaging MacMiniMixer as a direct-download `.zip` and publishing it as a
 GitHub Release.
 
-> **Guardrail:** v0.14 is an internal, unreleased checkpoint. `MARKETING_VERSION` stays `0.13` and
-> no tag is pushed until the maintainer explicitly decides to cut a public release (see
-> `docs/HANDOFF.md` §3). Nothing in this pipeline publishes a release on its own: a tag push only
-> creates a **draft**, and a person publishes it.
+> **Guardrail:** nothing in this pipeline publishes a release on its own. A tag push only creates a
+> **draft**, and a person publishes it. Tag and release only when the maintainer explicitly asks
+> (see `docs/HANDOFF.md` §3).
 
 ## What gets shipped
 
 - `MacMiniMixer-<version>.zip` contains `MacMiniMixer.app`, a Release build that is **ad-hoc
   signed and not notarized**. It ships with `MacMiniMixer-<version>.zip.sha256`.
 - The app is **menu bar only**: `Info.plist` sets `LSUIElement`, so there is no Dock icon and no main
-  window. The app lives in the menu bar and quits from the panel's **Quit MacMiniMixer** button.
+  window. The app lives in the menu bar and quits from **Quit MacMiniMixer** in the panel header's `⋯` menu.
 - It runs on **macOS 13.0+**. Product Real Control and the other Process Tap features need
   **macOS 14.2+**. Product Real Control is **experimental**.
 - The bundle identifier is still the placeholder `com.example.MacMiniMixer`. That's fine for
@@ -37,12 +36,14 @@ GitHub Release.
       ```
 - [ ] The essentials from `docs/MANUAL_TEST_CHECKLIST.md` pass on a real Mac (macOS 14.2+) with the
       **packaged** app, not an Xcode run. Cover at least §1 system output volume, §2 output devices,
-      §3 app discovery, §4 Real App Control, §11 Stop / Stop All, §12 output-device change while
-      active, §14 sleep/wake, and the §17/§18 Product Real smokes. Audio must be normal after quitting,
+      §3 app discovery, §4 Real App Control (always on, no toggle), §11 Stop / Stop All, §12 output-device change while
+      active, §14 sleep/wake, and the §17/§18 Product Real smokes (steps that read the Advanced card need developer mode, see
+      the checklist's setup). Audio must be normal after quitting,
       with no `sudo killall coreaudiod` needed.
-- [ ] `CHANGELOG.md` is final. Rename the `## [vX.Y] - Unreleased` section to
-      `## [vX.Y] - YYYY-MM-DD` and fold in the relevant `[Unreleased]` entries. The release workflow
-      copies the section whose heading starts with `## [vX.Y]` into the draft notes.
+- [ ] `CHANGELOG.md` is final. Move the `[Unreleased]` entries into a new `## [vX.Y] - YYYY-MM-DD`
+      section that opens with a short `### Highlights` list, and leave a new empty `## [Unreleased]`.
+      `scripts/release-notes.sh` puts that Highlights list (or, without one, the whole section) into
+      the release notes, followed by a link to the full changelog.
 - [ ] The version is bumped in `MacMiniMixer.xcodeproj/project.pbxproj`, in all **4** build
       configurations (app Debug/Release and test Debug/Release):
       - `MARKETING_VERSION` gets the new version, for example `0.14`. It becomes
@@ -99,7 +100,7 @@ download the zip in a browser, from the draft release or the workflow artifact.
 
 ```bash
 git switch main && git pull --ff-only
-git tag -a v0.14 -m "MacMiniMixer v0.14"
+git tag v0.14        # lightweight on purpose, see "Manual release" below (GH007)
 git push origin v0.14
 gh run watch            # or watch the Release workflow in the Actions tab
 ```
@@ -110,9 +111,11 @@ The `Release` workflow (`.github/workflows/release.yml`) does the following:
 2. Runs `scripts/package-app.sh`.
 3. Checks that the tag is exactly `v` + `CFBundleShortVersionString` (`v0.14` ⇔ `0.14`).
 4. Uploads the zip as a workflow artifact.
-5. Creates a **draft** GitHub Release with the zip and `.sha256`. Its notes cover the ad-hoc /
-   not-notarized status and how to open the app, macOS 13.0+ (14.2+ for per-app features), that
-   Product Real Control is experimental, and this version's CHANGELOG section.
+5. Creates a **draft** GitHub Release with the zip and `.sha256`. Its notes come from
+   `scripts/release-notes.sh <tag> <version>`: the ad-hoc / not-notarized status and how to open the
+   app, macOS 13.0+ (14.2+ for per-app features), that Product Real Control is experimental, always
+   on and unlimited, that Advanced needs developer mode, this version's CHANGELOG Highlights, and a
+   link to the full CHANGELOG at the tag.
 
 If something goes wrong:
 
@@ -129,6 +132,38 @@ If something goes wrong:
   `gh workflow run release.yml --ref main`. You get the artifact and no release.
 - **You want to abandon the release.** Run `gh release delete v0.14 --yes --cleanup-tag`, then
   `git tag -d v0.14`.
+
+## Manual release (CI unavailable)
+
+When GitHub Actions can't run (for example out of macOS minutes), tag and publish by hand from a
+Mac, after the checklist in section 1 (run the tests locally, bump the version, finalize the
+CHANGELOG, push the release commit to `main`):
+
+1. Push a **lightweight** tag on the pushed release commit:
+   ```bash
+   git fetch origin
+   git tag v0.14 origin/main && git push origin v0.14
+   ```
+   Don't use `git tag -a`: an annotated tag embeds the tagger's email, which GitHub's private-email
+   push protection (GH007) rejects. The tag push also starts the `Release` workflow. With CI
+   unavailable that run fails and can be ignored; if it does run, it creates a draft release for the
+   tag, so publish that draft ([section 4](#4-publish-the-draft)) instead of running
+   `gh release create`.
+2. Build and package the app:
+   ```bash
+   scripts/package-app.sh   # → dist/MacMiniMixer-0.14.zip + dist/MacMiniMixer-0.14.zip.sha256
+   ```
+3. Publish the release, either with the `gh` CLI:
+   ```bash
+   gh release create v0.14 dist/MacMiniMixer-0.14.zip dist/MacMiniMixer-0.14.zip.sha256 \
+     --title "MacMiniMixer v0.14" --prerelease \
+     --notes-file <(scripts/release-notes.sh v0.14 0.14)
+   ```
+   or in the web UI (Releases → **Draft a new release**): choose the `v0.14` tag, upload the zip
+   and `.sha256`, tick **Set as a pre-release**, and paste the notes copied with
+   ```bash
+   scripts/release-notes.sh v0.14 0.14 | pbcopy
+   ```
 
 ## 4. Publish the draft
 

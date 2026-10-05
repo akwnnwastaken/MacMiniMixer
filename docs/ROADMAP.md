@@ -1,9 +1,9 @@
 # MacMiniMixer Roadmap
 
-Current repository state: the internal **v0.14 Product Real stability checkpoint** is complete
-(the P177–P182 teardown/starvation hardening baseline, Advanced diagnostics, fake-backed tests, and
-the Product Real facade/store/start/stop split), and the `[Unreleased]` work on top of it has
-landed: **Product Real App Control has no app-count limit** (owner decision), starts are serialized
+Current repository state: **v0.14 is released (2026-10-06)**. It contains the **Product Real
+stability checkpoint** (the P177–P182 teardown/starvation hardening baseline, Advanced diagnostics,
+fake-backed tests, and the Product Real facade/store/start/stop split) and the work on top of it:
+**Product Real App Control has no app-count limit** (owner decision), starts are serialized
 through a **queued start lane**, live diagnostics are published only for the focused session while
 the Advanced section is visible, the system-output "Read-only" badge is probed proactively,
 accessibility coverage is complete, and release packaging (ad-hoc zip, CI artifact, draft-release
@@ -14,8 +14,8 @@ owner's Mac (48 kHz and 44.1 kHz, up to six sessions, a second output device); t
 path is a legacy fallback scheduled for removal. What is **not** done is real-hardware resource
 evidence (CPU, memory, Stop All, sleep) beyond three concurrent sessions, and wider device coverage
 of the direct engine.
-This is still unreleased, **not** a public v0.14 release: `MARKETING_VERSION` is unchanged (`0.13`)
-and no tag is cut. See `CHANGELOG.md` (`[v0.14] - Unreleased` and `[Unreleased]`).
+`MARKETING_VERSION` is `0.14` (ad-hoc signed, not notarized, published as a GitHub pre-release). See
+`CHANGELOG.md` (`[v0.14] - 2026-10-06`).
 
 This roadmap separates stable foundation, near-term low-risk work, later research, and
 explicitly deferred large-scope ideas. It is intentionally conservative: MacMiniMixer is
@@ -28,11 +28,14 @@ not yet a finished Windows Volume Mixer replacement.
 - System output volume and mute controls.
 - Output device listing and switching.
 - Application discovery via the current app-listing path.
-- Simplified menu bar mixer UI.
-- Global Product Real App Control opt-in.
+- Simplified menu bar mixer UI: header with a `⋯` menu (`Show all apps`, `Quit`), compact one-line
+  active banner, System Output, Applications list; Advanced is built only in developer mode
+  (`MacMiniMixerDeveloperMode`).
+- Product Real App Control always on (owner decision; no toggle — a row becomes Real only after the
+  user interacts with it).
 - Direct visible-PID Product Real Control for eligible apps such as Music/Spotify.
-- Browser/helper-PID resolution for Safari/YouTube-style rows when global Real App
-  Control is enabled and the user interacts with a row.
+- Browser/helper-PID resolution for Safari/YouTube-style rows after the user
+  interacts with a row.
 - Validation-first in-memory helper cache and early-accept fast path.
 - Persistent Product Real App Control sessions while healthy.
 - Product Real App Control for any number of apps at once (no app-count limit, owner decision),
@@ -156,7 +159,7 @@ not yet a finished Windows Volume Mixer replacement.
   - No private APIs.
   - No third-party dependencies.
   - No disk audio saving.
-  - Real control stays opt-in (global toggle OFF by default; sessions start only on interaction).
+  - Real control starts only on interaction (always on, no toggle; owner decision).
 
 ---
 
@@ -241,10 +244,11 @@ Explicit labels/values/hints added for app rows (volume slider, mute, Real/Resol
 state), the system output slider and mute button, and output-device selection rows.
 
 **Follow-up — done (`3a84483`)**: the rest of the UI is covered too — panel header/section
-captions, the Output devices button, the "Real app control" / "Show all" toggles, the Advanced
-disclosure, the severity-prefixed status banner, the read-only badge, the device list, and the
-Advanced Process Tap test, helper discovery, and Two-App Readiness views (macOS 13-compatible
-modifiers only, no layout change).
+captions, the Output devices button, the "Real app control" / "Show all" toggles (since then the
+former was removed and the latter moved to the header `⋯` menu), the Advanced disclosure, the
+severity-prefixed status banner, the read-only badge, the device list, and the Advanced Process Tap
+test, helper discovery, and Two-App Readiness views (macOS 13-compatible modifiers only, no layout
+change).
 
 **Still optional**: SwiftUI accessibility/snapshot tests once a view-test harness exists (see
 "UI-layer test coverage" below).
@@ -263,7 +267,7 @@ rather than a version-specific anchor for robustness across macOS versions.
 
 **Done**: the affordance is also surfaced on the main transient status banner.
 `MixerStatusMessage` now carries an optional `Action`; permission-denied start failures
-(both the Advanced manual path and the Real App Control toggle path) attach an
+(both the Advanced manual path and the Real App Control row-interaction path) attach an
 `openSystemAudioRecordingSettings` action rendered as an inline "Open Settings" button.
 
 ---
@@ -610,8 +614,8 @@ more than three sessions.
 **Priority**: High | **Risk**: Medium | **Status**: Implemented (`08d49bc`, `da2b06e`, `c57bf37`,
 `5a78656`, `774268a`); real-hardware characterization beyond three sessions **not done**
 
-Owner decision: like the Windows Volume Mixer, every app the user interacts with (global toggle
-ON) can be Real at the same time. What landed:
+Owner decision: like the Windows Volume Mixer, every app the user interacts with can be
+Real at the same time (real app control is now always on, no toggle). What landed:
 
 - **Cap removed**: `AppConstants.maxConcurrentLiveSessions: Int? = nil`,
   `ProcessTapLiveSessionManager(maxSessions: Int?)`, injectable `maxConcurrentSessions` on the
@@ -627,7 +631,8 @@ ON) can be Real at the same time. What landed:
   session; the cached-helper retry runs alongside other product sessions.
 
 **Remaining gates**: the real-hardware N-session characterization and the deferred many-session
-hardening (both in "Later Research / Experimental Work" above). Real control stays opt-in.
+hardening (both in "Later Research / Experimental Work" above). Real control starts only on
+interaction.
 
 ---
 
@@ -709,7 +714,7 @@ development instrument for this goal.
 2. N-app session management in `ProcessTapLiveSessionManager` — **done** (`maxSessions: Int?`,
    unlimited in the product).
 3. Per-row real control state in the main UI, any number of rows — **done** (per-app stop, Stop
-   All, "+N more" banner, queued start lane, per-app exit handling).
+   All, compact "N apps controlled" banner, queued start lane, per-app exit handling).
 4. Resource/latency characterization under many simultaneous sessions — **open** (the next gate).
 
 The app-count limit is gone by **owner decision** (`maxConcurrentLiveSessions = nil`), so the
@@ -718,9 +723,9 @@ real-hardware N-session characterization (e.g. 5–8 apps: CPU, Drops/Fail/Starv
 Stop All, sleep/wake), then the deferred many-session hardening (engine self-stops through the
 gates, main-thread hard teardown, sequential Stop All). Real-hardware resource evidence currently
 stops at three sessions (see "Three-app cap (cap=3) enabled" above); the direct output engine was
-additionally listened to with up to six sessions (no crackle). Control also still requires the opt-in
-toggle plus interaction with each row, so "every app in the list, automatically" is not a goal of
-the current design.
+additionally listened to with up to six sessions (no crackle). Control also still requires
+interaction with each row (real app control is always on, with no toggle), so "every app in the list,
+automatically" is not a goal of the current design.
 
 The phased implementation plan and its status live in [`PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md).
 

@@ -26,8 +26,11 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
   sessions only. The direct engine was additionally listened to with up to six sessions at 48 kHz and
   44.1 kHz and on a second output device (no crackle); beyond that, sessions have only been exercised
   by fake-backed tests.
-- App rows are preview/UI-state only by default. Real control requires the global "Real app control"
-  toggle (OFF by default) plus explicit user interaction with a row.
+- Real app control is always on (owner decision; no toggle in the panel — `MacMiniMixerApp` enables it
+  at launch). App rows are preview/UI-state until the user interacts with an eligible row.
+- The Advanced section is developer-only (owner decision): it is not built unless
+  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` was run (relaunch).
+  `Show all apps` and `Quit` live in the panel header's `⋯` menu.
 
 ---
 
@@ -37,11 +40,11 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Real output device list, switching, live refresh, external default-output sync.
 - Real system volume read, set, mute-to-zero/restore, live sync.
 - Real running app discovery via NSWorkspace, with audio-relevance filtering.
-- Process Tap Test and Replay Probe (user-triggered, Advanced section).
+- Process Tap Test and Replay Probe (user-triggered, Advanced section, developer mode only).
 - Product Real Control for several apps at once (a three-session long-run smoke passed on one Mac),
   indefinite while healthy, with per-app stop and Stop All.
 - Advanced manual one-app Live Control with Start/Stop, gain, fade-in/out, 60s timeout.
-- Browser/helper row resolution behind the global experimental toggle.
+- Browser/helper row resolution after explicit row interaction.
 - Validation-first in-memory helper cache.
 - Advanced Helper Process Discovery + Find audio helper auto-detect.
 - Two-App Readiness diagnostic (Advanced only, 10 s by default with 1/5/30 min options, isolated
@@ -174,7 +177,7 @@ After touching the audio path or MixerViewModel, at minimum verify:
 - Spotify/Music direct Product Real Control starts, gain applies, per-app stop and Stop All work.
 - Several rows started quickly queue (pending badge) and then start one after another.
 - After touching the live audio path: the direct engine check in `docs/MANUAL_TEST_CHECKLIST.md` §21
-  (Advanced card `Queued 0`, log `output=direct`, `resample report … path=`, no audible crackle).
+  (Advanced card, developer mode — `Queued 0`, log `output=direct`, `resample report … path=`, no audible crackle).
 - Product Real stops on output device change; Advanced manual Live Control also stops on its 60s
   timeout.
 - App quit during live control stops session cleanly (check Console for cleanup logs).
@@ -207,12 +210,12 @@ Full checklist: `docs/MANUAL_TEST_CHECKLIST.md`
 - **Product starts stay serialized** through the queued start lane, and product create/destroy stays
   behind the settle and lifecycle gates.
 - **Advanced tools stay in Advanced.** Process Tap Test, Replay Probe, Two-App Readiness,
-  and Helper Discovery must remain in the collapsed Advanced section, not exposed in the
+  and Helper Discovery must remain in the collapsed, developer-mode-only Advanced section, not exposed in the
   main mixer UI.
 - **Helper mappings are not persisted.** Cache is in-memory, validation-first, and
   invalidated on PID change. Do not add disk persistence without careful design.
-- **Real control is opt-in.** The global "Real app control" toggle defaults to OFF.
-  No capture starts automatically when an app appears in the list.
+- **Real control starts only on interaction.** It is always on (no toggle, owner decision), but no
+  capture starts automatically when an app appears in the list; keep it that way.
 - **No release, tag, or `MARKETING_VERSION` bump** unless the owner explicitly asks.
 
 ---

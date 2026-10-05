@@ -15,8 +15,8 @@ enum AppConstants {
     static let processTapTwoAppReadinessDuration: TimeInterval = 10
     /// Optional cap on concurrent live Process Tap sessions for Product Real Control; `nil` means
     /// unlimited. Owner decision: Product Real Control has **no app-count limit** — like the
-    /// Windows Volume Mixer, every app the user interacts with (while the global "Real app control"
-    /// toggle is ON) can be controlled at the same time. Each session owns its own process tap +
+    /// Windows Volume Mixer, every app the user interacts with can be controlled at the same time
+    /// (see `realAppControlEnabledAtLaunch`). Each session owns its own process tap +
     /// private aggregate device + IOProc + replay AudioQueue, so CPU scales roughly linearly per
     /// active app; a resource failure for an extra session surfaces through the normal per-app
     /// start-failure path ("Could not start live control for this app"), not a preemptive limit.
@@ -25,6 +25,15 @@ enum AppConstants {
     /// non-nil value; it is simply off by default. History: capped at 2, then 3 (Phase 5a) — see
     /// docs/PLAN_MULTI_APP.md / DECISIONS.md.
     static let maxConcurrentLiveSessions: Int? = nil
+    /// Whether the shipped app turns Product Real Control on at launch. Owner decision: it is always
+    /// on, so the panel has no "Real app control" toggle and `MacMiniMixerApp` enables it when it
+    /// builds the view model. `MixerViewModel` itself still defaults to OFF (and keeps
+    /// `setExperimentalRealAppControlEnabled`) so tests and previews opt in explicitly.
+    static let realAppControlEnabledAtLaunch = true
+    /// `UserDefaults` bool that shows the Advanced diagnostics section in the panel (hidden
+    /// otherwise; read once when the panel is created): `defaults write <bundle id>
+    /// MacMiniMixerDeveloperMode -bool YES`.
+    static let developerModeDefaultsKey = "MacMiniMixerDeveloperMode"
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
     /// Live output path for Process Tap live control (Product Real and Advanced live). The direct

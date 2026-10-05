@@ -91,7 +91,7 @@ open.*
   Advanced-selected app quits (`da2b06e`); the cached-helper retry runs alongside other sessions
   (`c57bf37`); live diagnostics publish only for the focused session while Advanced is visible
   (`5a78656`); the queued start lane (`774268a`, Phase 2 above). The banner already summarizes any N
-  ("first two +N more").
+  (originally "first two +N more"; since `4220c46` the one-line "N apps controlled").
 - Fake-backed coverage: real manager + fake controllers end to end with 7 apps, facade with 6, an
   unlimited manager with 8 sessions, a 7-app banner test.
 

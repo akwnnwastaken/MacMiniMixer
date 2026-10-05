@@ -6,6 +6,11 @@ struct MixerPanelView: View {
     @State private var isShowingOutputDevices = false
     @State private var isEditingSystemOutputSlider = false
     @State private var isShowingAdvanced = false
+    /// Advanced diagnostics are developer-only: the section is not built at all unless the
+    /// `MacMiniMixerDeveloperMode` default is true. Read once when the panel is first created.
+    @State private var isDeveloperModeEnabled = UserDefaults.standard.bool(
+        forKey: AppConstants.developerModeDefaultsKey
+    )
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppConstants.Layout.panelSpacing) {
@@ -36,9 +41,9 @@ struct MixerPanelView: View {
                 appMixerSection
             }
 
-            advancedSection
-
-            quitButton
+            if isDeveloperModeEnabled {
+                advancedSection
+            }
         }
         .padding(AppConstants.Layout.panelPadding)
         .frame(width: AppConstants.Layout.panelWidth)
@@ -96,18 +101,59 @@ struct MixerPanelView: View {
             .accessibilityValue(Text(isShowingOutputDevices ? "Expanded" : "Collapsed"))
             .accessibilityHint(Text(isShowingOutputDevices ? "Hides the output device list" : "Shows the output device list"))
             .foregroundStyle(isShowingOutputDevices ? .blue : .secondary)
-            .background(
-                Circle()
-                    .fill(.thinMaterial.opacity(isShowingOutputDevices ? 0.95 : 0.55))
-                    .overlay(
-                        Circle()
-                            .stroke(.white.opacity(isShowingOutputDevices ? 0.22 : 0.12), lineWidth: 1)
-                    )
-            )
+            .background(headerButtonBackground(isHighlighted: isShowingOutputDevices))
             .help("Output devices")
+
+            moreMenu
         }
         .padding(.horizontal, 3)
         .padding(.top, 1)
+    }
+
+    private func headerButtonBackground(isHighlighted: Bool) -> some View {
+        Circle()
+            .fill(.thinMaterial.opacity(isHighlighted ? 0.95 : 0.55))
+            .overlay(
+                Circle()
+                    .stroke(.white.opacity(isHighlighted ? 0.22 : 0.12), lineWidth: 1)
+            )
+    }
+
+    /// Secondary actions (`Show all apps`, `Quit`) kept out of the main panel body.
+    private var moreMenu: some View {
+        Menu {
+            Toggle(
+                "Show all apps",
+                isOn: Binding(
+                    get: { viewModel.showAllApps },
+                    set: { viewModel.setShowAllApps($0) }
+                )
+            )
+            .help("Show all regular running apps")
+            .accessibilityLabel(Text("Show all apps"))
+            .accessibilityHint(Text("When off, only audio-relevant apps are listed"))
+
+            Divider()
+
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Label("Quit MacMiniMixer", systemImage: "power")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
+                .background(headerButtonBackground(isHighlighted: false))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(Text("More options"))
+        .accessibilityHint(Text("Shows the Show all apps option and Quit"))
+        .help("More options")
     }
 
     private func activeLiveControlBanner(_ banner: RealControlBannerPresentation) -> some View {
@@ -118,7 +164,7 @@ struct MixerPanelView: View {
                 .frame(width: 18)
                 .accessibilityHidden(true)
 
-            Text(banner.summaryText)
+            Text(compactBannerText(banner))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
@@ -149,7 +195,7 @@ struct MixerPanelView: View {
             .accessibilityLabel(Text(banner.stopAccessibilityLabel))
         }
         .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(.thinMaterial)
@@ -158,6 +204,16 @@ struct MixerPanelView: View {
                         .stroke(Color.orange.opacity(0.24), lineWidth: 1)
                 )
         )
+    }
+
+    /// One-line banner text: "N apps controlled" once two or more apps are confirmed (the full
+    /// name list stays in the accessibility label), otherwise the presenter's own summary.
+    private func compactBannerText(_ banner: RealControlBannerPresentation) -> String {
+        if banner.mode == .product, banner.confirmedCount >= 2 {
+            return "\(banner.confirmedCount) apps controlled"
+        }
+
+        return banner.summaryText
     }
 
     private var systemOutputSection: some View {
@@ -249,32 +305,11 @@ struct MixerPanelView: View {
 
     private var appMixerSection: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Text("Applications")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .accessibilityAddTraits(.isHeader)
-
-                Spacer()
-
-                Toggle(
-                    "Show all",
-                    isOn: Binding(
-                        get: { viewModel.showAllApps },
-                        set: { viewModel.setShowAllApps($0) }
-                    )
-                )
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-                .font(.caption2.weight(.medium))
+            Text("Applications")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .help("Show all regular running apps")
-                .accessibilityLabel(Text("Show all apps"))
-                .accessibilityHint(Text("When off, only audio-relevant apps are listed"))
-            }
-            .padding(.horizontal, 2)
-
-            experimentalRealAppControlStrip
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 2)
 
             if viewModel.visibleMixerApps.isEmpty {
                 Text(viewModel.apps.isEmpty ? "No running apps found" : "No audio-relevant apps found")
@@ -311,49 +346,6 @@ struct MixerPanelView: View {
             }
         }
         .sectionStyle(tintOpacity: 0.22)
-    }
-
-    private var experimentalRealAppControlStrip: some View {
-        HStack(spacing: 7) {
-            Toggle(
-                "Real app control",
-                isOn: Binding(
-                    get: { viewModel.isExperimentalRealAppControlEnabled },
-                    set: { viewModel.setExperimentalRealAppControlEnabled($0) }
-                )
-            )
-            .toggleStyle(.checkbox)
-            .controlSize(.small)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(viewModel.isExperimentalRealAppControlEnabled ? .orange : .secondary)
-            .accessibilityLabel(Text("Real app control, experimental"))
-            .accessibilityHint(Text(realAppControlSpokenHint))
-
-            // Visual-only "Exp" badge; the toggle's accessibility label already says "experimental".
-            Text("Exp")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.orange.opacity(0.9))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.orange.opacity(0.12))
-                )
-                .accessibilityHidden(true)
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.orange.opacity(viewModel.isExperimentalRealAppControlEnabled ? 0.1 : 0.045))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(Color.orange.opacity(viewModel.isExperimentalRealAppControlEnabled ? 0.22 : 0.08), lineWidth: 1)
-                )
-        )
-        .help("When enabled, adjusting a candidate app row attempts to start real experimental control for that app.")
     }
 
     private var advancedSection: some View {
@@ -476,24 +468,6 @@ struct MixerPanelView: View {
         )
     }
 
-    private var quitButton: some View {
-        Button {
-            NSApplication.shared.terminate(nil)
-        } label: {
-            Label("Quit MacMiniMixer", systemImage: "power")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .font(.caption.weight(.medium))
-        .padding(.vertical, 8)
-        .background(
-            Capsule(style: .continuous)
-                .fill(.quaternary.opacity(0.45))
-        )
-        .contentShape(Capsule(style: .continuous))
-    }
-
     private func refreshSystemOutputVolumeIfIdle() {
         guard !isEditingSystemOutputSlider else {
             return
@@ -595,10 +569,6 @@ struct MixerPanelView: View {
 
     private func statusSpokenLabel(_ message: MixerStatusMessage) -> String {
         "\(message.style.spokenName): \(message.text)"
-    }
-
-    private var realAppControlSpokenHint: String {
-        "Experimental. When on, real per-app control starts only when you interact with an app row. Turning it off stops any active real control."
     }
 
     private func perform(_ action: MixerStatusMessage.Action) {

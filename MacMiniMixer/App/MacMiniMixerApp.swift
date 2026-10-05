@@ -28,21 +28,28 @@ struct MacMiniMixerApp: App {
         )
 
         _mixerViewModel = StateObject(
-            wrappedValue: MixerViewModel(
-                applicationLister: applicationLister,
-                audioController: audioController,
-                outputDeviceLister: outputDeviceLister,
-                outputDeviceController: outputDeviceController,
-                systemVolumeReader: systemVolumeReader,
-                systemVolumeController: systemVolumeController,
-                processTapTester: processTapTester,
-                processTapReplayProbe: processTapReplayProbe,
-                processTapLiveController: processTapLiveController,
-                twoAppReadinessTester: twoAppReadinessTester,
-                helperProcessAudioProbe: helperProcessAudioProbe,
-                appAudioTargetResolver: appAudioTargetResolver,
-                processLister: processLister
-            )
+            wrappedValue: { () -> MixerViewModel in
+                let viewModel = MixerViewModel(
+                    applicationLister: applicationLister,
+                    audioController: audioController,
+                    outputDeviceLister: outputDeviceLister,
+                    outputDeviceController: outputDeviceController,
+                    systemVolumeReader: systemVolumeReader,
+                    systemVolumeController: systemVolumeController,
+                    processTapTester: processTapTester,
+                    processTapReplayProbe: processTapReplayProbe,
+                    processTapLiveController: processTapLiveController,
+                    twoAppReadinessTester: twoAppReadinessTester,
+                    helperProcessAudioProbe: helperProcessAudioProbe,
+                    appAudioTargetResolver: appAudioTargetResolver,
+                    processLister: processLister
+                )
+                // Real app control is always on in the shipped app (owner decision). Nothing is
+                // captured here: a session still only starts when the user moves an eligible row's
+                // slider or mute.
+                viewModel.setExperimentalRealAppControlEnabled(AppConstants.realAppControlEnabledAtLaunch)
+                return viewModel
+            }()
         )
     }
 
