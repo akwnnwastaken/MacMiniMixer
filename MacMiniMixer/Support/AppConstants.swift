@@ -13,14 +13,31 @@ enum AppConstants {
     static let processTapReplayProbeDuration: TimeInterval = 2.5
     static let processTapLiveControlMaxDuration: TimeInterval = 60
     static let processTapTwoAppReadinessDuration: TimeInterval = 10
-    /// Maximum concurrent live Process Tap sessions the shared session manager will run.
-    /// Raised to 3 (Phase 5a) after the cap=2 Release CPU gate passed and a real-hardware
-    /// three-session smoke (see docs/PLAN_MULTI_APP.md / DECISIONS.md). Product orchestration
-    /// reads this single constant for its count-based guard and the user-facing limit message;
-    /// N>3 remains a separate gate (resolver serialization, resource provisioning).
-    static let maxConcurrentLiveSessions = 3
+    /// Optional cap on concurrent live Process Tap sessions for Product Real Control; `nil` means
+    /// unlimited. Owner decision: Product Real Control has **no app-count limit** — like the
+    /// Windows Volume Mixer, every app the user interacts with (while the global "Real app control"
+    /// toggle is ON) can be controlled at the same time. Each session owns its own process tap +
+    /// private aggregate device + IOProc + replay AudioQueue, so CPU scales roughly linearly per
+    /// active app; a resource failure for an extra session surfaces through the normal per-app
+    /// start-failure path ("Could not start live control for this app"), not a preemptive limit.
+    /// The cap mechanism itself is kept and stays testable: the shared session manager and the
+    /// product start preflight (count guard + "supports N apps at a time" message) both honour a
+    /// non-nil value; it is simply off by default. History: capped at 2, then 3 (Phase 5a) — see
+    /// docs/PLAN_MULTI_APP.md / DECISIONS.md.
+    static let maxConcurrentLiveSessions: Int? = nil
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
+    /// Live output path for Process Tap live control (Product Real and Advanced live). The direct
+    /// aggregate path renders the tap straight into the output device on one clock (no AudioQueue),
+    /// which removes the two-clock hand-off behind random crackle. A/B fallback without a rebuild:
+    /// `defaults write <bundle id> MacMiniMixerLiveOutputMode audioQueue` (read per controller).
+    static let processTapLiveDefaultOutputMode: ProcessTapLiveOutputMode = .directAggregateOutput
+    static let processTapLiveOutputModeDefaultsKey = "MacMiniMixerLiveOutputMode"
+    /// Sample-rate conversion inside the direct path when the tap and output rates differ (e.g. tap
+    /// 48 kHz, built-in speakers at 44.1 kHz) instead of falling back to the AudioQueue path.
+    /// Safety valve: `defaults write <bundle id> MacMiniMixerDirectResample off` (read per controller).
+    static let processTapDirectResampleDefaultMode: ProcessTapDirectResampleMode = .on
+    static let processTapDirectResampleDefaultsKey = "MacMiniMixerDirectResample"
     static let processTapLivePrimingBufferCount = 2
     static let processTapReplayFallbackSampleRate: Double = 48_000
     static let processTapReplayBufferCount = 8

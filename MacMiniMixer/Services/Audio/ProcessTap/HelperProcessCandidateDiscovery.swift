@@ -103,7 +103,7 @@ enum HelperProcessCandidateDiscovery {
         return nil
     }
 
-    private static func isDescendant(
+    static func isDescendant(
         _ process: SystemProcessInfo,
         of rootPID: Int32,
         processByPID: [Int32: SystemProcessInfo]

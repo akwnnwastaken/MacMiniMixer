@@ -63,7 +63,10 @@ protocol ProcessTapLiveSessionManaging: Sendable {
 
 final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, ProcessTapLiveControlling, @unchecked Sendable {
     private let controllerFactory: @Sendable () -> ProcessTapLiveControlling
-    private let maxSessions: Int
+    /// Maximum concurrent (starting/active/stopping) sessions, or `nil` for no limit. The Product
+    /// Real manager is built with `AppConstants.maxConcurrentLiveSessions` (nil = unlimited); the
+    /// compatibility initializer and diagnostics (e.g. Two-App Readiness) pass explicit caps.
+    private let maxSessions: Int?
     /// Serializes all Core Audio session create/destroy across every session this manager owns, so a
     /// teardown never overlaps a setup (or another teardown) and churns the shared route twice at
     /// once. Shared by all sessions here because they all target the same coreaudiod route.
@@ -82,13 +85,15 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         self.lifecycleGate = lifecycleGate
     }
 
+    /// - Parameter maxSessions: Concurrent-session cap; `nil` means unlimited. A non-nil value is
+    ///   clamped to at least 1.
     init(
-        maxSessions: Int,
+        maxSessions: Int?,
         lifecycleGate: ProductRealCoreAudioLifecycleGate = ProductRealCoreAudioLifecycleGate(),
         controllerFactory: @escaping @Sendable () -> ProcessTapLiveControlling
     ) {
         self.controllerFactory = controllerFactory
-        self.maxSessions = max(1, maxSessions)
+        self.maxSessions = maxSessions.map { max(1, $0) }
         self.lifecycleGate = lifecycleGate
     }
 
@@ -136,7 +141,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         let controller = controllerFactory()
 
         guard reserveSession(sessionState, controller: controller) else {
-            AppLogger.processTap.warning("Live session start rejected: max sessions reached app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public) maxSessions=\(self.maxSessions, privacy: .public)")
+            AppLogger.processTap.warning("Live session start rejected: max sessions reached app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public) maxSessions=\(self.maxSessionsLogDescription, privacy: .public)")
             return ProcessTapLiveSessionStartResult(
                 sessionID: nil,
                 result: ProcessTapTestResult(
@@ -314,6 +319,11 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         sessions.values.filter { $0.phase == .starting || $0.phase == .active || $0.phase == .stopping }.count
     }
 
+    /// Log-friendly rendering of the cap, so an unlimited manager never prints a sentinel number.
+    private var maxSessionsLogDescription: String {
+        maxSessions.map { String($0) } ?? "unlimited"
+    }
+
     private var activeSessionIDs: [ProcessTapLiveSessionID] {
         sessions
             .filter { $0.value.phase == .starting || $0.value.phase == .active || $0.value.phase == .stopping }
@@ -329,7 +339,9 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
             lock.unlock()
         }
 
-        guard activeSessionCount < maxSessions else {
+        // `nil` cap = unlimited: every reservation is admitted (resource failures surface later
+        // through the controller's own start result).
+        if let maxSessions = self.maxSessions, activeSessionCount >= maxSessions {
             return false
         }
 

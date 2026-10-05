@@ -21,9 +21,33 @@ final class ProductRealStartCoordinator {
     private let appAudioTargetResolver: AppAudioTargetResolving
     private let startSettleGate: ProductRealStartSettling
     private let processTapEligibility: @Sendable (Int32?) -> ProcessTapProcessEligibility
+    /// Optional concurrent Product Real session cap for the start preflight; `nil` = unlimited (the
+    /// product default, `AppConstants.maxConcurrentLiveSessions`). Injectable so tests can prove the
+    /// cap mechanism and its message with an explicit value.
+    private let maxConcurrentSessions: Int?
     private weak var sideEffects: ProductRealControlSideEffects?
     private weak var context: ProductRealControlContext?
     private var appAudioResolutionTask: Task<Void, Never>?
+
+    /// Queued start lane: at most one Product Real helper resolution or product start is physically
+    /// in flight at a time; a start requested while one is in flight is queued (FIFO, see
+    /// `ProductRealControlState.queuedStarts`) instead of rejected, and drained when the lane frees.
+    /// Direct-PID starts queue too: a helper probe creates/destroys its own tap + aggregate outside
+    /// the lifecycle and settle gates, and the shared Advanced "running" flag assumes one start at a
+    /// time. This physical in-flight tracking is deliberately kept here and NOT in the shared state,
+    /// so global state resets (Stop All, Real off, sleep) cannot free the lane while a cancelled
+    /// start or probe is still running.
+    ///
+    /// Start requests whose async start body has not yet run its post-await block.
+    private var inFlightStartRequestIDs: Set<ProductRealControlStartRequestID> = []
+    /// Resolution tasks that have not yet finished (a cancelled task still counts until it returns).
+    private var inFlightResolutionTaskCount = 0
+
+    /// Whether a Product Real resolution or start is in flight, so a new start must queue. Internal
+    /// (not private) for tests.
+    var isStartLaneBusy: Bool {
+        inFlightResolutionTaskCount > 0 || !inFlightStartRequestIDs.isEmpty || productRealControlState.isResolving
+    }
 
     /// Diagnostics-only, per-live-session bookkeeping for starvation-escalation attribution logging.
     /// **Not** a source of truth: it never drives audio, UI, `ProductRealControlState`, or any published
@@ -31,6 +55,14 @@ final class ProductRealStartCoordinator {
     /// one debug log so an intermittent Starv spike can be attributed to a specific session/app. See
     /// `ProductRealStarvationAttributionLog`.
     private var starvationAttribution = ProductRealStarvationAttributionLog()
+
+    /// The app whose Product Real session owns the single shared Advanced live-diagnostics surface
+    /// (`setProcessTapLiveDiagnostics` / `setLiveControlDiagnosticProgress`), so concurrent sessions
+    /// do not interleave their values there. The newest start takes it; when the focused app no
+    /// longer has a session, the next accepted callback from a surviving session adopts it (see
+    /// `shouldPublishLiveDiagnostics(for:)`), so the stop side needs no bookkeeping. Display-only:
+    /// it never affects audio, `ProductRealControlState`, or attribution logging.
+    private var liveDiagnosticsFocusAppID: MixerAppItem.ID?
 
     /// Routes the engine `onStopped` callback to the stop side. No-op default so construction never
     /// captures the sibling before the facade wires it (post-init).
@@ -46,13 +78,15 @@ final class ProductRealStartCoordinator {
         startSettleGate: ProductRealStartSettling,
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility,
         sideEffects: ProductRealControlSideEffects,
-        context: ProductRealControlContext
+        context: ProductRealControlContext,
+        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions
     ) {
         self.stateStore = stateStore
         self.liveSessionManager = liveSessionManager
         self.appAudioTargetResolver = appAudioTargetResolver
         self.startSettleGate = startSettleGate
         self.processTapEligibility = processTapEligibility
+        self.maxConcurrentSessions = maxConcurrentSessions
         self.sideEffects = sideEffects
         self.context = context
     }
@@ -105,20 +139,22 @@ final class ProductRealStartCoordinator {
     // `onWillChange` still fires.
 
     /// Starts Product Real for `app`, resolving an audio-helper target first when the visible process
-    /// is not directly eligible. Preserves the previous eligibility/permission/helper checks and
-    /// status messages verbatim.
+    /// is not directly eligible. An eligible visible process is widened to the app's other audio
+    /// processes (`expandedVisibleAppTarget`), so a Chromium/Electron main process is tapped
+    /// together with the helper that actually renders its audio. Any other app goes through the
+    /// resolver, which matches the HAL process list first and only then falls back to probing
+    /// browser helpers (or asks the user to play audio first). Preserves the previous
+    /// permission/platform checks and status messages verbatim.
     func startResolvedExperimentalControl(for app: MixerAppItem, allowsCachedLookup: Bool = true) {
-        let request = app.appAudioTargetRequest
+        let request = audioTargetRequest(for: app)
         let visibleEligibility = processTapEligibility(app.processIdentifier)
 
         if visibleEligibility.isEligible {
+            let target = expandedVisibleAppTarget(for: app)
             startExperimentalControl(
                 for: app,
-                target: ProcessTapTarget(
-                    appID: app.id,
-                    appName: app.name,
-                    processIdentifier: app.processIdentifier
-                )
+                target: target,
+                resolutionSource: target.additionalProcessIdentifiers.isEmpty ? nil : .matchedAudioProcesses
             )
             return
         }
@@ -136,13 +172,14 @@ final class ProductRealStartCoordinator {
             return
         }
 
-        guard HelperProcessCandidateDiscovery.isLikelyHelperResolvable(app.helperProcessDiscoveryTarget) else {
-            sideEffects?.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
-            return
-        }
-
+        // No browser-keyword gate here any more: the resolver matches the app against the HAL's
+        // process list first (any multi-process app — Discord, Slack, Teams, VS Code, Firefox), and
+        // reports "play audio first" itself for a non-browser app with no audio process yet.
         productRealControlState.beginResolution(for: app.id)
         appAudioResolutionTask?.cancel()
+        // The resolution holds the start lane until this task physically finishes (even when it was
+        // cancelled), so no queued start runs while a helper probe may still own Core Audio objects.
+        inFlightResolutionTaskCount += 1
         appAudioResolutionTask = Task { [weak self] in
             let result = await self?.appAudioTargetResolver.resolveTarget(
                 for: request,
@@ -151,8 +188,16 @@ final class ProductRealStartCoordinator {
 
             await MainActor.run {
                 self?.handleAppAudioTargetResolution(result, for: app.id)
+                self?.finishResolutionTask()
             }
         }
+    }
+
+    /// Releases the start lane held by a finished resolution task, then drains the queue. Runs after
+    /// `handleAppAudioTargetResolution`, so a resolved target's start has already taken the lane.
+    private func finishResolutionTask() {
+        inFlightResolutionTaskCount = max(0, inFlightResolutionTaskCount - 1)
+        drainStartQueueIfIdle()
     }
 
     /// Handles the async resolution result: accepts it only while still resolving for `appID`, clears
@@ -202,7 +247,9 @@ final class ProductRealStartCoordinator {
     }
 
     /// Cancels an in-flight resolution and clears resolving state (guarded on actually resolving), the
-    /// same as the view model's previous `cancelAppAudioTargetResolution`.
+    /// same as the view model's previous `cancelAppAudioTargetResolution`. Deliberately does not drain
+    /// the start queue: a cancelled probe keeps running briefly (plus its Core Audio cleanup), so only
+    /// the resolution task's own completion (`finishResolutionTask`) frees the lane and drains.
     func cancelAppAudioTargetResolution(reason: ProcessTapCandidateProbeStopReason) {
         guard productRealControlState.isResolving else {
             return
@@ -216,15 +263,18 @@ final class ProductRealStartCoordinator {
 
     /// Cancels only the resolution task, for the synchronous sleep/termination teardown path where the
     /// view model already performs the resolver cancel and state clears alongside its other teardown.
+    /// Like `cancelAppAudioTargetResolution`, it does not drain the start queue.
     func cancelResolutionTask() {
         appAudioResolutionTask?.cancel()
         appAudioResolutionTask = nil
     }
 
     /// Whether a new product real-control session may start for `appID`. Returns a warning message
-    /// when blocked, or nil when allowed. Multiple product sessions are permitted up to
-    /// `maxConcurrentLiveSessions`; Advanced manual control and diagnostics remain mutually exclusive
-    /// with product control. Callers handle "already active for this app" separately.
+    /// when blocked, or nil when allowed. Any number of product sessions may run concurrently by
+    /// default (`maxConcurrentSessions == nil`); when a cap is configured, a new app is blocked once
+    /// it is reached and the message names that configured count. Advanced manual control and
+    /// diagnostics remain mutually exclusive with product control. Callers handle "already active
+    /// for this app" separately.
     func productSessionStartBlockReason(for appID: MixerAppItem.ID) -> String? {
         if context?.isProcessTapTesting == true {
             return "Stop active live control first"
@@ -234,14 +284,111 @@ final class ProductRealStartCoordinator {
             return "Stop the active live control first"
         }
 
-        if productRealControlState.wouldExceedConcurrentSessionCap(
-            for: appID,
-            cap: AppConstants.maxConcurrentLiveSessions
-        ) {
-            return "Real app control supports \(AppConstants.maxConcurrentLiveSessions) apps at a time"
+        if let cap = maxConcurrentSessions,
+           productRealControlState.wouldExceedConcurrentSessionCap(for: appID, cap: cap) {
+            return "Real app control supports \(cap) apps at a time"
         }
 
         return nil
+    }
+
+    // MARK: - Queued start lane
+    //
+    // Ordering for a start request: (1) dedupe — already queued / resolving / pending / active is a
+    // no-op; (2) hard blocks reject immediately (and are re-checked at drain); (3) lane busy → enqueue
+    // FIFO; (4) `productSessionStartBlockReason` is evaluated only once the lane is free. The lane is
+    // drained only when it physically frees: at the end of a start's post-await block (after any
+    // cached-helper retry took the lane) and at the end of a resolution task.
+
+    /// Slider / mute driven automatic Product Real start for `appID` (moved from the view model's
+    /// `startAutomaticRealControlIfNeeded`; same checks and status messages, except that a start
+    /// requested while another resolution/start is in flight is now queued instead of rejected with
+    /// "Finish resolving app audio first" / "Stop active live control first"). Reads the app — and so
+    /// the gain — from current `context.apps`, so a drained entry uses the slider value at drain time.
+    func requestAutomaticStart(for appID: MixerAppItem.ID) {
+        guard context?.isExperimentalRealAppControlEnabled == true else {
+            return
+        }
+
+        guard context?.isTwoAppReadinessRunning != true else {
+            sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
+            return
+        }
+
+        // The app disappeared (e.g. a queued entry whose app exited before it drained): nothing to start.
+        guard let app = context?.apps.first(where: { $0.id == appID }) else {
+            return
+        }
+
+        guard app.isEligibleForExperimentalLiveControl else {
+            sideEffects?.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
+            return
+        }
+
+        if productRealControlState.isResolving(appID: app.id) {
+            return
+        }
+
+        // Rapid-toggle guard also covers the slider-driven auto-start path: do not kick off a new
+        // start while a start/stop for this row is already in flight, or while one is queued for it.
+        if productRealControlState.isOperationPending(for: app.id) {
+            return
+        }
+
+        if context?.isHelperBusy == true {
+            sideEffects?.showProductRealStatus("Stop helper probe first", style: .warning, action: nil)
+            return
+        }
+
+        if productRealControlState.isActive(appID: app.id, isLiveControlActive: context?.isProcessTapLiveControlActive == true) {
+            return
+        }
+
+        if isStartLaneBusy {
+            productRealControlState.enqueueStart(for: app.id, origin: .automatic)
+            return
+        }
+
+        if let blockReason = productSessionStartBlockReason(for: app.id) {
+            sideEffects?.showProductRealStatus(blockReason, style: .warning, action: nil)
+            return
+        }
+
+        startResolvedExperimentalControl(for: app)
+    }
+
+    /// Runs queued starts, oldest first, while the lane is free. Each entry re-enters its original
+    /// entry point, so it re-runs the full preflight against current state (a now-blocked entry shows
+    /// its message and is dropped; a vanished app is skipped) and the loop moves on; it stops as soon
+    /// as an entry takes the lane.
+    private func drainStartQueueIfIdle() {
+        while !isStartLaneBusy,
+              !productRealControlState.queuedStarts.isEmpty,
+              let next = productRealControlState.dequeueNextStart() {
+            switch next.origin {
+            case .automatic:
+                requestAutomaticStart(for: next.appID)
+            case .toggle:
+                startExperimentalControl(for: next.appID)
+            }
+        }
+    }
+
+    /// Releases the start lane held by `startRequestID`'s start body, then drains the queue.
+    private func finishInFlightStart(_ startRequestID: ProductRealControlStartRequestID) {
+        inFlightStartRequestIDs.remove(startRequestID)
+        drainStartQueueIfIdle()
+    }
+
+    /// Drops every queued (not yet started) Product Real start, e.g. when the panel closes so queued
+    /// entries never drain into background helper probing. In-flight work is unaffected. No-op (and
+    /// no state-change notification) when nothing is queued.
+    func clearQueuedStarts() {
+        guard !productRealControlState.queuedStarts.isEmpty else {
+            return
+        }
+
+        productRealControlState.clearAllQueuedStarts()
     }
 
     // MARK: - Async start body
@@ -252,13 +399,25 @@ final class ProductRealStartCoordinator {
     // refreshes via `refreshActiveName`.
 
     /// Synchronous start preflight for the row toggle: validates busy/cap/eligibility and builds the
-    /// direct-PID target, then hands off to the async start body.
+    /// direct-PID target, then hands off to the async start body. While another Product Real
+    /// resolution/start is in flight the toggle is queued (see "Queued start lane") and re-runs this
+    /// preflight when it drains.
     func startExperimentalControl(for appID: MixerAppItem.ID) {
         guard context?.isTwoAppReadinessRunning != true else {
             sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
             return
         }
 
+        if isStartLaneBusy {
+            if !productRealControlState.isOperationPending(for: appID),
+               !productRealControlState.isResolving(appID: appID) {
+                productRealControlState.enqueueStart(for: appID, origin: .toggle)
+            }
+            return
+        }
+
+        // With the lane free, this only fires for Advanced work (a diagnostic or a manual live start):
+        // a product start's own "running" flag and a resolution both mean the lane is busy, handled above.
         guard context?.isProcessTapTesting != true,
               context?.isAppAudioTargetResolving != true else {
             sideEffects?.showProductRealStatus("Process Tap is already busy", style: .warning, action: nil)
@@ -286,21 +445,134 @@ final class ProductRealStartCoordinator {
             return
         }
 
-        let target = ProcessTapTarget(
+        // Widen the visible process to the app's other audio processes (helpers, WebKit GPU
+        // process). When nothing matched and the visible process is not a Core Audio tap target
+        // either, a direct start could only fail, so route through resolution instead (helper probe
+        // for browsers, "play audio first" for other apps). The lane is free here, so a resolution
+        // may start.
+        let target = expandedVisibleAppTarget(for: app)
+        if target.additionalProcessIdentifiers.isEmpty,
+           !processTapEligibility(app.processIdentifier).isEligible {
+            startResolvedExperimentalControl(for: app)
+            return
+        }
+
+        startExperimentalControl(
+            for: app,
+            target: target,
+            resolutionSource: target.additionalProcessIdentifiers.isEmpty ? nil : .matchedAudioProcesses
+        )
+    }
+
+    /// The direct target for `app`'s visible process, widened to every other Core Audio process
+    /// object the resolver matches to the app (synchronous, no probing; see
+    /// `AppAudioProcessMatcher`). Falls back to the plain visible-PID target when nothing matches.
+    private func expandedVisibleAppTarget(for app: MixerAppItem) -> ProcessTapTarget {
+        let request = audioTargetRequest(for: app)
+        let matchedProcessIdentifiers = appAudioTargetResolver.matchedAudioProcessIdentifiers(for: request)
+        return AppAudioProcessMatcher.target(
+            for: request,
+            matchedProcessIdentifiers: matchedProcessIdentifiers
+        ) ?? ProcessTapTarget(
             appID: app.id,
             appName: app.name,
             processIdentifier: app.processIdentifier
         )
-        startExperimentalControl(for: app, target: target)
+    }
+
+    /// `app`'s audio-target request carrying every other current app row (pid + bundle id), so the
+    /// resolver's process matcher never attributes another row's processes to `app` (e.g. a Safari
+    /// web app's WebKit processes to Safari, Chrome Canary's helpers to Chrome).
+    private func audioTargetRequest(for app: MixerAppItem) -> AppAudioTargetRequest {
+        app.audioTargetRequest(amongRunningApps: context?.apps ?? [])
+    }
+
+    /// Drops from `target` every process another app's Product Real session (optimistic or
+    /// confirmed) already taps, so no process is ever tapped twice — two `.mutedWhenTapped` taps over
+    /// one process would replay its audio twice. Keeps the primary process when it survives,
+    /// otherwise promotes the first surviving additional one. Returns nil when nothing survives.
+    /// Unchanged (same value) when nothing overlaps.
+    private func removingProcessesControlledByOtherSessions(
+        from target: ProcessTapTarget,
+        appID: MixerAppItem.ID
+    ) -> ProcessTapTarget? {
+        let controlledElsewhere = productRealControlState.processIdentifiersControlledByOtherSessions(than: appID)
+        let allProcessIdentifiers = target.allProcessIdentifiers
+        guard !controlledElsewhere.isEmpty,
+              allProcessIdentifiers.contains(where: { controlledElsewhere.contains($0) }) else {
+            return target
+        }
+
+        let remaining = allProcessIdentifiers.filter { !controlledElsewhere.contains($0) }
+        guard let firstRemaining = remaining.first else {
+            // Field diagnostics for "already under real control in another row": which of this
+            // app's pids are taken, and by which session (its app id carries the bundle id). The
+            // resolver's "Audio process objects matched" log lines give each pid's bundle id and
+            // resource coalition.
+            let requestedPIDs = ProductRealStartCoordinator.processIdentifierList(allProcessIdentifiers)
+            let conflicts = conflictingSessionsDescription(for: allProcessIdentifiers, appID: appID)
+            AppLogger.helperResolution.warning("Product Real start blocked: every process already controlled by another session appID=\(appID, privacy: .public) app=\(target.appName, privacy: .public) requestedPIDs=\(requestedPIDs, privacy: .public) conflicts=\(conflicts, privacy: .public)")
+            return nil
+        }
+
+        let primary: Int32
+        if let targetPrimary = target.processIdentifier, remaining.contains(targetPrimary) {
+            primary = targetPrimary
+        } else {
+            primary = firstRemaining
+        }
+
+        let conflicts = conflictingSessionsDescription(for: allProcessIdentifiers, appID: appID)
+        AppLogger.processTap.info("Product Real start skipped processes already controlled by another session app=\(target.appName, privacy: .public) skipped=\(allProcessIdentifiers.count - remaining.count, privacy: .public) conflicts=\(conflicts, privacy: .public)")
+        return ProcessTapTarget(
+            appID: target.appID,
+            appName: target.appName,
+            processIdentifier: primary,
+            additionalProcessIdentifiers: remaining.filter { $0 != primary }
+        )
+    }
+
+    /// Log-only: `<session app id> (<name>, starting|live)=<pids>` for every other app's session that
+    /// taps any of `processIdentifiers`, sorted; `none` when no session does.
+    private func conflictingSessionsDescription(
+        for processIdentifiers: [Int32],
+        appID: MixerAppItem.ID
+    ) -> String {
+        var conflicts: [String] = []
+        for (sessionAppID, session) in productRealControlState.activeSessionsByAppID where sessionAppID != appID {
+            let overlapping = session.controlledProcessIdentifiers.filter { processIdentifiers.contains($0) }
+            guard !overlapping.isEmpty else {
+                continue
+            }
+
+            let state = session.liveSessionID == nil ? "starting" : "live"
+            let overlappingPIDs = ProductRealStartCoordinator.processIdentifierList(overlapping)
+            conflicts.append("\(sessionAppID) (\(session.displayName), \(state))=\(overlappingPIDs)")
+        }
+
+        return conflicts.isEmpty ? "none" : conflicts.sorted().joined(separator: "; ")
+    }
+
+    private static func processIdentifierList(_ processIdentifiers: [Int32]) -> String {
+        processIdentifiers.map { String($0) }.joined(separator: ",")
     }
 
     func startExperimentalControl(
         for app: MixerAppItem,
-        target: ProcessTapTarget,
+        target requestedTarget: ProcessTapTarget,
         resolutionSource: ResolvedAppAudioTarget.Source? = nil
     ) {
-        guard target.processIdentifier.map({ $0 > 0 }) == true else {
+        guard requestedTarget.processIdentifier.map({ $0 > 0 }) == true else {
             sideEffects?.showProductRealStatus("This app is not available for live control", style: .warning, action: nil)
+            return
+        }
+
+        guard let target = removingProcessesControlledByOtherSessions(from: requestedTarget, appID: app.id) else {
+            sideEffects?.showProductRealStatus(
+                "This app's audio is already under real control in another row",
+                style: .warning,
+                action: nil
+            )
             return
         }
 
@@ -319,10 +591,13 @@ final class ProductRealStartCoordinator {
             visibleAppID: app.id,
             displayName: app.name,
             controlledProcessIdentifier: target.processIdentifier,
+            additionalControlledProcessIdentifiers: target.additionalProcessIdentifiers,
             source: ProductRealControlStartSource(resolutionSource: resolutionSource),
             startRequestID: startRequestID
         )
         sideEffects?.setActiveLiveControlAppName(app.name)
+        // The newest start owns the shared live-diagnostics surface, matching its "Starting…" line.
+        liveDiagnosticsFocusAppID = app.id
         sideEffects?.setLiveControlDiagnosticResult(
             ProcessTapTestResult(
                 outcome: .liveControlStarting,
@@ -346,6 +621,10 @@ final class ProductRealStartCoordinator {
         // start below resolves (cleared at the top of the post-await block, for every outcome).
         productRealControlState.beginOperation(for: app.id)
 
+        // This start now owns the queued start lane until its post-await block releases it
+        // (`finishInFlightStart`), whatever the outcome — even if a global reset cancels it meanwhile.
+        inFlightStartRequestIDs.insert(startRequestID)
+
         Task {
             // Teardown-settle gate: wait for any in-flight Product Real teardown to finish and for
             // coreaudiod to settle the shared output route before creating this session's Core
@@ -362,11 +641,17 @@ final class ProductRealStartCoordinator {
                     guard self.productRealControlState.shouldAcceptCallback(for: app.id, requestID: startRequestID) else {
                         return
                     }
-                    self.sideEffects?.setProcessTapLiveDiagnostics(diagnostics)
-                    self.sideEffects?.setLiveControlDiagnosticProgress(diagnostics.progress)
-                    // Diagnostics-only attribution: emitted *after* the accept guard and the unchanged
-                    // publish calls, so a stale/rejected callback returns above and never logs or moves
-                    // the per-session baseline, and what is published to the UI is exactly as before.
+                    // Only the focused session publishes to the shared Advanced surface, and only
+                    // while that surface is on screen. Checked after the accept guard, so a
+                    // stale/rejected callback can never take the focus.
+                    if self.shouldPublishLiveDiagnostics(for: app.id) {
+                        self.sideEffects?.setProcessTapLiveDiagnostics(diagnostics)
+                        self.sideEffects?.setLiveControlDiagnosticProgress(diagnostics.progress)
+                    }
+                    // Diagnostics-only attribution: emitted *after* the accept guard, so a
+                    // stale/rejected callback returns above and never logs or moves the per-session
+                    // baseline. It runs for every accepted callback, whether or not this session
+                    // published above (non-focused session, or the display is hidden).
                     self.logDiagnosticsAttributionIfEscalated(
                         sessionID: sessionID,
                         appID: app.id,
@@ -402,7 +687,7 @@ final class ProductRealStartCoordinator {
                         refreshActiveName()
                     }
                     // This start owned the "running" diagnostics flag (starts are serialised by
-                    // the isProcessTapTesting guard), so clear it now that it is rejected.
+                    // the queued start lane), so clear it now that it is rejected.
                     sideEffects?.setLiveControlDiagnosticRunning(false)
                     sideEffects?.setLiveControlDiagnosticProgress(nil)
                     return false
@@ -419,6 +704,7 @@ final class ProductRealStartCoordinator {
                         visibleAppID: app.id,
                         displayName: app.name,
                         controlledProcessIdentifier: target.processIdentifier,
+                        additionalControlledProcessIdentifiers: target.additionalProcessIdentifiers,
                         source: ProductRealControlStartSource(resolutionSource: resolutionSource),
                         liveSessionID: startResult.sessionID,
                         startRequestID: startRequestID
@@ -434,10 +720,12 @@ final class ProductRealStartCoordinator {
                     sideEffects?.setProcessTapLiveDiagnostics(nil)
                     sideEffects?.setLiveControlDiagnosticProgress(nil)
 
+                    // Only the mutually exclusive Advanced manual session suppresses this helper-probe
+                    // retry; other Product sessions run concurrently (a normal start resolves alongside them).
                     if resolutionSource == .cachedHelper,
                        context?.isExperimentalRealAppControlEnabled == true,
                        context?.isTwoAppReadinessRunning != true,
-                       context?.isProcessTapLiveControlActive != true,
+                       context?.advancedManualLiveControlActive != true,
                        context?.isAppAudioTargetResolving != true {
                         startResolvedExperimentalControl(for: app, allowsCachedLookup: false)
                     } else {
@@ -452,6 +740,9 @@ final class ProductRealStartCoordinator {
                     }
                 }
 
+                // Release the start lane and drain the queue. Done last, so a cached-helper retry
+                // above has already taken the lane (its resolution) and the queue keeps waiting.
+                finishInFlightStart(startRequestID)
                 return true
             }
 
@@ -462,6 +753,11 @@ final class ProductRealStartCoordinator {
                 // (and the settle window) before creating its own Core Audio objects.
                 let orphanCleanupTask = Task { await self.cleanupStaleProductLiveStart(startResult) }
                 self.startSettleGate.registerStop(orphanCleanupTask)
+                // Release the start lane only now that the orphan teardown is registered, so a queued
+                // start drained here sees it in `waitForReadyToStart` (settle after teardown).
+                await MainActor.run {
+                    self.finishInFlightStart(startRequestID)
+                }
                 await orphanCleanupTask.value
             }
         }
@@ -492,6 +788,30 @@ final class ProductRealStartCoordinator {
         }
 
         AppLogger.processTap.debug("Product Real diagnostics escalated reason=\(decision.reasonLabel, privacy: .public) sessionID=\(sessionID.rawValue.uuidString, privacy: .public) appID=\(appID, privacy: .public) app=\(appName, privacy: .public) starv=\(diagnostics.outputStarvationCount, privacy: .public) drops=\(diagnostics.droppedBufferCount, privacy: .public) fail=\(diagnostics.totalFailureCount, privacy: .public) enqueued=\(diagnostics.enqueuedBufferCount, privacy: .public) warmingUp=\(diagnostics.isWarmingUpOutput, privacy: .public)")
+    }
+
+    /// Whether an *accepted* live-diagnostics callback for `appID` should be published to the shared
+    /// Advanced surface. Updates the focus first: `appID` adopts it when no app holds it or the
+    /// focused app no longer has a session (stopped, failed, superseded) — so focus falls back to a
+    /// surviving session without stop-side bookkeeping. Then only the focused app publishes, and
+    /// only while the Advanced display is on screen (focus still moves while it is hidden).
+    private func shouldPublishLiveDiagnostics(for appID: MixerAppItem.ID) -> Bool {
+        if liveDiagnosticsFocusAppID != appID,
+           liveDiagnosticsFocusAppID.map({ productRealControlState.activeSessionsByAppID[$0] == nil }) ?? true {
+            liveDiagnosticsFocusAppID = appID
+        }
+
+        guard liveDiagnosticsFocusAppID == appID else {
+            return false
+        }
+
+        return context?.isLiveDiagnosticsDisplayVisible ?? true
+    }
+
+    /// Test-only: whether a live session currently has starvation-attribution state, i.e. at least
+    /// one of its diagnostics callbacks was accepted and reached the attribution logger.
+    func hasStarvationAttributionBaseline(for sessionID: ProcessTapLiveSessionID) -> Bool {
+        starvationAttribution.hasBaseline(for: sessionID)
     }
 }
 

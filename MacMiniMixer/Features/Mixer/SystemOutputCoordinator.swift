@@ -22,9 +22,16 @@ final class SystemOutputCoordinator {
     private(set) var outputDevices: [OutputDeviceItem]
     private(set) var selectedOutputDeviceID: OutputDeviceItem.ID
     private(set) var isSystemOutputMuted: Bool
-    /// Whether the currently selected output device accepted the most recent volume
-    /// write. Assumed writable until a write attempt is rejected, and reset to writable
-    /// whenever the selected device changes.
+    /// Whether the current output device is expected to accept volume writes.
+    ///
+    /// Proactively probed (read-only, via `SystemVolumeControlling.isCurrentOutputVolumeSettable()`)
+    /// whenever the output device is established: at init, when `refreshOutputDevices()`
+    /// detects an output-device change, and after a successful `selectOutputDevice(_:)`.
+    /// A probe that cannot tell (`nil`) assumes writable, so a false "Read-only" badge is
+    /// never shown. Volume write results still take precedence afterwards: a rejected write
+    /// marks the device non-writable and a successful write marks it writable. A failed
+    /// device selection restores the previous device's value. Refreshes that do not change
+    /// the output device do not re-probe, so evidence from a rejected write is kept.
     private(set) var isSystemOutputVolumeWritable = true
 
     private let audioController: AudioControlling
@@ -59,6 +66,8 @@ final class SystemOutputCoordinator {
         let listedOutputDevices = outputDeviceLister.listOutputDevices()
         self.outputDevices = listedOutputDevices
         self.selectedOutputDeviceID = Self.preferredOutputDeviceID(in: listedOutputDevices)
+
+        probeSystemOutputVolumeWritability()
     }
 
     var selectedOutputDeviceName: String {
@@ -111,13 +120,18 @@ final class SystemOutputCoordinator {
         }
 
         let previousDeviceID = selectedOutputDeviceID
+        let previousVolumeWritable = isSystemOutputVolumeWritable
         setSelectedOutputDeviceID(deviceID)
 
         guard outputDeviceController.setDefaultOutputDevice(device) else {
             setSelectedOutputDeviceID(previousDeviceID)
+            // The default device did not change, so the previous device's writability still applies.
+            setSystemOutputVolumeWritable(previousVolumeWritable)
             return .failed(message: "Could not switch output device")
         }
 
+        // Probe only after the switch: the volume controller targets the default device.
+        probeSystemOutputVolumeWritability()
         return .selected
     }
 
@@ -130,11 +144,19 @@ final class SystemOutputCoordinator {
         let didSelectionChange = syncSelectedOutputDeviceWithDefault(fallbackDeviceID: previousDeviceID)
         let refreshedDefaultDeviceID = refreshedDevices.first { $0.isSystemDefault }?.id
 
-        return SystemOutputRefreshResult(
+        let refreshResult = SystemOutputRefreshResult(
             previousDefaultDeviceID: previousDefaultDeviceID,
             currentDefaultDeviceID: refreshedDefaultDeviceID,
             didSelectionChange: didSelectionChange
         )
+
+        // Only re-probe on an actual output-device change, so periodic refreshes neither
+        // repeat the probe nor discard evidence from a rejected volume write.
+        if refreshResult.didOutputDeviceChange {
+            probeSystemOutputVolumeWritability()
+        }
+
+        return refreshResult
     }
 
     func refreshSystemOutputVolume() {
@@ -221,7 +243,8 @@ final class SystemOutputCoordinator {
         self.selectedOutputDeviceID = selectedOutputDeviceID
 
         if didChangeDevice {
-            // Writability is per-device; a new device is assumed writable until proven otherwise.
+            // Writability is per-device; a new device is assumed writable until a probe or a
+            // rejected write proves otherwise.
             setSystemOutputVolumeWritable(true)
         }
     }
@@ -233,6 +256,14 @@ final class SystemOutputCoordinator {
 
         notifyWillChange()
         isSystemOutputVolumeWritable = isWritable
+    }
+
+    /// Re-derives writability for a newly established output device with a cheap, read-only
+    /// probe. Evidence from the previous device no longer applies, so an unknown result
+    /// (`nil`) assumes writable; only a definite `false` marks the device read-only.
+    private func probeSystemOutputVolumeWritability() {
+        let isSettable = systemVolumeController.isCurrentOutputVolumeSettable()
+        setSystemOutputVolumeWritable(isSettable ?? true)
     }
 
     private func notifyWillChange() {

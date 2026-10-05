@@ -5,6 +5,17 @@ simultaneous, independent per-app volume control for every app in the audio list
 deliberately incremental and evidence-gated. The first concrete milestone is **sustained
 two-app live control**.
 
+> **Status (current):** Phases 0–5 are **done in code**. The product went from one session to two,
+> then three, and then — by **owner decision** (`08d49bc`) — to **no app-count limit**
+> (`maxConcurrentLiveSessions = nil`, manager `maxSessions: nil`). Gap B (resolution queue) is closed
+> by the queued start lane (`774268a`); the shared-diagnostics part of gap D is mitigated by
+> publishing only the focused session while Advanced is visible (`5a78656`); per-app exit and
+> cached-helper retry were fixed for many sessions (`da2b06e`, `c57bf37`). **What is left is
+> evidence and hardening, not code to lift a limit:** real-hardware characterization with more than
+> three sessions (none has been done), then the deferred many-session items listed under Phase 5.
+> The sections below are kept as the historical plan; where they say "maxSessions = 1", "cap 2", or
+> "N > 3 deferred", that describes the state at the time.
+
 ## Feasibility verdict
 
 **Feasible, and the right next step.** Half the infrastructure already exists. The work is
@@ -16,7 +27,8 @@ assumption to multi-session, and proving stability under sustained (not 10-secon
 - **Multi-session engine**: `ProcessTapLiveSessionManager` already supports N sessions via
   `init(maxSessions:controllerFactory:)`, with per-session diagnostics/stop callbacks,
   `activeSessions`, `stopAll`, and `updateGain(sessionID:)`. The product currently uses the
-  single-session compatibility shim `init(controller:)` (`maxSessions = 1`).
+  single-session compatibility shim `init(controller:)` (`maxSessions = 1`). *(At the time of
+  writing; the product now uses `init(maxSessions: nil, controllerFactory:)`.)*
 - **Two-session evidence**: Two-App Readiness
   (`CoreAudioProcessTapTwoAppReadinessTester`) already runs two simultaneous sessions for a
   10s diagnostic with per-session callbacks/peak/RMS/queued/drops, observed at 0 drops.
@@ -28,12 +40,12 @@ assumption to multi-session, and proving stability under sustained (not 10-secon
 | # | Gap | Required change | Risk |
 |---|-----|-----------------|------|
 | A | Product state is singular — `ProductRealControlState.activeSession`, `isProcessTapLiveControlActive: Bool`, `activeLiveControlAppName: String?` model exactly one session | Convert to a collection keyed by visible app id | **High** — touches the ~142-reference central arbiter in `MixerViewModel` |
-| B | Resolution is single-lane — `HelperAudioTargetResolver` rejects a second concurrent resolution (`beginResolution`), and probing uses one shared probe | Queue resolution requests; surface a per-row "queued" state | Medium |
+| B | Resolution is single-lane — `HelperAudioTargetResolver` rejects a second concurrent resolution (`beginResolution`), and probing uses one shared probe | Queue resolution requests; surface a per-row "queued" state | Medium — **done in code (`774268a`)**: a single start lane covers a resolution *or* a product start; further requests queue FIFO with the pending badge and re-preflight at drain |
 | C | Mutual-exclusion guards block a second product session ("Stop the active live control first") | Relax for live sessions while keeping resolution serialized | Medium |
-| D | Diagnostics-display coupling — product drives the single `advancedProcessTapDiagnostics` result/progress surface | Give product its own per-row state instead of the shared Advanced surface | Medium (the coupling flagged in the coordinator reassessment) |
+| D | Diagnostics-display coupling — product drives the single `advancedProcessTapDiagnostics` result/progress surface | Give product its own per-row state instead of the shared Advanced surface | Medium (the coupling flagged in the coordinator reassessment) — **mitigated (`5a78656`)**: only the focused session publishes, only while Advanced is visible; per-row state still not built |
 | E | Lifecycle is not per-session — output change / app exit / termination tear down *the* session | Map an exited app id to its session; selective stop (the manager has `stopAll`, needs selective product use) | Medium |
 | F | App wiring uses `init(controller:)` (maxSessions=1) | Switch to `init(maxSessions: 2, controllerFactory:)` | Low (one line, but triggers A–E) |
-| G | Resource reality — N× independent `AudioQueue` + aggregate device; **short-run** two- and three-session Release CPU is now measured (2 direct ~12–14%, 3-session ~19%; see Phase 5 note), but sustained (hours) and N>3 CPU/latency remain unmeasured | Characterization evidence | **Met for cap=3 (short-run); still gating for N>3** |
+| G | Resource reality — N× independent tap + private aggregate device + IOProc (the direct output engine; the AudioQueue path is now a legacy fallback); **short-run** two- and three-session Release CPU is now measured (2 direct ~12–14%, 3-session ~19%; see Phase 5 note), but sustained (hours) and N>3 CPU/latency remain unmeasured | Characterization evidence | **Met for three sessions (short-run + normal-use long-run); still open for more than three — now the main remaining gate since the cap is gone** |
 
 ## Phased plan (each phase gated by evidence)
 
@@ -50,7 +62,13 @@ characterization tests. This is exactly the work the coordinator reassessment sa
 (protected by the existing characterization tests).
 
 **Phase 2 — Serialize resolution.** Queue resolution so app B shows "queued" while app A
-resolves, instead of being rejected.
+resolves, instead of being rejected. *Status: done in code (`774268a`) as a single **start
+lane**: it turned out there were two single lanes (the resolver, and every product start holding
+the shared Advanced "running" flag), so the lane covers a resolution **or** a product start, and
+direct-PID starts queue too (the helper probe creates its own tap + aggregate outside the
+lifecycle/settle gates). Queued rows show the pending badge; entries re-run their full preflight
+at drain; per-app stop, Stop All, Real off, output change, sleep, termination, panel close, and app
+exit drop them. See `DECISIONS.md` "Why Product Real starts are queued behind a single start lane".*
 
 **Phase 3 — Flip to maxSessions = 2.** Wire `init(maxSessions: 2, controllerFactory:)`,
 relax the mutual-exclusion guard to allow a second product session, route per-app gain via
@@ -63,8 +81,36 @@ reason, wake is refresh-only (device/volume/app state) with no auto-restart (see
 `DECISIONS.md`). Auto-restart/recovery and longer-duration sleep/wake characterization remain
 open.*
 
-**Phase 5 — N apps.** Raise the cap as evidence allows, toward the full mixer. *Status: cap=3
-done. `maxConcurrentLiveSessions` was raised from 2 to 3 (Phase 5a/5b) and a three-session smoke
+**Phase 5 — N apps.** Raise the cap as evidence allows, toward the full mixer.
+
+*Status: **done in code — no app-count limit** (owner decision, `08d49bc`).*
+- `AppConstants.maxConcurrentLiveSessions: Int? = nil`; the product manager is
+  `ProcessTapLiveSessionManager(maxSessions: nil, controllerFactory:)`; the start coordinator /
+  facade keep an injectable `maxConcurrentSessions: Int?` so tests can still prove a configured cap.
+- Follow-ups for many sessions: per-app exit no longer stops every session when the
+  Advanced-selected app quits (`da2b06e`); the cached-helper retry runs alongside other sessions
+  (`c57bf37`); live diagnostics publish only for the focused session while Advanced is visible
+  (`5a78656`); the queued start lane (`774268a`, Phase 2 above). The banner already summarizes any N
+  ("first two +N more").
+- Fake-backed coverage: real manager + fake controllers end to end with 7 apps, facade with 6, an
+  unlimited manager with 8 sessions, a 7-app banner test.
+
+*Remaining gates (need real hardware; nothing above has been measured with more than three
+sessions):*
+1. **N-session characterization** — Release build, e.g. 5–8 Real apps: CPU, memory/threads,
+   Drops/Fail/Starv/Gap, audible glitches; per-app stop, Stop All, output-device change, quitting one
+   app, sleep/wake (`MANUAL_TEST_CHECKLIST.md` §19).
+2. **Engine self-stops bypass the gates** — stops a controller initiates itself (output change / app
+   exit seen by its diagnostics timer, timeout) go around the lifecycle (P181) and settle (P179)
+   gates, so many sessions can tear down concurrently.
+3. **Hard teardown blocks the main thread** at sleep/quit — estimated from the code path at roughly
+   0.4–3.4 s with many sessions (not measured).
+4. **Stop All is sequential** (N × fade + destroy).
+5. The menu bar label / scene still observes the whole view model.
+6. Still open from before: sustained (hours) long-run with many sessions, the real-hardware
+   orphan-tap repro, AudioQueue underrun/jitter at scale.
+
+*History (kept): cap=3 done. `maxConcurrentLiveSessions` was raised from 2 to 3 (Phase 5a/5b) and a three-session smoke
 passed on one real Mac (Release; two direct + one helper) — measured CPU ≈ 19% (within the
 ~17–25% PASS band), memory ≈ 59 MB, ~16 threads, thermal nominal; per-app stop, Stop All, output
 change, and repeated start/stop all clean, no drops/failures/cleanup warnings; CI green (see
@@ -73,13 +119,19 @@ single-lane resolver promoted to a real queue (multi-helper UX), N-session Core 
 resource-scale evidence, larger-N UI/banner behaviour, repeated-teardown safety at scale, the
 real-hardware orphan-tap repro, AudioQueue underrun/jitter measurement (drops==0 does not cover
 it), and sustained long-run characterization. Go/no-go for N > 3 is a separate decision; do not
-raise the cap past 3 before it.*
+raise the cap past 3 before it. — That go/no-go was taken by the owner (no limit); the
+resolver-queue, UI/banner, and per-app teardown items were done in code, and the evidence items
+moved to the remaining gates above.*
 
 ## Recommended order
 
-Start with **Phase 0** (sustained characterization): low risk, produces the gating evidence,
-unblocks the rest. In parallel, a read-only boundary plan for **Phase 1** can be drafted
+*Historical:* start with **Phase 0** (sustained characterization): low risk, produces the gating
+evidence, unblocks the rest. In parallel, a read-only boundary plan for **Phase 1** can be drafted
 since it is the highest-risk refactor.
+
+*Now:* the real-hardware N-session characterization (Phase 5 remaining gate 1) comes first; then
+the engine-self-stop gating (gate 2), then whatever the measurements show is most urgent among
+gates 3–5.
 
 ## Biggest risk
 

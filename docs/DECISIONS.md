@@ -54,6 +54,19 @@ session and is destroyed in `cleanup()`.
   macOS 14.2, is sufficient for all current use cases.
 - An open-source project built on private APIs would be fragile and harder to maintain.
 
+**Grey area (per-app process attribution, `6d1d265`)**: to tell Safari's processes from a Safari web
+app's (and Chrome's from Chrome PWAs'/Canary's), the app reads each process's resource coalition id
+with the public libproc function `proc_pidinfo` and the flavor `PROC_PIDCOALITIONINFO` (20). The
+function is public, but the flavor number and the `proc_pidcoalitioninfo` struct (and
+`COALITION_TYPE_RESOURCE`) are defined only in XNU's private headers
+(`bsd/sys/proc_info_private.h`, `osfmk/mach/coalition.h`), so the SDK does not expose them and the raw
+values are mirrored in `SystemProcessLister` (checked against the XNU sources, not against Apple
+documentation). It is accepted because it is read-only, needs no entitlement, and degrades safely: a
+failed or short read, or id 0, means "unknown", and `AppAudioProcessMatcher` then falls back to its
+bundle-id rules (less precise: they cannot separate sibling apps as reliably). If the flavor ever stops
+working, attribution gets worse; nothing breaks. **Would revisit if**: Apple documents a public way
+to ask which app a helper process belongs to, or the flavor changes.
+
 ---
 
 ## Why helper discovery is user-triggered
@@ -80,6 +93,9 @@ mappings only when needed.
 
 ## Why main product remains one active session
 
+> **Superseded:** Product Real now has no app-count limit — see "Why there is no Product Real
+> app-count limit (owner decision)" below.
+
 > **Update (Phase 3):** Superseded — the product cap was raised to two. After Phase 0
 > sustained characterization (two simultaneous sessions for 5 minutes at 0 drops, 0 failures,
 > stable CPU) and the incremental Phase 1–3 refactor, `maxConcurrentLiveSessions` is now 2 and
@@ -104,6 +120,10 @@ latency across a range of app combinations and macOS versions.
 ---
 
 ## Why the session cap is 3 (and N>3 is deferred)
+
+> **Superseded:** the cap was removed by owner decision (`maxConcurrentLiveSessions = nil`) — see
+> "Why there is no Product Real app-count limit (owner decision)" below. The measurements here are
+> still the only real-hardware multi-session evidence.
 
 > **Update (Phase 5a):** the cap was raised from 2 to 3 after a three-session real-hardware
 > smoke passed (see below). The original cap=2 reasoning and measurements are kept for history;
@@ -139,9 +159,11 @@ panel mostly closed):
 - The cap=3 *performance* gate is considered passed for the current scope, so the audio path
   does not need a large refactor (e.g. vDSP) right now.
 - If optimization is ever pursued, Release profiling points at reducing MainActor/SwiftUI
-  publication (e.g. throttling the 10 Hz diagnostics update, or gating publication while the
-  panel is closed) **before** any audio-buffer/vDSP work. This is the likely future direction,
-  not a current requirement.
+  publication **before** any audio-buffer/vDSP work. (Update: the "10 Hz" figure is stale. The
+  controller's diagnostics *timer* still ticks at 10 Hz, but since `e95bcd0` a per-session
+  `ProcessTapDiagnosticsPublishGate` limits each session's publishes to ~4 Hz, and since `5a78656`
+  only the focused session publishes, and only while the Advanced section is visible — see the
+  entry on live diagnostics below.)
 - N > 3 is **not** a configuration change: each extra session is another tap + private
   aggregate device + `AudioQueue`, and needs the still-single-lane resolver promoted to a real
   queue (multi-helper UX), N-session Core Audio resource-scale evidence, N-row UI/banner
@@ -185,9 +207,13 @@ product's steady state is **panel closed**, so the cap=3 performance gate is jud
 panel-closed number; the panel-open cost is a UI rendering cost, not an audio-path cost.
 
 **Why a UI publication throttle is future work, not a blocker**: the relative cost centre is
-Main Thread / SwiftUI / AppKit, so the right (future) optimization is throttling the 10 Hz
-diagnostics publication or gating it while the panel is closed — **before** any audio-buffer
-work. CPU is low enough at cap=3 that this is not required now.
+Main Thread / SwiftUI / AppKit, so the right optimization is reducing diagnostics publication —
+**before** any audio-buffer work. CPU was low enough at cap=3 that this was not required.
+(Update: the "10 Hz" wording is stale. The controller's diagnostics timer still ticks at 10 Hz,
+but since `e95bcd0` a per-session publish gate limits each session's publishes to ~4 Hz. With the
+cap removed, `5a78656` added the remaining gating: only the focused session publishes, and only
+while the Advanced section is visible. The panel-open CPU numbers above predate both changes and
+have not been re-measured.)
 
 **Would revisit if**: real-hardware runs show `Starv`/`Late` rising *together with* an audible
 glitch (then the counters have found a real defect and the audio path needs work), or if
@@ -210,7 +236,9 @@ the session cap at 3.
   persistent one surfaced as a fault — never swallowed as a clean stop.
 - **Dispose the output queue after IOProc stop/destroy (P178)**: disposing the queue while the
   IOProc can still enqueue produces self-inflicted Drops/Fail during teardown. Ordering the
-  dispose after the producer is gone removes that spike.
+  dispose after the producer is gone removes that spike. (This applies to the legacy `AudioQueue`
+  path; the default direct output path has no queue and instead waits, bounded, for the IOProc to
+  render its fade-out before stopping IO.)
 - **Serialize Product Real Core Audio lifecycle operations (P181)**: each session owns a private
   aggregate device wrapping a tap; creating/destroying one churns the shared coreaudiod route.
   Overlapping a teardown with another session's setup compounded the churn and starved a
@@ -244,7 +272,9 @@ toggle burst still queues route churn faster than coreaudiod settles. This is de
 scope for v0.14 because the intended flow is Real Control staying **enabled during use**, not rapid
 manual toggling. The fix, if it becomes necessary, is a **UI-level** guard (debounce the toggle /
 disable it while a Product Real lifecycle operation is in flight), tracked as a v0.15 candidate — it
-would not change cap=3, the audio callback, or these gates, and keeps N > 3 deferred.
+would not change cap=3, the audio callback, or these gates, and keeps N > 3 deferred. *(Update: that
+guard is implemented — see "Why rapid Product Real toggles are guarded at the UI / view-model
+level" below; the cap has since been removed by owner decision.)*
 
 **Would revisit if**: a real underrun is ever masked (an audible glitch with `Starv 0` after the
 warmup window — then the warmup threshold `processTapReplayStartupWarmupBufferCount` is too high),
@@ -381,6 +411,17 @@ structs with duplicated buffer pool + copy logic.
 testing across multiple macOS versions, and the behavioral delta between them is clearly
 understood and can be expressed as a clean configuration struct.
 
+> **Superseded in part (direct output engine, `377f1a8`).** The live `AudioQueue` is no longer the
+> default live output: Product Real and Advanced live control now render through one aggregate IOProc
+> (see "Why live output renders straight to the device through one aggregate IOProc"). So the
+> "`ProcessTapLiveOutputQueue` is the audio callback path, do not change it casually" guidance
+> (also in `docs/QUICK_START_FOR_AGENTS.md`) now applies to the **direct renderer and its IOProc**
+> (`ProcessTapDirectOutputRenderer`, `ProcessTapDirectOutputCopier`, `ProcessTapDirectOutputResampler`).
+> The live queue is a **legacy fallback** (moved to `ProcessTapLegacyAudioQueueOutput.swift`) and is
+> scheduled for removal rather than for unification with the Replay queue; the Replay Probe keeps its
+> own `AudioQueue`. Until the legacy path is removed, treat it as frozen: fix only what a regression
+> in the fallback needs.
+
 ---
 
 ## Why `MixerViewModel` is being split incrementally
@@ -405,7 +446,8 @@ self-contained subsystems are being extracted one coordinator at a time.
 
 **Would revisit**: Continue the split in small steps. Product Real App Control should only
 move after a read-only boundary plan and more characterization tests confirm the safest
-interface.
+interface. *(Update: that happened — see the next entry; Product Real now lives behind the
+`ProductRealControlCoordinator` facade.)*
 
 ---
 
@@ -607,8 +649,10 @@ ad hoc.
 **Stated product goal (from the maintainer)**: a true Windows-Volume-Mixer experience —
 *simultaneous, independent per-app volume control for every app shown in the audio list*,
 not just one or two at a time. This makes full multi-app Product Real Control the
-north-star goal, not a deferred curiosity. The current one-active-session limit remains the
-*incremental* path toward it (see "Why main product remains one active session").
+north-star goal, not a deferred curiosity. The one-active-session limit of the time was the
+*incremental* path toward it (see "Why main product remains one active session"); the product has
+since gone to two, three, and then no app-count limit (see "Why there is no Product Real
+app-count limit (owner decision)").
 
 **Decision**: **Retain all diagnostic tooling for now.** Nothing is removed or debug-gated,
 because every tool is on the critical path to the multi-app goal — either as evidence or as
@@ -637,3 +681,217 @@ be debug-gated while its *engine* stays (the product still needs it).
 
 **Would revisit if**: the multi-app goal is ever abandoned — in that case Two-App Readiness
 (~1670 LOC) becomes the single largest removal candidate.
+
+---
+
+## Why there is no Product Real app-count limit (owner decision)
+
+**Decision** (`08d49bc`): Product Real Control has **no app-count limit**.
+`AppConstants.maxConcurrentLiveSessions` is `Int? = nil`, the product `ProcessTapLiveSessionManager`
+is built with `maxSessions: nil`, and the start preflight never blocks on the session count. This
+supersedes "Why the session cap is 3 (and N>3 is deferred)" and "Why main product remains one
+active session".
+
+**Reasoning**:
+- It is the owner's product decision: like the Windows Volume Mixer, every app the user interacts
+  with (global "Real app control" ON) should be controllable at the same time. With a cap of 3, the
+  fourth app the user touched simply refused, which contradicts the north-star goal.
+- The engine already scaled per session: each session has its own controller, process tap, private
+  aggregate device, IOProc, and (at that time; today only on the legacy fallback path) `AudioQueue`,
+  and the manager and `ProductRealControlState` track sessions as collections. Nothing in the audio
+  path depends on a count.
+- Several of the "N > 3 needs…" items from the cap=3 entry were addressed in code around the
+  decision: the banner summarizes any N ("first two +N more", full list in the accessibility label),
+  quitting one app no longer stops other sessions (`da2b06e`), the cached-helper retry works next to
+  other sessions (`c57bf37`), the resolver lane became a real queue (`774268a`), and the shared
+  diagnostics surface no longer multiplies by N (`5a78656`).
+- A failure for an extra session (for example Core Audio refusing another tap/aggregate) surfaces
+  through the normal per-app start-failure path ("Could not start live control for this app"), not
+  through a preemptive limit.
+- The cap mechanism is kept and testable: `ProcessTapLiveSessionManager(maxSessions:)` still honours
+  a non-nil value (clamped to at least 1); the start coordinator and facade take an injectable
+  `maxConcurrentSessions: Int?`, and a configured cap still reports "Real app control supports N apps
+  at a time". Tests pin both the unlimited default (6–8 sessions) and a configured cap.
+
+**What it does not mean**:
+- It is **not** evidence that many sessions are stable. Real-hardware measurements exist only for up
+  to three sessions (one, two, and three sessions scaled roughly linearly in Release CPU: ~7%, ~12%,
+  ~19%). Every Real app adds its own Core Audio objects and CPU. The remaining gates are hardware
+  evidence — N-session characterization (e.g. 5–8 apps) — and the deferred many-session hardening:
+  engine self-stops that bypass the lifecycle/settle gates, the main-thread hard teardown at
+  sleep/quit, and the sequential Stop All.
+- Real control stays opt-in: the global toggle is OFF by default and sessions start only on user
+  interaction with a row.
+
+**Would revisit if**: real-hardware N-session runs show resource exhaustion, orphaned mutes, or
+audible degradation that cannot be fixed in the teardown/gating path. Then the **owner** decides
+whether to reintroduce a (configurable) cap; agents should not reintroduce one on their own.
+
+---
+
+## Why Product Real starts are queued behind a single start lane
+
+**Decision** (`774268a`): At most **one** Product Real helper resolution **or** product start is
+physically in flight. A start requested meanwhile (slider/mute auto-start or row toggle, direct-PID
+or helper row) is queued FIFO and drained when the lane frees, instead of being rejected.
+
+**Context — there were two single lanes, not one**:
+1. **The resolver lane.** Helper resolution handles one request at a time; a slider move on a second
+   row during a resolution was rejected with "Finish resolving app audio first".
+2. **The start lane.** Every product start set the shared Advanced "running" flag
+   (`setLiveControlDiagnosticRunning(true)`) until its post-await block. While it was set,
+   `isProcessTapTesting` was true, so `productSessionStartBlockReason` rejected every other product
+   start with "Stop active live control first" — even direct-PID ones — and toggles hit "Process Tap
+   is already busy".
+
+With the app-count limit gone, moving several sliders in a row became the normal way to hit both. A
+queue that only waited for `!isResolving` would immediately have hit the second rejection, so the
+lane covers "a resolution **or** a product start".
+
+**Why direct-PID starts queue too** (instead of running next to a resolution):
+- The helper probe (`CoreAudioProcessTapCandidateAudioProbe`) creates and destroys its own process
+  tap + private aggregate **outside** the Core Audio lifecycle gate (P181) and the stop→start settle
+  gate (P179). A direct-PID start building its own tap/aggregate at the same time would bring back
+  the overlapping route churn those gates exist to prevent.
+- The shared Advanced result/progress/"running" surface assumes one start at a time.
+- The cost is start latency for rows queued behind another start — most noticeable behind a helper
+  resolution, which probes candidates for ~1.25 s each. That is a one-time cost per app.
+
+**How it works**:
+- Order for a request: dedupe (already queued / resolving / pending / active → no-op) → hard blocks
+  reject immediately (Real off, Two-App Readiness running, ineligible app, helper probe busy) → lane
+  busy ⇒ enqueue → `productSessionStartBlockReason` is evaluated only when the lane is free.
+- Queued apps report `isOperationPending`, so the row shows the existing pending badge, repeated
+  attempts dedupe, and queued rows stay visible in the row filter.
+- The physical in-flight tracking (start request ids + resolution task count) is private to
+  `ProductRealStartCoordinator`, **not** in the shared state: global resets (Stop All, Real off,
+  sleep) clear the state, but must not "free" the lane while a cancelled start or probe is still
+  creating or destroying Core Audio objects.
+- **Drain points** are only where the lane physically frees: the end of a start's post-await block —
+  after a cached-helper retry has already taken the lane, and in the stale branch only after the
+  orphan teardown is registered with the settle gate, so the next start's `waitForReadyToStart` sees
+  it — and the end of a resolution task. Cancelling a resolution does **not** drain: the cancelled
+  probe keeps running briefly plus its cleanup, so draining immediately would start a resolution that
+  collides with it.
+- Each drained entry re-enters its original entry point and re-runs the full preflight against
+  current `context.apps`, so the gain is the slider value at drain time; a now-blocked entry shows its
+  message and is dropped; a vanished app is skipped.
+- Queued entries are dropped by per-app stop, Stop All, Real off, output-device change, sleep,
+  termination, app exit, and panel close (queued entries must not drain into background helper
+  probing after the panel closes). Stop All also cancels an in-flight helper resolution, whose late
+  result would otherwise start a session after the user stopped everything.
+
+**Would revisit if**: N-session measurements show that start latency with many rows is a real
+usability problem. Then consider letting direct-PID starts bypass the lane while no helper probe is
+running — but only after the probe itself is brought under the lifecycle/settle gates.
+
+---
+
+## Why live diagnostics publish only for the focused session and only while Advanced is visible
+
+**Decision** (`5a78656`): Per-callback Product Real live diagnostics are published to the shared
+Advanced surface (`processTapLiveDiagnostics` and the Advanced coordinator's progress) only by the
+**focused** session, and only while the Advanced section is **visible**.
+
+**Reasoning**:
+- The Advanced card is one shared surface. With N sessions, every session's ~4 Hz diagnostics
+  callback (already rate-limited by the per-session publish gate) overwrote the same two fields, so
+  the card showed interleaved values from different apps — misleading as a diagnostic.
+- Each publish fired `objectWillChange` twice on the single `MixerViewModel`, which the menu bar
+  scene label and the panel observe. The main thread therefore took ~4N callbacks/s × 2
+  notifications, each re-evaluating the scene and re-rendering the panel — even with the Advanced
+  section collapsed or the panel closed, when nothing reads those fields (`ProcessTapTestView` is the
+  only reader). Release profiling had already shown Main Thread / SwiftUI as the relative cost centre.
+- **Focus rule:** the newest start takes the focus, matching its "Starting…/started" result line. If
+  the focused app no longer has a session (stopped, failed, superseded), the next accepted callback
+  from a surviving session adopts the focus. This lazy adoption needs no stop-side bookkeeping. The
+  focus check runs after `shouldAcceptCallback`, so a stale callback can never take the focus.
+- **Visibility** is a plain stored property (`isLiveDiagnosticsDisplayVisible`, **not**
+  `@Published`): nothing renders from it, so changing it must not fire `objectWillChange` itself.
+  `MixerPanelView` sets it on appear, clears it on disappear, and sets it from the Advanced disclosure
+  action (no `onChange`, for macOS 13). The focus still moves while the display is hidden.
+- Deliberately **not** gated: the start's "Starting…" result / zero progress / cleared diagnostics /
+  running flag, the post-await result and failure clears, the stop display (final diagnostics + stop
+  result), the Advanced manual path, the manager's `recordDiagnostics`, the controller's publish gate,
+  and the per-session starvation attribution log — it still runs for every accepted callback, so a
+  spike on a non-focused session stays attributable in the log.
+
+**Would revisit if**: per-row live meters are added (each row then needs its own per-session
+diagnostics state instead of the single shared surface — gap D in `PLAN_MULTI_APP.md`), or users need
+to choose which session the Advanced card shows.
+
+---
+
+## Why live output renders straight to the device through one aggregate IOProc
+
+**Decision** (`377f1a8`, with in-engine sample-rate handling in `da6ed70`): The default live output
+path of Product Real and Advanced live control is the **direct aggregate output engine**: one private
+aggregate device whose main/clock sub-device is the default output device and which also contains the
+process tap (drift compensated), and **one IOProc** that reads the tap from `inInputData` and writes
+the faded/gained samples to `outOutputData`. There is no `AudioQueue` and no cross-thread buffer
+hand-off. The old tap-only aggregate + `AudioQueue` path stays as a **legacy fallback** (used when
+`MacMiniMixerLiveOutputMode=audioQueue` is set, when the output device has input streams, or when the
+direct setup fails) and is scheduled for removal.
+
+**Context — random crackle came from two clocks.** The previous live path ran a tap-only aggregate
+whose IOProc (tap clock) copied buffers across threads into a separate `AudioQueue` that runs on the
+output device's clock. Two free-running clocks joined by a hand-off will underrun sooner or later, so
+Product Real Control crackled at random, typically when a second session started. The earlier
+hardening (P177–P182, the toggle guard) addressed teardown/startup transients and made the symptoms
+measurable, but could not remove a drift between two clocks that is built into the structure.
+
+**Reasoning**:
+- It follows Apple's own structure for tap playback: aggregate = output device (main sub-device, so
+  it provides the clock) + tap with drift compensation. Input and output are then delivered in the
+  same callback on one clock, so there is no queue depth to tune and nothing to underrun between
+  threads.
+- Gain and fades stay what they were: the renderer reuses `ProcessTapLiveGainRamp` (fade-in on start,
+  fade-out before stop) and receives gain/fade requests through a try-lock only, so the audio thread
+  still never blocks, allocates or logs. The copy itself is a pure, real-time-safe function
+  (`ProcessTapDirectOutputCopier`) that handles interleaved/non-interleaved layouts, mono/stereo
+  mapping, extra channels (zeroed) and short/missing input (silence), and is unit-tested.
+- **Fallback instead of failure.** Anything the direct path cannot do safely falls back to the
+  legacy path (after tearing down every direct-path resource) rather than failing the start. The
+  important case is an output device that also has **input streams** (headsets, interfaces with a
+  microphone): the aggregate's input list then holds the device's microphone as well as the tap, the
+  order is not documented, and the wrong stream would play the microphone, so only output-only devices
+  use the direct path. Unsupported formats/rates and any aggregate/IOProc failure fall back the same
+  way, and the reason is logged.
+- **Never change the user's device sample rate** (owner decision). At the default 44.1 kHz on
+  built-in speakers the aggregate's tap stream *reports* 48 kHz. The first direct version rejected
+  that as a "sample rate mismatch" and fell back to the crackly path. The engine now accepts differing
+  rates (ratio within 1/8..8) and converts inside the IOProc with `ProcessTapDirectOutputResampler`
+  (preallocated FIFO + `AudioConverter`, created and warmed up off the audio thread; underruns render
+  silence and are counted). The real-hardware log then showed the HAL already delivers the tap at the
+  aggregate's rate — 512 tap frames per 512 output frames every cycle, `measuredRatio=1.00000` — so
+  the "mismatch" was a property of the reported format, not of the audio. The resampler therefore
+  **measures** the first cycles and passes frames straight through (`path=passthrough`) when it sees
+  one tap frame per output frame; it keeps the converter only as a safety net for a HAL that does
+  deliver a different rate (assuming the reported rate would otherwise play at the wrong speed).
+- **Safety valves without a rebuild:** `defaults write <bundle id> MacMiniMixerLiveOutputMode
+  audioQueue` (force the legacy path, for A/B listening) and `MacMiniMixerDirectResample off`
+  (restore "rate mismatch → fall back"). Both are read when a controller is created.
+- Teardown ordering is unchanged in spirit: the direct path fades out inside the IOProc and waits,
+  bounded, for the ramp to render before stopping IO, so the device never stops on a non-zero sample.
+
+**Evidence** (one MacBook Pro, owner's listening tests plus the unified log; **not** CPU or
+latency measurements): at 48 kHz, five concurrent sessions (two Safari web apps, Safari, Spotify,
+Music) over three rounds, every start `output=direct`, no fallbacks, no Core Audio errors, no crackle;
+at the default 44.1 kHz, up to six concurrent sessions with repeated stop/start rounds,
+`path=passthrough`, `underruns=0 overflows=0`, no crackle; and crackle-free on a second output device
+at 48 kHz with Firefox, Safari, Spotify, Music and YouTube (every start on that device logged `output=direct rate=48000 resample=false`).
+
+**What it does not mean**:
+- It is not verified on other Macs, output devices, sample rates or macOS versions, and says nothing
+  about CPU, memory, Stop All or sleep timing with more than three sessions — the many-session gates
+  in "Why there is no Product Real app-count limit" are unchanged.
+- Devices with input streams still use the legacy path, which can still crackle there.
+- The converting path (`path=converting`) has unit tests but has not been seen on real hardware,
+  because every tested device passed through.
+
+**Would revisit if**: a device or macOS version crackles on the direct path (compare with
+`MacMiniMixerLiveOutputMode=audioQueue`, and read the `output=` / `direct resample report` log
+lines), or a HAL starts delivering the tap at a different rate (`path=converting` with underruns).
+**Open question for the owner before the legacy path is removed:** what happens on devices with input
+streams — support them directly (that needs a reliable way to find the tap stream inside the
+aggregate's input list) or accept no live control there.

@@ -71,6 +71,8 @@ final class ProductRealStopCoordinator {
         reason: ProcessTapLiveStopReason = .userStopped
     ) {
         // Per-app stop invalidates only this app's pending start, leaving other apps untouched.
+        // `clearStartRequest` also drops this app's queued start (if it is still waiting for the
+        // start lane), so a queued row never starts after being stopped.
         productRealControlState.clearStartRequest(for: appID)
 
         guard let sessionID = productRealControlState.activeSessionsByAppID[appID]?.liveSessionID else {
@@ -185,8 +187,8 @@ final class ProductRealStopCoordinator {
     // wired to its resolution slice.
 
     /// After an app-list refresh, tears down Product Real Control work whose target app is
-    /// no longer running: a live-controlled app that exited stops its session, and a pending
-    /// helper resolution for a vanished app is cancelled.
+    /// no longer running: a live-controlled app that exited stops its session, a queued start for a
+    /// vanished app is dropped, and a pending helper resolution for a vanished app is cancelled.
     func stopRealControlForExitedTargetApps() {
         let runningApps = context?.apps ?? []
         let exitedActiveAppIDs = productRealControlState.activeVisibleAppIDs.filter { activeAppID in
@@ -195,6 +197,11 @@ final class ProductRealStopCoordinator {
         // Tear down only the exited apps' sessions/requests; surviving apps keep running.
         for exitedAppID in exitedActiveAppIDs {
             stopExperimentalControl(for: exitedAppID, reason: .targetAppExited)
+        }
+
+        // Drop queued (not yet started) starts whose app exited; surviving apps keep their place.
+        if !productRealControlState.queuedStarts.isEmpty {
+            productRealControlState.removeQueuedStarts(notIn: Set(runningApps.map(\.id)))
         }
 
         if let resolvingAppID = productRealControlState.resolvingAppIDs.first,
@@ -210,8 +217,9 @@ final class ProductRealStopCoordinator {
     // advanced-manual reset, and the resolution-task cancel all stay in the view model's teardown at
     // their existing positions. No engine `stopSession` is issued here.
 
-    /// Clears all Product Real session/request/resolution/operation state and resets the shared
-    /// active-name display, for the synchronous hard teardown (sleep / termination). Mutates state via
+    /// Clears all Product Real session/request/resolution/operation state (queued starts included, via
+    /// the start-request/operation clears) and resets the shared active-name display, for the
+    /// synchronous hard teardown (sleep / termination). Mutates state via
     /// the `productRealControlState` property so `onWillChange` still fires. The view model's
     /// `tearDownAllProcessTapWork` calls this (via the facade) in place of its previous inline resets.
     func tearDownProductStateForHardStop() {

@@ -306,6 +306,56 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .directVisibleApp), .directVisiblePID)
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .discoveredHelper), .discoveredHelper)
         XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .cachedHelper), .cachedHelper)
+        XCTAssertEqual(ProductRealControlStartSource(resolutionSource: .matchedAudioProcesses), .matchedAudioProcesses)
+    }
+
+    // MARK: - Multi-process sessions
+
+    func testSessionRecordsEveryControlledProcess() {
+        var state = ProductRealControlState()
+
+        state.beginSession(
+            visibleAppID: "chrome",
+            displayName: "Google Chrome",
+            controlledProcessIdentifier: 100,
+            additionalControlledProcessIdentifiers: [300, 301],
+            source: .matchedAudioProcesses
+        )
+
+        let session = state.activeSessionsByAppID["chrome"]
+        XCTAssertEqual(session?.controlledProcessIdentifier, 100)
+        XCTAssertEqual(session?.additionalControlledProcessIdentifiers, [300, 301])
+        XCTAssertEqual(session?.controlledProcessIdentifiers, [100, 300, 301])
+        XCTAssertEqual(session?.source, .matchedAudioProcesses)
+    }
+
+    func testSingleProcessSessionDefaultsToNoAdditionalProcesses() {
+        var state = ProductRealControlState()
+
+        state.beginSession(visibleAppID: "music", displayName: "Music", controlledProcessIdentifier: 102, source: .directVisiblePID)
+        state.beginSession(visibleAppID: "ghost", displayName: "Ghost", controlledProcessIdentifier: nil, source: .directVisiblePID)
+
+        XCTAssertEqual(state.activeSessionsByAppID["music"]?.additionalControlledProcessIdentifiers, [])
+        XCTAssertEqual(state.activeSessionsByAppID["music"]?.controlledProcessIdentifiers, [102])
+        // The `-1` "no process" placeholder is never reported as a controlled process.
+        XCTAssertEqual(state.activeSessionsByAppID["ghost"]?.controlledProcessIdentifiers, [])
+    }
+
+    func testProcessIdentifiersControlledByOtherSessionsExcludesTheAskingApp() {
+        var state = ProductRealControlState()
+        state.beginSession(
+            visibleAppID: "chrome",
+            displayName: "Google Chrome",
+            controlledProcessIdentifier: 100,
+            additionalControlledProcessIdentifiers: [300],
+            source: .matchedAudioProcesses
+        )
+        state.beginSession(visibleAppID: "music", displayName: "Music", controlledProcessIdentifier: 102, source: .directVisiblePID)
+
+        XCTAssertEqual(state.processIdentifiersControlledByOtherSessions(than: "chrome"), [102])
+        XCTAssertEqual(state.processIdentifiersControlledByOtherSessions(than: "music"), [100, 300])
+        XCTAssertEqual(state.processIdentifiersControlledByOtherSessions(than: "safari"), [100, 102, 300])
+        XCTAssertEqual(ProductRealControlState().processIdentifiersControlledByOtherSessions(than: "chrome"), [])
     }
 
     // MARK: - shouldAcceptCallback
@@ -436,6 +486,23 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "a", cap: 1))
     }
 
+    // A nil cap is the product default (no app-count limit): never blocks, however many apps run.
+    func testNilCapNeverBlocksNewOrExistingApp() {
+        var state = ProductRealControlState()
+        for appID in ["a", "b", "c", "d", "e", "f", "g"] {
+            state.beginSession(
+                visibleAppID: appID,
+                displayName: appID,
+                controlledProcessIdentifier: 100,
+                source: .directVisiblePID
+            )
+        }
+
+        XCTAssertEqual(state.activeSessions.count, 7)
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "h", cap: nil))
+        XCTAssertFalse(state.wouldExceedConcurrentSessionCap(for: "a", cap: nil))
+    }
+
     func testGainOptionUsesCurrentMuteAndVolumeMapping() {
         let audibleApp = MixerAppItem(
             id: "spotify",
@@ -458,5 +525,91 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertEqual(ProductRealControlState.gainOption(for: audibleApp).percentLabel, "42%")
         XCTAssertEqual(ProductRealControlState.gainOption(for: mutedApp).scalar, 0)
         XCTAssertEqual(ProductRealControlState.gainOption(for: mutedApp).percentLabel, "0%")
+    }
+
+    // MARK: - Queued start lane
+
+    func testEnqueueStartIsFIFOAndDedupesPerApp() {
+        var state = ProductRealControlState()
+
+        XCTAssertTrue(state.enqueueStart(for: "spotify", origin: .automatic))
+        XCTAssertTrue(state.enqueueStart(for: "music", origin: .toggle))
+        XCTAssertTrue(state.enqueueStart(for: "youtube", origin: .automatic))
+        // A second request for an already-queued app is a no-op: it keeps its place and origin.
+        XCTAssertFalse(state.enqueueStart(for: "spotify", origin: .toggle))
+
+        XCTAssertEqual(state.queuedStartAppIDs, ["spotify", "music", "youtube"])
+        XCTAssertEqual(state.dequeueNextStart(), ProductRealQueuedStart(appID: "spotify", origin: .automatic))
+        XCTAssertEqual(state.dequeueNextStart(), ProductRealQueuedStart(appID: "music", origin: .toggle))
+        XCTAssertEqual(state.dequeueNextStart(), ProductRealQueuedStart(appID: "youtube", origin: .automatic))
+        XCTAssertNil(state.dequeueNextStart())
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+    }
+
+    func testQueuedAppReportsOperationPendingUntilDequeued() {
+        var state = ProductRealControlState()
+        state.enqueueStart(for: "music", origin: .automatic)
+
+        XCTAssertTrue(state.isStartQueued(for: "music"))
+        XCTAssertTrue(state.isOperationPending(for: "music"))
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+
+        _ = state.dequeueNextStart()
+
+        XCTAssertFalse(state.isStartQueued(for: "music"))
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+    }
+
+    func testClearStartRequestRemovesOnlyThatAppsQueuedStart() {
+        var state = ProductRealControlState()
+        let spotifyRequest = state.beginStartRequest(for: "spotify")
+        state.enqueueStart(for: "music", origin: .automatic)
+        state.enqueueStart(for: "youtube", origin: .toggle)
+
+        state.clearStartRequest(for: "music")
+
+        XCTAssertEqual(state.queuedStartAppIDs, ["youtube"])
+        // Other apps' pending start requests are untouched.
+        XCTAssertTrue(state.isCurrentStartRequest(spotifyRequest, for: "spotify"))
+    }
+
+    func testClearAllStartRequestsEmptiesTheQueue() {
+        var state = ProductRealControlState()
+        state.enqueueStart(for: "music", origin: .automatic)
+        state.enqueueStart(for: "youtube", origin: .toggle)
+
+        state.clearAllStartRequests()
+
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+    }
+
+    func testClearAllOperationsEmptiesTheQueue() {
+        var state = ProductRealControlState()
+        state.beginOperation(for: "spotify")
+        state.enqueueStart(for: "music", origin: .automatic)
+
+        state.clearAllOperations()
+
+        XCTAssertTrue(state.queuedStarts.isEmpty)
+        XCTAssertFalse(state.isOperationPending(for: "spotify"))
+        XCTAssertFalse(state.isOperationPending(for: "music"))
+    }
+
+    func testRemoveQueuedStartsNotInDropsExitedAppsAndKeepsOrder() {
+        var state = ProductRealControlState()
+        state.enqueueStart(for: "spotify", origin: .automatic)
+        state.enqueueStart(for: "music", origin: .toggle)
+        state.enqueueStart(for: "youtube", origin: .automatic)
+
+        state.removeQueuedStarts(notIn: ["spotify", "youtube"])
+
+        XCTAssertEqual(state.queuedStartAppIDs, ["spotify", "youtube"])
+
+        state.removeQueuedStart(for: "spotify")
+        XCTAssertEqual(state.queuedStartAppIDs, ["youtube"])
+
+        state.clearAllQueuedStarts()
+        XCTAssertTrue(state.queuedStarts.isEmpty)
     }
 }

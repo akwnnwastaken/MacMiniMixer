@@ -51,7 +51,7 @@ struct OutputDeviceSelectorView: View {
                     .background(rowBackground(isSelected: device.id == selectedDeviceID))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(device.name))
+                .accessibilityLabel(Text(deviceSpokenLabel(device)))
                 .accessibilityHint(Text("Switch system output to this device"))
                 .accessibilityAddTraits(device.id == selectedDeviceID ? .isSelected : [])
             }
@@ -65,6 +65,8 @@ struct OutputDeviceSelectorView: View {
                         .stroke(.white.opacity(0.14), lineWidth: 1)
                 )
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Output devices"))
         .animation(.snappy(duration: 0.16), value: selectedDeviceID)
         .onAppear(perform: refreshDevices)
         .task {
@@ -86,6 +88,11 @@ struct OutputDeviceSelectorView: View {
                 refreshDevices()
             }
         }
+    }
+
+    /// The row's explicit label replaces its children, so the visible "Default" badge is folded in.
+    private func deviceSpokenLabel(_ device: OutputDeviceItem) -> String {
+        device.isSystemDefault ? "\(device.name), system default" : device.name
     }
 
     private func rowBackground(isSelected: Bool) -> some View {

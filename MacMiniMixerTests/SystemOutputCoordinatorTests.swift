@@ -257,6 +257,360 @@ final class SystemOutputCoordinatorTests: XCTestCase {
         )
     }
 
+    // MARK: - Proactive volume writability probe
+
+    func testInitialNotSettableProbeMarksOutputVolumeNonWritableWithoutWriting() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: false)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+        XCTAssertTrue(volumeController.requestedScalars.isEmpty)
+    }
+
+    func testInitialUnknownProbeAssumesOutputVolumeWritable() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: nil)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+    }
+
+    func testInitialSettableProbeKeepsOutputVolumeWritable() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: true)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+    }
+
+    func testRefreshDetectingOutputDeviceChangeReprobesWritability() {
+        let lister = FakeOutputDeviceLister(devices: [
+            makeSystemOutputDevice(id: "built-in", isDefault: true),
+            makeSystemOutputDevice(id: "hdmi")
+        ])
+        let volumeController = FakeSystemVolumeController(settableProbeResult: true)
+        let coordinator = makeCoordinator(
+            outputDeviceLister: lister,
+            systemVolumeController: volumeController
+        )
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+
+        lister.devices = [
+            makeSystemOutputDevice(id: "built-in"),
+            makeSystemOutputDevice(id: "hdmi", isDefault: true)
+        ]
+        volumeController.settableProbeResult = false
+
+        let result = coordinator.refreshOutputDevices()
+
+        XCTAssertTrue(result.didOutputDeviceChange)
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "hdmi")
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 2)
+        XCTAssertTrue(volumeController.requestedScalars.isEmpty)
+    }
+
+    func testRefreshDetectingOutputDeviceChangeWithUnknownProbeClearsReadOnly() {
+        let lister = FakeOutputDeviceLister(devices: [
+            makeSystemOutputDevice(id: "hdmi", isDefault: true),
+            makeSystemOutputDevice(id: "built-in")
+        ])
+        let volumeController = FakeSystemVolumeController(settableProbeResult: false)
+        let coordinator = makeCoordinator(
+            outputDeviceLister: lister,
+            systemVolumeController: volumeController
+        )
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+
+        lister.devices = [
+            makeSystemOutputDevice(id: "hdmi"),
+            makeSystemOutputDevice(id: "built-in", isDefault: true)
+        ]
+        volumeController.settableProbeResult = nil
+
+        let result = coordinator.refreshOutputDevices()
+
+        XCTAssertTrue(result.didOutputDeviceChange)
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "built-in")
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 2)
+    }
+
+    func testRefreshWithoutOutputDeviceChangeKeepsRejectedWriteWithoutReprobing() {
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false, settableProbeResult: true)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        coordinator.setSystemVolume(80)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+
+        let result = coordinator.refreshOutputDevices()
+
+        XCTAssertFalse(result.didOutputDeviceChange)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+    }
+
+    func testSuccessfulOutputDeviceSelectionReprobesWritability() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: true)
+        let coordinator = makeCoordinator(
+            outputDeviceLister: FakeOutputDeviceLister(devices: [
+                makeSystemOutputDevice(id: "built-in", isDefault: true),
+                makeSystemOutputDevice(id: "hdmi")
+            ]),
+            systemVolumeController: volumeController
+        )
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        volumeController.settableProbeResult = false
+
+        let result = coordinator.selectOutputDevice("hdmi")
+
+        XCTAssertEqual(result, SystemOutputDeviceSelectionResult.selected)
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "hdmi")
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 2)
+    }
+
+    func testSuccessfulOutputDeviceSelectionWithUnknownProbeAssumesWritable() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: false)
+        let coordinator = makeCoordinator(
+            outputDeviceLister: FakeOutputDeviceLister(devices: [
+                makeSystemOutputDevice(id: "hdmi", isDefault: true),
+                makeSystemOutputDevice(id: "airpods")
+            ]),
+            systemVolumeController: volumeController
+        )
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        volumeController.settableProbeResult = nil
+
+        let result = coordinator.selectOutputDevice("airpods")
+
+        XCTAssertEqual(result, SystemOutputDeviceSelectionResult.selected)
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+    }
+
+    func testRejectedWriteAfterSettableProbeMarksOutputVolumeNonWritable() {
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false, settableProbeResult: true)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+
+        coordinator.setSystemVolume(80)
+        let message = coordinator.finishSystemVolumeEditing()
+
+        XCTAssertEqual(message, "This device does not expose writable volume")
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+    }
+
+    func testSuccessfulWriteAfterNotSettableProbeMarksOutputVolumeWritable() {
+        let volumeController = FakeSystemVolumeController(shouldSucceed: true, settableProbeResult: false)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+
+        coordinator.setSystemVolume(60)
+
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.requestedScalars, [0.6])
+    }
+
+    func testProbeDrivenWritabilityChangeNotifiesBeforeApplying() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: true)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+        var writabilityObservedAtNotify: [Bool] = []
+        coordinator.setOnWillChange {
+            // willSet-style timing: a read here still observes the previous value.
+            writabilityObservedAtNotify.append(coordinator.isSystemOutputVolumeWritable)
+        }
+        volumeController.settableProbeResult = false
+
+        // Re-selecting the current device keeps the selection, so the probe is the only
+        // source of the writability change.
+        let result = coordinator.selectOutputDevice("built-in")
+
+        XCTAssertEqual(result, SystemOutputDeviceSelectionResult.selected)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(writabilityObservedAtNotify.last, true)
+    }
+
+    // MARK: - Failure paths
+
+    func testFailedOutputDeviceSelectionRestoresPreviousWritabilityWithoutReprobing() {
+        let volumeController = FakeSystemVolumeController(settableProbeResult: false)
+        let coordinator = makeCoordinator(
+            outputDeviceLister: FakeOutputDeviceLister(devices: [
+                makeSystemOutputDevice(id: "hdmi", isDefault: true),
+                makeSystemOutputDevice(id: "airpods")
+            ]),
+            outputDeviceController: FakeOutputDeviceController(shouldSucceed: false),
+            systemVolumeController: volumeController
+        )
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+
+        let result = coordinator.selectOutputDevice("airpods")
+
+        XCTAssertEqual(result, SystemOutputDeviceSelectionResult.failed(message: "Could not switch output device"))
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "hdmi")
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+    }
+
+    func testSelectingUnknownOutputDeviceReturnsNotFoundWithoutSideEffects() {
+        let controller = FakeOutputDeviceController()
+        let volumeController = FakeSystemVolumeController()
+        let coordinator = makeCoordinator(
+            outputDeviceController: controller,
+            systemVolumeController: volumeController
+        )
+        var willChangeCount = 0
+        coordinator.setOnWillChange { willChangeCount += 1 }
+
+        let result = coordinator.selectOutputDevice("missing")
+
+        XCTAssertEqual(result, SystemOutputDeviceSelectionResult.notFound)
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "built-in")
+        XCTAssertTrue(controller.requestedDeviceIDs.isEmpty)
+        XCTAssertEqual(willChangeCount, 0)
+        XCTAssertEqual(volumeController.settableProbeCount, 1)
+    }
+
+    func testMissingOutputDevicesFallBackToPlaceholderSelection() {
+        let controller = FakeOutputDeviceController()
+        let coordinator = makeCoordinator(
+            outputDeviceLister: FakeOutputDeviceLister(devices: []),
+            outputDeviceController: controller
+        )
+
+        let result = coordinator.selectOutputDevice("output:none")
+
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "output:none")
+        XCTAssertEqual(coordinator.selectedOutputDeviceName, "Output")
+        XCTAssertEqual(result, SystemOutputDeviceSelectionResult.notFound)
+        XCTAssertTrue(controller.requestedDeviceIDs.isEmpty)
+    }
+
+    func testRefreshWhenAllOutputDevicesDisappearFallsBackToPlaceholder() {
+        let lister = FakeOutputDeviceLister(devices: [
+            makeSystemOutputDevice(id: "built-in", isDefault: true)
+        ])
+        let coordinator = makeCoordinator(outputDeviceLister: lister)
+        lister.devices = []
+
+        let result = coordinator.refreshOutputDevices()
+
+        XCTAssertTrue(coordinator.outputDevices.isEmpty)
+        XCTAssertEqual(coordinator.selectedOutputDeviceID, "output:none")
+        XCTAssertEqual(coordinator.selectedOutputDeviceName, "Output")
+        XCTAssertEqual(result.previousDefaultDeviceID, "built-in")
+        XCTAssertNil(result.currentDefaultDeviceID)
+        XCTAssertTrue(result.didSelectionChange)
+        XCTAssertTrue(result.didOutputDeviceChange)
+    }
+
+    func testRefreshSystemOutputVolumeWithUnavailableReaderKeepsCurrentState() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 35)
+        let reader = FakeSystemVolumeReader(volumeScalar: nil)
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeReader: reader
+        )
+        var willChangeCount = 0
+        coordinator.setOnWillChange { willChangeCount += 1 }
+
+        coordinator.refreshSystemOutputVolume()
+
+        XCTAssertEqual(coordinator.systemVolume, 35)
+        XCTAssertFalse(coordinator.isSystemOutputMuted)
+        XCTAssertEqual(willChangeCount, 0)
+    }
+
+    func testFailedVolumeWriteWarningIsReportedOnceWhenReaderIsUnavailable() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 25)
+        let reader = FakeSystemVolumeReader(volumeScalar: nil)
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeReader: reader,
+            systemVolumeController: volumeController
+        )
+
+        coordinator.setSystemVolume(80)
+        let firstMessage = coordinator.finishSystemVolumeEditing()
+        let secondMessage = coordinator.finishSystemVolumeEditing()
+
+        XCTAssertEqual(firstMessage, "This device does not expose writable volume")
+        XCTAssertNil(secondMessage)
+        XCTAssertEqual(volumeController.requestedScalars, [0.8])
+        XCTAssertTrue(audioController.setSystemVolumeRequests.isEmpty)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+    }
+
+    func testFinishEditingReflectsOnlyTheMostRecentWriteOfADrag() {
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        coordinator.setSystemVolume(80)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+        volumeController.shouldSucceed = true
+        coordinator.setSystemVolume(60)
+        let message = coordinator.finishSystemVolumeEditing()
+
+        XCTAssertNil(message)
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.requestedScalars, [0.8, 0.6])
+    }
+
+    func testMuteFailureRefreshesVolumeFromReaderAndMarksNonWritable() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 70)
+        let reader = FakeSystemVolumeReader(volumeScalar: 0.7)
+        let volumeController = FakeSystemVolumeController(shouldSucceed: false)
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeReader: reader,
+            systemVolumeController: volumeController
+        )
+
+        let message = coordinator.toggleSystemOutputMuted()
+
+        XCTAssertEqual(message, "Could not mute system output")
+        XCTAssertEqual(volumeController.requestedScalars, [0])
+        XCTAssertEqual(coordinator.systemVolume, 70, accuracy: 0.0001)
+        XCTAssertFalse(coordinator.isSystemOutputMuted)
+        XCTAssertTrue(audioController.setSystemVolumeRequests.isEmpty)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+    }
+
+    func testRestoreFailureKeepsRememberedVolumeForNextRestore() {
+        let audioController = FakeSystemOutputAudioController(systemVolume: 70)
+        let reader = FakeSystemVolumeReader(volumeScalar: 0)
+        let volumeController = FakeSystemVolumeController()
+        let coordinator = makeCoordinator(
+            audioController: audioController,
+            systemVolumeReader: reader,
+            systemVolumeController: volumeController
+        )
+
+        let muteMessage = coordinator.toggleSystemOutputMuted()
+        XCTAssertNil(muteMessage)
+        volumeController.shouldSucceed = false
+
+        let failedRestoreMessage = coordinator.toggleSystemOutputMuted()
+
+        XCTAssertEqual(failedRestoreMessage, "Could not restore system output")
+        XCTAssertEqual(coordinator.systemVolume, 0)
+        XCTAssertTrue(coordinator.isSystemOutputMuted)
+        XCTAssertFalse(coordinator.isSystemOutputVolumeWritable)
+
+        volumeController.shouldSucceed = true
+        let restoreMessage = coordinator.toggleSystemOutputMuted()
+
+        XCTAssertNil(restoreMessage)
+        XCTAssertEqual(coordinator.systemVolume, 70)
+        XCTAssertFalse(coordinator.isSystemOutputMuted)
+        XCTAssertTrue(coordinator.isSystemOutputVolumeWritable)
+        XCTAssertEqual(volumeController.requestedScalars, [0, 0.7, 0.7])
+        XCTAssertEqual(audioController.setSystemVolumeRequests, [0, 70])
+    }
+
     private func makeCoordinator(
         audioController: FakeSystemOutputAudioController = FakeSystemOutputAudioController(systemVolume: 50),
         outputDeviceLister: FakeOutputDeviceLister = FakeOutputDeviceLister(devices: [
@@ -325,15 +679,24 @@ private final class FakeSystemVolumeReader: SystemVolumeReading {
 
 private final class FakeSystemVolumeController: SystemVolumeControlling {
     var shouldSucceed: Bool
+    /// Value returned by the read-only writability probe (`nil` = unknown).
+    var settableProbeResult: Bool?
     private(set) var requestedScalars: [Double] = []
+    private(set) var settableProbeCount = 0
 
-    init(shouldSucceed: Bool = true) {
+    init(shouldSucceed: Bool = true, settableProbeResult: Bool? = nil) {
         self.shouldSucceed = shouldSucceed
+        self.settableProbeResult = settableProbeResult
     }
 
     func setCurrentOutputVolumeScalar(_ volumeScalar: Double) -> Bool {
         requestedScalars.append(volumeScalar)
         return shouldSucceed
+    }
+
+    func isCurrentOutputVolumeSettable() -> Bool? {
+        settableProbeCount += 1
+        return settableProbeResult
     }
 }
 

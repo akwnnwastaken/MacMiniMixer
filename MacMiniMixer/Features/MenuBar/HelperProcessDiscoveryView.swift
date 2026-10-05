@@ -64,6 +64,8 @@ struct HelperProcessDiscoveryView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Helper Process Discovery"))
+            .accessibilityValue(Text(disclosureSpokenValue))
 
             if isExpanded {
                 content
@@ -98,6 +100,7 @@ struct HelperProcessDiscoveryView: View {
                 .buttonStyle(.plain)
                 .disabled(isBusy || selectedAppID == nil)
                 .opacity(isBusy || selectedAppID == nil ? 0.48 : 1)
+                .accessibilityHint(Text("Lists helper processes related to the selected app"))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
@@ -146,6 +149,7 @@ struct HelperProcessDiscoveryView: View {
             .buttonStyle(.plain)
             .disabled(isBusy)
             .opacity(isBusy ? 0.48 : 1)
+            .accessibilityHint(Text("Probes each eligible helper and selects the one producing audio as the Advanced target"))
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(
@@ -158,10 +162,12 @@ struct HelperProcessDiscoveryView: View {
             )
 
             if isAutoDetectRunning {
+                // Decorative spinner; the progress text next to it carries the state.
                 ProgressView()
                     .controlSize(.mini)
                     .scaleEffect(0.58)
                     .frame(width: 12, height: 12)
+                    .accessibilityHidden(true)
 
                 Text(autoDetectProgressText ?? "Testing")
                     .font(.caption2.monospacedDigit())
@@ -237,6 +243,8 @@ struct HelperProcessDiscoveryView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(isBusy || apps.isEmpty)
+        .accessibilityLabel(Text("Helper discovery app"))
+        .accessibilityValue(Text(selectedAppSpokenValue))
     }
 
     private func candidateRow(
@@ -246,15 +254,19 @@ struct HelperProcessDiscoveryView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                // Name, eligibility, and the PID line below are summarized in the row's
+                // accessibility label, so they are hidden individually to avoid repetition.
                 Text(candidate.process.name)
                     .font(.caption2.weight(.semibold))
                     .lineLimit(1)
+                    .accessibilityHidden(true)
 
                 Spacer(minLength: 0)
 
                 Text(candidate.eligibilityLabel)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(candidate.isTapEligible ? Color.green : Color.orange)
+                    .accessibilityHidden(true)
 
                 if candidate.isTapEligible {
                     Button {
@@ -273,6 +285,8 @@ struct HelperProcessDiscoveryView: View {
                     .disabled(isBusy)
                     .opacity(!isBusy ? 1 : 0.55)
                     .help("Listen briefly for audio callbacks from this helper process")
+                    .accessibilityLabel(Text(probeButtonSpokenLabel(candidate)))
+                    .accessibilityHint(Text("Listens briefly for audio callbacks from this helper process"))
 
                     Button {
                         useCandidateAsAdvancedTarget(candidate.id)
@@ -290,6 +304,7 @@ struct HelperProcessDiscoveryView: View {
                     .disabled(isBusy || isAdvancedTarget(candidate))
                     .opacity(!isBusy ? 1 : 0.55)
                     .help("Use this helper PID as the Advanced Process Tap Test target")
+                    .accessibilityLabel(Text(useButtonSpokenLabel(candidate)))
                 }
             }
 
@@ -308,6 +323,7 @@ struct HelperProcessDiscoveryView: View {
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
 
             if let reason = candidate.eligibility.reason, !reason.isEmpty {
                 Text(reason)
@@ -332,6 +348,10 @@ struct HelperProcessDiscoveryView: View {
                         .stroke(candidate.isTapEligible ? Color.green.opacity(0.12) : Color.white.opacity(0.06), lineWidth: 1)
                 )
         )
+        // One labelled group per candidate. `.contain` (not `.combine`) keeps the Probe/Use
+        // buttons individually actionable inside the group.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(candidateSpokenSummary(candidate)))
     }
 
     private func probeResultLine(
@@ -360,6 +380,8 @@ struct HelperProcessDiscoveryView: View {
                     .lineLimit(1)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(probeResultSpokenLabel(result, progress: progress)))
     }
 
     private func probeProgressLine(_ progress: ProcessTapDiagnosticProgress) -> some View {
@@ -377,6 +399,9 @@ struct HelperProcessDiscoveryView: View {
 
             compactMetrics(progress)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Listening: \(metricsSpokenText(progress))"))
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     private func compactMetrics(_ progress: ProcessTapDiagnosticProgress) -> some View {
@@ -394,6 +419,7 @@ struct HelperProcessDiscoveryView: View {
             Image(systemName: "scope")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.blue)
+                .accessibilityHidden(true)
 
             Text("Advanced target: \(target.displayName)")
                 .font(.caption2.weight(.medium))
@@ -412,6 +438,7 @@ struct HelperProcessDiscoveryView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.blue.opacity(0.06))
         )
+        .accessibilityElement(children: .combine)
     }
 
     private var selectedAppName: String {
@@ -446,6 +473,78 @@ struct HelperProcessDiscoveryView: View {
 
     private func isAdvancedTarget(_ candidate: HelperProcessCandidate) -> Bool {
         advancedTarget?.target.processIdentifier == candidate.process.processIdentifier
+    }
+
+    private var disclosureSpokenValue: String {
+        let state = isExpanded ? "Expanded" : "Collapsed"
+        return isScanning || isAutoDetectRunning ? "\(state), working" : state
+    }
+
+    private var selectedAppSpokenValue: String {
+        guard let selectedAppID,
+              let app = apps.first(where: { $0.id == selectedAppID }) else {
+            return "None selected"
+        }
+
+        return app.name
+    }
+
+    private func candidateSpokenSummary(_ candidate: HelperProcessCandidate) -> String {
+        let parentText: String = candidate.process.parentProcessIdentifier.map { "parent PID \($0)" } ?? "no parent PID"
+        var parts: [String] = [
+            candidate.process.name,
+            "PID \(candidate.process.processIdentifier)",
+            parentText,
+            "relation \(candidate.relation.label)",
+            candidate.eligibilityLabel
+        ]
+
+        if isAdvancedTarget(candidate) {
+            parts.append("current Advanced target")
+        }
+
+        return parts.joined(separator: ", ")
+    }
+
+    private func probeButtonSpokenLabel(_ candidate: HelperProcessCandidate) -> String {
+        let pid = candidate.process.processIdentifier
+        return runningProbePID == candidate.id ? "Probing helper PID \(pid)" : "Probe helper PID \(pid)"
+    }
+
+    private func useButtonSpokenLabel(_ candidate: HelperProcessCandidate) -> String {
+        let pid = candidate.process.processIdentifier
+        return isAdvancedTarget(candidate) ? "PID \(pid) is the Advanced target" : "Use PID \(pid) as Advanced target"
+    }
+
+    private func probeResultSpokenLabel(
+        _ result: ProcessTapTestResult,
+        progress: ProcessTapDiagnosticProgress?
+    ) -> String {
+        let prefix = result.severity == .warning ? "Probe warning" : "Probe result"
+        var text = "\(prefix): \(result.message)"
+
+        if let progress {
+            text += ", " + metricsSpokenText(progress)
+        } else if let detail = result.detail {
+            text += ", " + detail
+        }
+
+        return text
+    }
+
+    private func metricsSpokenText(_ progress: ProcessTapDiagnosticProgress) -> String {
+        "\(progress.callbackCount) callbacks, peak \(spokenPercent(progress.peakLevel)), RMS \(spokenPercent(progress.rmsLevel))"
+    }
+
+    /// Spoken form of a 0...1 linear level, e.g. "42 percent". Small non-zero levels read as
+    /// "less than 1 percent" instead of rounding down to zero.
+    private func spokenPercent(_ level: Double) -> String {
+        let percent = min(max(level, 0), 1) * 100
+        if percent > 0, percent < 1 {
+            return "less than 1 percent"
+        }
+
+        return "\(Int(percent.rounded())) percent"
     }
 }
 

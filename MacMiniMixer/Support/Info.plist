@@ -29,6 +29,6 @@
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>MacMiniMixer needs permission to test capturing audio from selected apps for future per-app volume control experiments.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string></string>
+	<string>Copyright © 2026 Ahmed Tuğra Kasem. MIT License.</string>
 </dict>
 </plist>

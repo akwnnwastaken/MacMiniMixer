@@ -2,6 +2,17 @@ import Foundation
 
 protocol ProcessListing: Sendable {
     func listProcesses() -> [SystemProcessInfo]
+
+    /// Enough processes to walk the parent chain of every pid in `processIdentifiers`: each of
+    /// those processes plus all of its ancestors (name/path may be left empty). Used for cheap
+    /// "is this pid a descendant of the app?" checks. The default lists every process.
+    func listProcessAncestry(of processIdentifiers: [Int32]) -> [SystemProcessInfo]
+}
+
+extension ProcessListing {
+    func listProcessAncestry(of processIdentifiers: [Int32]) -> [SystemProcessInfo] {
+        listProcesses()
+    }
 }
 
 struct SystemProcessInfo: Identifiable, Equatable, Sendable {
@@ -11,6 +22,12 @@ struct SystemProcessInfo: Identifiable, Equatable, Sendable {
     let parentProcessIdentifier: Int32?
     let name: String
     let executablePath: String?
+    /// The process's **resource coalition** id, or nil when unknown (not read, the read failed, or
+    /// the kernel reported 0). macOS puts an app and the XPC services / helpers launched on its behalf
+    /// (WebKit GPU / WebContent / Networking, Chromium and Electron helpers) into the app's resource
+    /// coalition — the grouping Activity Monitor's Energy tab shows — so equal ids mean "same app".
+    /// See `SystemProcessLister.resourceCoalitionID(for:)` and `AppAudioProcessMatcher`.
+    var resourceCoalitionID: UInt64? = nil
 }
 
 enum HelperProcessRelation: String, Equatable, Sendable {

@@ -26,6 +26,13 @@ final class MixerViewModel: ObservableObject {
     }
     @Published private(set) var showAllApps = false
     @Published private(set) var isExperimentalRealAppControlEnabled = false
+    /// Whether the Advanced section's live-diagnostics display is on screen (panel open with
+    /// Advanced expanded). Set by `MixerPanelView`; read by the Product Real start path through
+    /// `ProductRealControlContext` so per-callback product live diagnostics are not published (and
+    /// do not re-render the panel / menu bar scene) while nobody can see them. Deliberately a plain
+    /// stored property, NOT `@Published`: nothing renders from it, so changing it must not itself
+    /// fire `objectWillChange`. Hidden by default.
+    private(set) var isLiveDiagnosticsDisplayVisible = false
 
     private let applicationLister: ApplicationListing
     private let audioController: AudioControlling
@@ -378,7 +385,10 @@ final class MixerViewModel: ObservableObject {
             apps: apps,
             showAllApps: showAllApps,
             activeVisibleAppIDs: Set(productRealControlState.activeVisibleAppIDs),
-            resolvingAppIDs: Set(productRealControlState.resolvingAppIDs),
+            // A row whose Product start is queued behind the start lane stays visible like a
+            // resolving row, so its pending state cannot be filtered out.
+            resolvingAppIDs: Set(productRealControlState.resolvingAppIDs)
+                .union(productRealControlState.queuedStartAppIDs),
             selectedProcessTapAppID: selectedProcessTapAppID,
             isLiveControlActive: isProcessTapLiveControlActive
         )
@@ -393,6 +403,13 @@ final class MixerViewModel: ObservableObject {
 
     func setShowAllApps(_ showAllApps: Bool) {
         self.showAllApps = showAllApps
+    }
+
+    /// Records whether the Advanced live-diagnostics display is on screen (see
+    /// `isLiveDiagnosticsDisplayVisible`). Called by the panel on appear/disappear and when the
+    /// Advanced section is expanded or collapsed. Never publishes a change itself.
+    func setLiveDiagnosticsDisplayVisible(_ isVisible: Bool) {
+        isLiveDiagnosticsDisplayVisible = isVisible
     }
 
     func setExperimentalRealAppControlEnabled(_ isEnabled: Bool) {
@@ -640,6 +657,9 @@ final class MixerViewModel: ObservableObject {
 
     func stopProcessTapLiveControl() {
         stopProcessTapLiveControl(reason: .userStopped)
+        // Stop All also cancels an in-flight helper resolution, so its late result cannot start a
+        // session after the user stopped everything (no-op when nothing is resolving).
+        productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
     }
 
     private func stopProcessTapLiveControl(reason: ProcessTapLiveStopReason) {
@@ -730,6 +750,10 @@ final class MixerViewModel: ObservableObject {
     }
 
     func stopTwoAppReadinessForPanelClose() {
+        // Queued Product starts must not drain into background helper probing once the panel is
+        // closed: drop them before cancelling the in-flight resolution below.
+        productRealControlCoordinator.clearQueuedStarts()
+
         guard isTwoAppReadinessRunning else {
             stopHelperProcessAutoDetect(reason: .userStopped)
             productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
@@ -799,8 +823,11 @@ final class MixerViewModel: ObservableObject {
     }
 
     /// Preserves the Advanced diagnostic selection when the previously selected app survived
-    /// the refresh; otherwise stops any active live control for the vanished app and falls
-    /// back to a preferred selection.
+    /// the refresh; otherwise stops the Advanced manual live session (which always targets the
+    /// selected app) and falls back to a preferred selection. Product Real sessions are not
+    /// stopped here: the Advanced picker's selection is unrelated to which apps Product Real
+    /// controls, an exited app's own product session is already torn down per app by
+    /// `stopRealControlForExitedTargetApps`, and every other app's session keeps running.
     private func refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: MixerAppItem.ID?) {
         if let previousProcessTapAppID,
            apps.contains(where: { $0.id == previousProcessTapAppID }) {
@@ -808,7 +835,12 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        if isProcessTapLiveControlActive {
+        // Only the Advanced manual session is tied to the vanished selection. Guarding on the
+        // derived `isProcessTapLiveControlActive` here would route through the global stop and
+        // tear down every product session whenever the selected app (by default the first
+        // eligible one) quits. Advanced manual and product control are mutually exclusive, so the
+        // router below takes its Advanced manual branch.
+        if advancedManualLiveControlActive {
             stopProcessTapLiveControl(reason: .targetAppExited)
         }
 
@@ -833,7 +865,7 @@ final class MixerViewModel: ObservableObject {
         apps[index].volume = clampedVolume
         audioController.setVolume(clampedVolume, for: appID)
 
-        startAutomaticRealControlIfNeeded(for: apps[index])
+        productRealControlCoordinator.requestAutomaticStart(for: appID)
         updateExperimentalGainIfActive(for: apps[index])
     }
 
@@ -844,57 +876,9 @@ final class MixerViewModel: ObservableObject {
 
         apps[index].isMuted = isMuted
         audioController.setMuted(isMuted, for: appID)
-        startAutomaticRealControlIfNeeded(for: apps[index])
+        productRealControlCoordinator.requestAutomaticStart(for: appID)
         updateExperimentalGainIfActive(for: apps[index])
     }
-
-    private func startAutomaticRealControlIfNeeded(for app: MixerAppItem) {
-        guard productRealContext.isExperimentalRealAppControlEnabled else {
-            return
-        }
-
-        guard !productRealContext.isTwoAppReadinessRunning else {
-            productRealSideEffects.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
-            return
-        }
-
-        guard app.isEligibleForExperimentalLiveControl else {
-            productRealSideEffects.showProductRealStatus("This app is not available for real app control", style: .warning, action: nil)
-            return
-        }
-
-        if isResolvingExperimentalControl(for: app.id) {
-            return
-        }
-
-        // Rapid-toggle guard also covers the slider-driven auto-start path: do not kick off a new
-        // start while a start/stop for this row is already in flight.
-        if productRealControlState.isOperationPending(for: app.id) {
-            return
-        }
-
-        if productRealContext.isAppAudioTargetResolving {
-            productRealSideEffects.showProductRealStatus("Finish resolving app audio first", style: .warning, action: nil)
-            return
-        }
-
-        if productRealContext.isHelperBusy {
-            productRealSideEffects.showProductRealStatus("Stop helper probe first", style: .warning, action: nil)
-            return
-        }
-
-        if isExperimentalControlActive(for: app.id) {
-            return
-        }
-
-        if let blockReason = productRealControlCoordinator.productSessionStartBlockReason(for: app.id) {
-            productRealSideEffects.showProductRealStatus(blockReason, style: .warning, action: nil)
-            return
-        }
-
-        productRealControlCoordinator.startResolvedExperimentalControl(for: app)
-    }
-
 
     // Witnesses `ProductRealControlSideEffects.applyLiveControlStoppedDisplay`, letting the coordinator
     // (which now owns `handleProductLiveControlStopped`) run the shared stop/display cleanup that stays
@@ -1023,13 +1007,6 @@ final class MixerViewModel: ObservableObject {
         )
     }
 
-    /// The Product Real write/read seam, typed as the narrow protocols (see
-    /// `ProductRealControlSideEffects`). Product Real code goes through these so a future
-    /// `ProductRealControlCoordinator` can receive them as injected collaborators instead of the
-    /// whole view model. Both are `self` today; no behavior change.
-    private var productRealSideEffects: ProductRealControlSideEffects { self }
-    private var productRealContext: ProductRealControlContext { self }
-
 }
 
 extension MixerViewModel: ProductRealControlSideEffects {
@@ -1078,5 +1055,21 @@ extension MixerAppItem {
             appName: name,
             processIdentifier: processIdentifier
         )
+    }
+
+    /// `appAudioTargetRequest` carrying every *other* app in `runningApps` (its pid and bundle id),
+    /// so the per-app audio process matcher never hands this row a process that plainly belongs to
+    /// another row. Used by the Product Real start path, which has the current app list.
+    func audioTargetRequest(amongRunningApps runningApps: [MixerAppItem]) -> AppAudioTargetRequest {
+        var request = appAudioTargetRequest
+        request.otherRunningApps = runningApps
+            .filter { $0.id != id }
+            .map { otherApp in
+                AppAudioTargetRequest.OtherRunningApp(
+                    processIdentifier: otherApp.processIdentifier,
+                    bundleIdentifier: AppAudioProcessMatcher.bundleIdentifier(forAppID: otherApp.id)
+                )
+            }
+        return request
     }
 }

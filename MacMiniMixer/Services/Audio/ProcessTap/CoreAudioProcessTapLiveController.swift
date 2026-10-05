@@ -6,6 +6,21 @@ import Foundation
 final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unchecked Sendable {
     private let sessionLock = NSLock()
     private var activeSession: ProcessTapLiveSession?
+    private let outputMode: ProcessTapLiveOutputMode
+    private let directResampleMode: ProcessTapDirectResampleMode
+
+    /// Delay before the one-off "direct resample report" log of a converting direct session.
+    private static let directResampleReportDelay: TimeInterval = 2
+
+    /// `outputMode` / `directResampleMode` default to the configured modes (`UserDefaults`
+    /// overrides, else `AppConstants` defaults), read once here when the controller is made.
+    init(
+        outputMode: ProcessTapLiveOutputMode = ProcessTapLiveOutputMode.configured(),
+        directResampleMode: ProcessTapDirectResampleMode = ProcessTapDirectResampleMode.configured()
+    ) {
+        self.outputMode = outputMode
+        self.directResampleMode = directResampleMode
+    }
 
     func startLiveControl(
         for target: ProcessTapTarget,
@@ -125,53 +140,322 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) -> ProcessTapTestResult {
+        if outputMode == .directAggregateOutput {
+            let directAttempt = attemptDirectOutputStart(
+                target: target,
+                gain: gain,
+                timeoutPolicy: timeoutPolicy,
+                processIdentifier: processIdentifier,
+                onDiagnostics: onDiagnostics,
+                onStopped: onStopped
+            )
+
+            switch directAttempt {
+            case .finished(let result):
+                return result
+            case .fallBackToAudioQueue(let reason):
+                // Every direct-path resource is already torn down (its defer ran). The AudioQueue
+                // path is the long-standing one, so a device it cannot handle directly still plays.
+                AppLogger.processTap.warning("Live control direct output unavailable, falling back to AudioQueue app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) reason=\(reason, privacy: .public)")
+            }
+        }
+
+        return attemptAudioQueueStart(
+            target: target,
+            gain: gain,
+            timeoutPolicy: timeoutPolicy,
+            processIdentifier: processIdentifier,
+            onDiagnostics: onDiagnostics,
+            onStopped: onStopped
+        )
+    }
+
+    /// Direct aggregate output (`ProcessTapLiveOutputMode.directAggregateOutput`): one private
+    /// aggregate = default output device (main/clock sub-device) + the tap, and one IOProc that
+    /// reads the tap from `inInputData` and writes the faded/gained samples to `outOutputData` in
+    /// the same callback. Input and output share the device clock and there is no buffer hand-off
+    /// to a second thread, which removes the random underruns of the tap→AudioQueue path.
+    /// Returns `.fallBackToAudioQueue` (after tearing everything down) when this device/format
+    /// cannot be rendered directly; tap-level failures (permission, process) finish here.
+    @available(macOS 14.2, *)
+    private func attemptDirectOutputStart(
+        target: ProcessTapTarget,
+        gain: ProcessTapReplayGainOption,
+        timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+        processIdentifier: Int32,
+        onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
+        onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
+    ) -> ProcessTapDirectOutputStartAttempt {
         let pid = pid_t(processIdentifier)
-        AppLogger.processTap.info("Live control start requested app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) gain=\(gain.percentLabel, privacy: .public)")
+        AppLogger.processTap.info("Live control start requested app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) gain=\(gain.percentLabel, privacy: .public) output=direct")
         let resources = ProcessTapResourceContext()
         var didActivateSession = false
-        let outputQueue = ProcessTapLiveOutputQueue()
         let gainState = ProcessTapLiveGainState(gain: gain)
-
-        func cleanupInactiveResources() {
-            _ = resources.cleanup(
-                afterDestroyingIOProc: outputQueue.stop,
-                statusFormatter: { "\($0)" }
-            )
-        }
 
         defer {
             if !didActivateSession {
-                cleanupInactiveResources()
+                _ = resources.cleanup(statusFormatter: { "\($0)" })
             }
         }
 
         guard let startDefaultOutputDeviceID = ProcessTapCoreAudio.defaultOutputDeviceID() else {
             AppLogger.processTap.error("Live control setup failed: missing default output device app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
+            return .finished(ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not read default output device",
                 severity: .warning
+            ))
+        }
+
+        guard let outputDeviceUID = ProcessTapCoreAudio.stringProperty(
+            kAudioDevicePropertyDeviceUID,
+            for: startDefaultOutputDeviceID
+        ) else {
+            return .fallBackToAudioQueue(reason: "output device UID unavailable")
+        }
+
+        // The aggregate's input list holds the output device's own input streams (a headset or
+        // interface microphone) as well as the tap stream, and their order is not documented.
+        // Rendering the wrong one would play the microphone, so only output-only devices (built-in
+        // speakers, HDMI/DisplayPort, USB DACs) use the direct path; the input list is then the tap.
+        let outputDeviceInputStreamCount = ProcessTapCoreAudio.streamCount(
+            for: startDefaultOutputDeviceID,
+            scope: kAudioObjectPropertyScopeInput
+        )
+        guard outputDeviceInputStreamCount == 0 else {
+            return .fallBackToAudioQueue(
+                reason: "output device has input streams (\(outputDeviceInputStreamCount.map { String($0) } ?? "unknown"))"
             )
         }
 
-        guard let processObjectID = ProcessTapCoreAudio.processObjectID(for: pid) else {
-            AppLogger.processTap.warning("Live control setup failed: Core Audio process not found app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
+        let tapUID: String
+        switch createLiveTap(target: target, processIdentifier: processIdentifier, resources: resources) {
+        case .created(let createdTapUID):
+            tapUID = createdTapUID
+        case .failed(let result):
+            return .finished(result)
+        }
+
+        let createAggregateStatus = resources.createPrivateOutputAggregateDevice(
+            name: "MacMiniMixer Process Tap Live Output",
+            uidPrefix: "com.macminimixer.process-tap-live-output",
+            tapUID: tapUID,
+            outputDeviceUID: outputDeviceUID
+        )
+        guard createAggregateStatus == noErr, resources.aggregateDeviceID != kAudioObjectUnknown else {
+            return .fallBackToAudioQueue(
+                reason: "create aggregate status=\(ProcessTapCoreAudio.formatOSStatus(createAggregateStatus))"
+            )
+        }
+
+        let aggregateDeviceID = resources.aggregateDeviceID
+        guard (ProcessTapCoreAudio.streamCount(for: aggregateDeviceID, scope: kAudioObjectPropertyScopeInput) ?? 0) > 0,
+              (ProcessTapCoreAudio.streamCount(for: aggregateDeviceID, scope: kAudioObjectPropertyScopeOutput) ?? 0) > 0 else {
+            return .fallBackToAudioQueue(reason: "aggregate is missing its tap input or device output streams")
+        }
+
+        guard let inputFormat = ProcessTapCoreAudio.streamDescription(
+                for: aggregateDeviceID,
+                scope: kAudioObjectPropertyScopeInput
+              ),
+              let outputFormat = ProcessTapCoreAudio.streamDescription(
+                for: aggregateDeviceID,
+                scope: kAudioObjectPropertyScopeOutput
+              ) else {
+            return .fallBackToAudioQueue(reason: "could not read aggregate stream formats")
+        }
+
+        if let incompatibility = ProcessTapDirectOutputCopier.formatIncompatibility(
+            input: inputFormat,
+            output: outputFormat,
+            allowsSampleRateConversion: directResampleMode == .on
+        ) {
+            return .fallBackToAudioQueue(reason: incompatibility)
+        }
+
+        // Equal rates keep the frame-for-frame copy (no resampler). Differing rates (e.g. tap
+        // 48 kHz, built-in speakers at 44.1 kHz) convert inside the IOProc; everything the
+        // converter needs is created here, off the audio thread.
+        let resampler: ProcessTapDirectOutputResampler?
+        if ProcessTapDirectOutputCopier.requiresSampleRateConversion(input: inputFormat, output: outputFormat) {
+            let bufferFrameSize = Int(ProcessTapCoreAudio.bufferFrameSize(for: aggregateDeviceID) ?? 0)
+            guard let createdResampler = ProcessTapDirectOutputResampler(
+                inputSampleRate: inputFormat.mSampleRate,
+                outputSampleRate: outputFormat.mSampleRate,
+                channelCount: Int(inputFormat.mChannelsPerFrame),
+                maxOutputFramesPerCycle: max(
+                    ProcessTapDirectOutputResampler.minimumOutputFrameCapacity,
+                    bufferFrameSize * 2
+                )
+            ) else {
+                return .fallBackToAudioQueue(
+                    reason: "could not create sample rate converter (tap \(inputFormat.mSampleRate) Hz, output \(outputFormat.mSampleRate) Hz)"
+                )
+            }
+            resampler = createdResampler
+        } else {
+            resampler = nil
+        }
+
+        let renderer = ProcessTapDirectOutputRenderer(
+            sampleRate: outputFormat.mSampleRate,
+            channelCount: Int(outputFormat.mChannelsPerFrame),
+            gain: gain.scalar,
+            resampler: resampler
+        )
+        let accumulator = ProcessTapDiagnosticsAccumulator()
+        let timingAccumulator = ProcessTapCallbackTimingAccumulator()
+        let callbackQueue = DispatchQueue(label: "com.macminimixer.process-tap-live-output.callback")
+        let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, outputData, _ in
+            timingAccumulator.record(hostTime: inputTime.pointee.mHostTime)
+            accumulator.observe(inputData)
+            renderer.render(inputData, into: outputData)
+        }
+
+        let createIOProcStatus = resources.createIOProc(
+            queue: callbackQueue,
+            block: ioBlock
+        )
+        guard createIOProcStatus == noErr, resources.ioProcID != nil else {
+            return .fallBackToAudioQueue(
+                reason: "create IOProc status=\(ProcessTapCoreAudio.formatOSStatus(createIOProcStatus))"
+            )
+        }
+
+        let startStatus = resources.startIO()
+        guard startStatus == noErr else {
+            return .fallBackToAudioQueue(
+                reason: "start IO status=\(ProcessTapCoreAudio.formatOSStatus(startStatus))"
+            )
+        }
+
+        let session = ProcessTapLiveSession(
+            pid: pid,
+            targetName: target.appName,
+            gainState: gainState,
+            startDefaultOutputDeviceID: startDefaultOutputDeviceID,
+            resources: resources,
+            output: .directAggregate(renderer),
+            accumulator: accumulator,
+            timingAccumulator: timingAccumulator,
+            publishGate: ProcessTapDiagnosticsPublishGate(),
+            onDiagnostics: onDiagnostics,
+            onStopped: onStopped
+        )
+
+        guard activate(session, timeoutPolicy: timeoutPolicy) else {
+            return .finished(ProcessTapTestResult(
+                outcome: .liveControlSetupFailed,
+                message: "Live control is already active",
+                severity: .warning
+            ))
+        }
+
+        didActivateSession = true
+        let isResampling = resampler != nil
+        AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public) output=direct rate=\(outputFormat.mSampleRate, privacy: .public) outChannels=\(outputFormat.mChannelsPerFrame, privacy: .public) tapRate=\(inputFormat.mSampleRate, privacy: .public) resample=\(isResampling, privacy: .public)")
+        if let resampler {
+            scheduleDirectResampleReport(resampler, appName: target.appName, processIdentifier: processIdentifier)
+        }
+
+        return .finished(ProcessTapTestResult(
+            outcome: .liveControlStarted,
+            message: "Live control started",
+            detail: startDetail(gain: gain, timeoutPolicy: timeoutPolicy),
+            severity: .info
+        ))
+    }
+
+    /// Publishes `session` as the active one and starts its timers, unless another start won the
+    /// race (returns false; the caller then tears its resources down).
+    func activate(_ session: ProcessTapLiveSession, timeoutPolicy: ProcessTapLiveTimeoutPolicy) -> Bool {
+        sessionLock.lock()
+        guard activeSession == nil else {
+            sessionLock.unlock()
+            return false
+        }
+
+        activeSession = session
+        sessionLock.unlock()
+
+        startTimers(for: session, timeoutPolicy: timeoutPolicy)
+        // First publish is forced (and seeds the gate so the imminent first timer tick does not
+        // immediately re-publish within the throttle interval).
+        let initialDiagnostics = session.diagnostics()
+        _ = session.publishGate.shouldPublish(initialDiagnostics, force: true)
+        session.onDiagnostics(initialDiagnostics)
+        return true
+    }
+
+    /// Logs once, `directResampleReportDelay` after start and off the audio thread, what a direct
+    /// session with differing tap/output rates measured: the reported rates, the path the resampler
+    /// chose, average tap/output frames per IOProc cycle and their ratio, and FIFO underruns /
+    /// overflows. measuredRatio ≈ expectedRatio means the HAL delivers tap frames at the tap's own
+    /// rate; ≈ 1 means it already resampled them. Logs even if the session stopped meanwhile.
+    /// Notice level (one line per session) so it is kept without `--info` log capture.
+    private func scheduleDirectResampleReport(
+        _ resampler: ProcessTapDirectOutputResampler,
+        appName: String,
+        processIdentifier: Int32
+    ) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.directResampleReportDelay) {
+            let snapshot = resampler.snapshot()
+            AppLogger.processTap.notice("Live control direct resample report app=\(appName, privacy: .public) pid=\(processIdentifier, privacy: .public) tapRate=\(snapshot.inputSampleRate, privacy: .public) outputRate=\(snapshot.outputSampleRate, privacy: .public) path=\(snapshot.path.rawValue, privacy: .public) avgTapFramesPerCycle=\(String(format: "%.2f", snapshot.averageInputFramesPerCycle), privacy: .public) avgOutputFramesPerCycle=\(String(format: "%.2f", snapshot.averageOutputFramesPerCycle), privacy: .public) measuredRatio=\(String(format: "%.5f", snapshot.measuredRatio), privacy: .public) expectedRatio=\(String(format: "%.5f", snapshot.expectedRatio), privacy: .public) cycles=\(snapshot.cycleCount, privacy: .public) underruns=\(snapshot.underrunCount, privacy: .public) overflows=\(snapshot.overflowCount, privacy: .public)")
+        }
+    }
+
+    /// Maps the target's processes to Core Audio process objects and creates the muted process
+    /// tap over them (shared by both live output paths).
+    @available(macOS 14.2, *)
+    func createLiveTap(
+        target: ProcessTapTarget,
+        processIdentifier: Int32,
+        resources: ProcessTapResourceContext
+    ) -> ProcessTapLiveTapCreation {
+        // A multi-process target (the app plus its audio helpers) becomes one tap over every process
+        // that still maps to a Core Audio process object. Processes that do not (e.g. a browser's
+        // main process that never used audio, or a helper that just exited) are skipped; the start
+        // only fails when none of them maps. A single-process target behaves exactly as before.
+        let requestedProcessIdentifiers = target.allProcessIdentifiers
+        var processObjectIDs: [AudioObjectID] = []
+        var unmappedProcessIdentifiers: [Int32] = []
+        for requestedProcessIdentifier in requestedProcessIdentifiers {
+            guard let processObjectID = ProcessTapCoreAudio.processObjectID(for: pid_t(requestedProcessIdentifier)) else {
+                unmappedProcessIdentifiers.append(requestedProcessIdentifier)
+                continue
+            }
+
+            if !processObjectIDs.contains(processObjectID) {
+                processObjectIDs.append(processObjectID)
+            }
+        }
+
+        guard !processObjectIDs.isEmpty else {
+            AppLogger.processTap.warning("Live control setup failed: Core Audio process not found app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) requestedCount=\(requestedProcessIdentifiers.count, privacy: .public)")
+            let detail = requestedProcessIdentifiers.count > 1
+                ? "None of PIDs \(requestedProcessIdentifiers.map { String($0) }.joined(separator: ", ")) mapped to a Core Audio process object."
+                : "PID \(processIdentifier) did not map to a Core Audio process object."
+            return .failed(ProcessTapTestResult(
                 outcome: .processNotFound,
                 message: "Could not find Core Audio process",
-                detail: "PID \(processIdentifier) did not map to a Core Audio process object.",
+                detail: detail,
                 severity: .warning
-            )
+            ))
+        }
+
+        if requestedProcessIdentifiers.count > 1 {
+            let unmappedDescription = unmappedProcessIdentifiers.map { String($0) }.joined(separator: ",")
+            AppLogger.processTap.info("Live control multi-process tap app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) requested=\(requestedProcessIdentifiers.count, privacy: .public) mapped=\(processObjectIDs.count, privacy: .public) unmappedPIDs=\(unmappedDescription, privacy: .public)")
         }
 
         let createStatus = resources.createProcessTap(
-            processObjectID: processObjectID,
+            processObjectIDs: processObjectIDs,
             name: "MacMiniMixer Live Control - \(target.appName)",
             muteBehavior: .mutedWhenTapped
         )
         guard createStatus == noErr, resources.tapID != kAudioObjectUnknown else {
             AppLogger.processTap.error("Live control setup failed: create tap status=\(ProcessTapCoreAudio.formatOSStatus(createStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
+            return .failed(ProcessTapTestResult(
                 outcome: ProcessTapPermissionMessage.isPermissionDeniedStatus(createStatus) ? .permissionDenied : .liveControlSetupFailed,
                 message: ProcessTapPermissionMessage.message(
                     forCreateStatus: createStatus,
@@ -182,151 +466,19 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
                     fallback: "Create failed with \(ProcessTapCoreAudio.formatOSStatus(createStatus))."
                 ),
                 severity: .warning
-            )
+            ))
         }
 
         guard let tapUID = resources.tapUID else {
             AppLogger.processTap.error("Live control setup failed: missing tap UID app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
+            return .failed(ProcessTapTestResult(
                 outcome: .liveControlSetupFailed,
                 message: "Could not read process tap UID",
                 severity: .warning
-            )
+            ))
         }
 
-        let createAggregateStatus = resources.createPrivateAggregateDevice(
-            name: "MacMiniMixer Process Tap Live Control",
-            uidPrefix: "com.macminimixer.process-tap-live-control",
-            tapUID: tapUID
-        )
-
-        guard createAggregateStatus == noErr, resources.aggregateDeviceID != kAudioObjectUnknown else {
-            AppLogger.processTap.error("Live control setup failed: create aggregate status=\(ProcessTapCoreAudio.formatOSStatus(createAggregateStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Could not create live tap device",
-                detail: "Aggregate setup failed with \(ProcessTapCoreAudio.formatOSStatus(createAggregateStatus)).",
-                severity: .warning
-            )
-        }
-
-        guard let tapStreamDescription = ProcessTapCoreAudio.streamDescription(for: resources.aggregateDeviceID) else {
-            AppLogger.processTap.error("Live control setup failed: could not read stream format app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Could not read live tap format",
-                severity: .warning
-            )
-        }
-
-        guard ProcessTapCoreAudio.isSupportedFloatPCMMonoOrStereo(tapStreamDescription) else {
-            AppLogger.processTap.warning("Live control setup failed: unsupported stream format app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) channels=\(tapStreamDescription.mChannelsPerFrame, privacy: .public) bits=\(tapStreamDescription.mBitsPerChannel, privacy: .public)")
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Unsupported live tap format",
-                detail: "Live control currently handles 32-bit Float PCM mono/stereo only.",
-                severity: .warning
-            )
-        }
-
-        let sampleRate = tapStreamDescription.mSampleRate > 0
-            ? tapStreamDescription.mSampleRate
-            : AppConstants.processTapReplayFallbackSampleRate
-        let outputFormat = ProcessTapLiveOutputFormat(
-            sampleRate: sampleRate,
-            channelCount: Int(tapStreamDescription.mChannelsPerFrame)
-        )
-
-        let outputStartStatus = outputQueue.start(format: outputFormat)
-        guard outputStartStatus == noErr else {
-            AppLogger.processTap.error("Live control setup failed: AudioQueue start status=\(ProcessTapCoreAudio.formatOSStatus(outputStartStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Live playback setup failed",
-                detail: "AudioQueue setup failed with \(ProcessTapCoreAudio.formatOSStatus(outputStartStatus)).",
-                severity: .warning
-            )
-        }
-
-        let accumulator = ProcessTapDiagnosticsAccumulator()
-        let timingAccumulator = ProcessTapCallbackTimingAccumulator()
-        let callbackQueue = DispatchQueue(label: "com.macminimixer.process-tap-live-control.callback")
-        let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, _, _ in
-            timingAccumulator.record(hostTime: inputTime.pointee.mHostTime)
-            // `observe` returns whether this callback had real (non-silent) audio, reusing the peak
-            // it already computes — no extra scan — so the output queue can gate starvation on it.
-            let hadRealAudioInput = accumulator.observe(inputData)
-            outputQueue.enqueue(inputData, gain: gainState.scalar, hadRealAudioInput: hadRealAudioInput)
-        }
-
-        let createIOProcStatus = resources.createIOProc(
-            queue: callbackQueue,
-            block: ioBlock
-        )
-
-        guard createIOProcStatus == noErr, resources.ioProcID != nil else {
-            AppLogger.processTap.error("Live control setup failed: create IOProc status=\(ProcessTapCoreAudio.formatOSStatus(createIOProcStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Could not attach live callback",
-                detail: "IOProc setup failed with \(ProcessTapCoreAudio.formatOSStatus(createIOProcStatus)).",
-                severity: .warning
-            )
-        }
-
-        let startStatus = resources.startIO()
-        guard startStatus == noErr else {
-            AppLogger.processTap.error("Live control setup failed: start IO status=\(ProcessTapCoreAudio.formatOSStatus(startStatus), privacy: .public) app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public)")
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Could not start live control",
-                detail: "Start failed with \(ProcessTapCoreAudio.formatOSStatus(startStatus)).",
-                severity: .warning
-            )
-        }
-
-        let session = ProcessTapLiveSession(
-            pid: pid,
-            targetName: target.appName,
-            gainState: gainState,
-            startDefaultOutputDeviceID: startDefaultOutputDeviceID,
-            resources: resources,
-            outputQueue: outputQueue,
-            accumulator: accumulator,
-            timingAccumulator: timingAccumulator,
-            publishGate: ProcessTapDiagnosticsPublishGate(),
-            onDiagnostics: onDiagnostics,
-            onStopped: onStopped
-        )
-
-        sessionLock.lock()
-        guard activeSession == nil else {
-            sessionLock.unlock()
-            return ProcessTapTestResult(
-                outcome: .liveControlSetupFailed,
-                message: "Live control is already active",
-                severity: .warning
-            )
-        }
-
-        activeSession = session
-        sessionLock.unlock()
-        didActivateSession = true
-
-        startTimers(for: session, timeoutPolicy: timeoutPolicy)
-        // First publish is forced (and seeds the gate so the imminent first timer tick does not
-        // immediately re-publish within the throttle interval).
-        let initialDiagnostics = session.diagnostics()
-        _ = session.publishGate.shouldPublish(initialDiagnostics, force: true)
-        onDiagnostics(initialDiagnostics)
-        AppLogger.processTap.info("Live control started app=\(target.appName, privacy: .public) pid=\(processIdentifier, privacy: .public) outputDeviceID=\(startDefaultOutputDeviceID, privacy: .public)")
-
-        return ProcessTapTestResult(
-            outcome: .liveControlStarted,
-            message: "Live control started",
-            detail: startDetail(gain: gain, timeoutPolicy: timeoutPolicy),
-            severity: .info
-        )
+        return .created(tapUID: tapUID)
     }
 
     private func startTimers(for session: ProcessTapLiveSession, timeoutPolicy: ProcessTapLiveTimeoutPolicy) {
@@ -378,7 +530,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
         timeoutTimer?.resume()
     }
 
-    private func startDetail(gain: ProcessTapReplayGainOption, timeoutPolicy: ProcessTapLiveTimeoutPolicy) -> String {
+    func startDetail(gain: ProcessTapReplayGainOption, timeoutPolicy: ProcessTapLiveTimeoutPolicy) -> String {
         switch timeoutPolicy {
         case .limited(let duration):
             return "Gain \(gain.percentLabel). Auto-stops after \(Int(duration))s."
@@ -503,13 +655,32 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
 }
 
-private final class ProcessTapLiveSession: @unchecked Sendable {
+/// Result of a direct-output start attempt: either a final start result (started, or a tap-level
+/// failure the AudioQueue path would hit too), or a reason to retry on the AudioQueue path.
+private enum ProcessTapDirectOutputStartAttempt {
+    case finished(ProcessTapTestResult)
+    case fallBackToAudioQueue(reason: String)
+}
+
+enum ProcessTapLiveTapCreation {
+    case created(tapUID: String)
+    case failed(ProcessTapTestResult)
+}
+
+/// Where a live session's audio goes: the legacy AudioQueue, or straight out of the aggregate's
+/// own IOProc output (direct mode).
+enum ProcessTapLiveOutputBackend {
+    case audioQueue(ProcessTapLiveOutputQueue)
+    case directAggregate(ProcessTapDirectOutputRenderer)
+}
+
+final class ProcessTapLiveSession: @unchecked Sendable {
     let pid: pid_t
     let targetName: String
     let gainState: ProcessTapLiveGainState
     let startDefaultOutputDeviceID: AudioDeviceID
     let resources: ProcessTapResourceContext
-    let outputQueue: ProcessTapLiveOutputQueue
+    let output: ProcessTapLiveOutputBackend
     let accumulator: ProcessTapDiagnosticsAccumulator
     let timingAccumulator: ProcessTapCallbackTimingAccumulator
     let publishGate: ProcessTapDiagnosticsPublishGate
@@ -528,7 +699,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         gainState: ProcessTapLiveGainState,
         startDefaultOutputDeviceID: AudioDeviceID,
         resources: ProcessTapResourceContext,
-        outputQueue: ProcessTapLiveOutputQueue,
+        output: ProcessTapLiveOutputBackend,
         accumulator: ProcessTapDiagnosticsAccumulator,
         timingAccumulator: ProcessTapCallbackTimingAccumulator,
         publishGate: ProcessTapDiagnosticsPublishGate,
@@ -540,7 +711,7 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
         self.gainState = gainState
         self.startDefaultOutputDeviceID = startDefaultOutputDeviceID
         self.resources = resources
-        self.outputQueue = outputQueue
+        self.output = output
         self.accumulator = accumulator
         self.timingAccumulator = timingAccumulator
         self.publishGate = publishGate
@@ -588,10 +759,19 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
 
         return resources.cleanup(
             beforeStoppingIO: {
-                // Ramp the gain to silence while the output queue is still live and the IOProc is
-                // still feeding it, so the fade is smooth and no buffers are dropped during it.
-                self.outputQueue.beginFadeOut()
-                Thread.sleep(forTimeInterval: AppConstants.processTapLiveFadeOutDuration)
+                switch self.output {
+                case .audioQueue(let outputQueue):
+                    // Ramp the gain to silence while the output queue is still live and the IOProc is
+                    // still feeding it, so the fade is smooth and no buffers are dropped during it.
+                    outputQueue.beginFadeOut()
+                    Thread.sleep(forTimeInterval: AppConstants.processTapLiveFadeOutDuration)
+                case .directAggregate(let renderer):
+                    // The IOProc renders the fade itself; stop it only once it has rendered the
+                    // whole ramp (bounded wait), so the device never stops on a non-zero sample.
+                    renderer.beginFadeOut()
+                    Thread.sleep(forTimeInterval: AppConstants.processTapLiveFadeOutDuration)
+                    renderer.waitForFadeOutToRender()
+                }
             },
             afterDestroyingIOProc: {
                 // Dispose the output queue only after the IOProc has been stopped and destroyed.
@@ -599,8 +779,10 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
                 // the IOProc is still running (the previous order) made every in-flight enqueue
                 // hit the stopped-queue guard and count as a dropped buffer — the Drops/Fail spike
                 // seen when tearing down during an output-device route change. With the producer
-                // already gone, this dispose drops nothing.
-                self.outputQueue.stop()
+                // already gone, this dispose drops nothing. Direct mode has no queue to dispose.
+                if case .audioQueue(let outputQueue) = self.output {
+                    outputQueue.stop()
+                }
             },
             statusFormatter: { "\($0)" }
         )
@@ -608,11 +790,33 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
 
     func updateGain(_ gain: ProcessTapReplayGainOption) {
         gainState.update(gain)
+        if case .directAggregate(let renderer) = output {
+            renderer.updateTargetGain(gain.scalar)
+        }
     }
 
     func diagnostics() -> ProcessTapLiveDiagnostics {
         let inputSnapshot = accumulator.snapshot()
-        let outputSnapshot = outputQueue.snapshot()
+        let outputSnapshot: ProcessTapLiveOutputSnapshot
+        var resampleSnapshot: ProcessTapDirectResampleSnapshot?
+        switch output {
+        case .audioQueue(let outputQueue):
+            outputSnapshot = outputQueue.snapshot()
+        case .directAggregate(let renderer):
+            // No queue in direct mode: the queue-only counters (enqueued/failures) and the queue
+            // warmup state do not apply and report zero/false. With sample-rate conversion, the
+            // resampler's FIFO underruns report as starvation and its overflows as drops; both stay
+            // zero on the equal-rate path.
+            resampleSnapshot = renderer.resampleSnapshot()
+            outputSnapshot = ProcessTapLiveOutputSnapshot(
+                enqueuedBufferCount: 0,
+                droppedBufferCount: resampleSnapshot?.overflowCount ?? 0,
+                enqueueFailureCount: 0,
+                copyFailureCount: 0,
+                outputStarvationCount: resampleSnapshot?.underrunCount ?? 0,
+                isWithinStartupWarmup: false
+            )
+        }
         let timingSnapshot = timingAccumulator.snapshot()
 
         return ProcessTapLiveDiagnostics(
@@ -627,12 +831,14 @@ private final class ProcessTapLiveSession: @unchecked Sendable {
             maxCallbackGapMilliseconds: timingSnapshot.maxCallbackGapMilliseconds,
             lateCallbackCount: timingSnapshot.lateCallbackCount,
             outputStarvationCount: outputSnapshot.outputStarvationCount,
-            isWarmingUpOutput: outputSnapshot.isWithinStartupWarmup
+            isWarmingUpOutput: outputSnapshot.isWithinStartupWarmup,
+            averageTapFramesPerCycle: resampleSnapshot?.averageInputFramesPerCycle ?? 0,
+            averageOutputFramesPerCycle: resampleSnapshot?.averageOutputFramesPerCycle ?? 0
         )
     }
 }
 
-private final class ProcessTapLiveGainState: @unchecked Sendable {
+final class ProcessTapLiveGainState: @unchecked Sendable {
     private let lock = NSLock()
     private var gain: ProcessTapReplayGainOption
 
@@ -665,7 +871,7 @@ private final class ProcessTapLiveGainState: @unchecked Sendable {
     }
 }
 
-private struct ProcessTapLiveOutputFormat {
+struct ProcessTapLiveOutputFormat {
     let sampleRate: Double
     let channelCount: Int
 
@@ -687,262 +893,147 @@ private struct ProcessTapLiveOutputFormat {
     }
 }
 
-private final class ProcessTapLiveOutputQueue: @unchecked Sendable {
-    private let lock = NSLock()
-    private let gainRampLock = NSLock()
-    private var queue: AudioQueueRef?
-    private var availableBuffers: [AudioQueueBufferRef] = []
-    private var outputFormat: ProcessTapLiveOutputFormat?
-    private var isStarted = false
-    private var isStopped = false
-    private var enqueuedBufferCount = 0
-    private var droppedBufferCount = 0
-    private var enqueueFailureCount = 0
-    private var copyFailureCount = 0
-    /// Diagnostic-only: counts times the queue fully drained (every buffer back in the pool) while
-    /// playback was started — a public-API proxy for an AudioQueue underrun. Only counted once the
-    /// session has observed real (non-silent) input (`hasObservedRealAudioInput`): a queue draining
-    /// before any real audio is the "waiting for app audio" idle state, not an underrun. A genuine
-    /// mid-stream input pause can still drain the queue, so a non-zero count means "the queue ran
-    /// dry; investigate", not "definite glitch".
-    private var outputStarvationCount = 0
-    /// Latched true the first time a real (non-silent) input callback is enqueued. Gates
-    /// `outputStarvationCount` so a silent/no-audio Real session does not log false starvation.
-    private var hasObservedRealAudioInput = false
-    private var gainRamp = ProcessTapLiveGainRamp()
+/// Audio-thread side of the direct aggregate output path. `render` runs only in the IOProc (which
+/// Core Audio calls serially) and owns the gain ramp and the other render-only fields. Other
+/// threads only post a new target gain or the fade-out request under `controlLock`; the IOProc
+/// reads them with a non-blocking `try()` and, if the lock is momentarily held, keeps last cycle's
+/// values and picks the change up on the next cycle. So the callback never blocks, allocates or
+/// logs. Fade semantics are `ProcessTapLiveGainRamp`'s: fade-in from silence on start, fade-out
+/// before stop.
+///
+/// With a `resampler` (tap rate ≠ output rate), each cycle's tap frames go through it first and the
+/// copier renders its output (same channel mapping and per-output-frame gain); until it has audio
+/// to give (start-up prefill) the output is written silent without advancing the fade-in, so the
+/// fade-in still starts with the audio. Without one, the cycle is rendered exactly as before.
+final class ProcessTapDirectOutputRenderer: @unchecked Sendable {
+    /// Teardown waits at most this many extra polls (beyond the fade-out duration) for the IOProc
+    /// to finish rendering the ramp — bounded so a stalled device cannot hang a stop.
+    private static let fadeOutRenderedPollInterval: TimeInterval = 0.005
+    private static let fadeOutRenderedMaxPolls = 8
 
-    func start(format: ProcessTapLiveOutputFormat) -> OSStatus {
-        lock.lock()
-        outputFormat = format
-        isStopped = false
-        isStarted = false
-        enqueuedBufferCount = 0
-        droppedBufferCount = 0
-        enqueueFailureCount = 0
-        copyFailureCount = 0
-        outputStarvationCount = 0
-        hasObservedRealAudioInput = false
-        lock.unlock()
+    private let controlLock = NSLock()
+    // Guarded by `controlLock`.
+    private var requestedTargetGain: Float
+    private var isFadeOutRequested = false
+    private var isFadeOutRendered = false
 
-        gainRampLock.lock()
+    // IOProc only.
+    private var gainRamp: ProcessTapLiveGainRamp
+    private var renderTargetGain: Float
+    private var isRenderingFadeOut = false
+    private var fadeOutFramesRendered = 0
+    private var hasPublishedFadeOutRendered = false
+    private let fadeOutFrameCount: Int
+    private let resampler: ProcessTapDirectOutputResampler?
+
+    /// `sampleRate` / `channelCount` are the output device's (the side the gain ramp runs on).
+    init(
+        sampleRate: Double,
+        channelCount: Int,
+        gain: Float,
+        resampler: ProcessTapDirectOutputResampler? = nil
+    ) {
+        let format = ProcessTapLiveOutputFormat(sampleRate: sampleRate, channelCount: channelCount)
+        let rampSampleRate = sampleRate > 0 ? sampleRate : AppConstants.processTapReplayFallbackSampleRate
         gainRamp = ProcessTapLiveGainRamp(format: format)
-        gainRampLock.unlock()
-
-        var streamDescription = format.audioStreamBasicDescription
-        var newQueue: AudioQueueRef?
-        let createStatus = AudioQueueNewOutput(
-            &streamDescription,
-            processTapLiveAudioQueueCallback,
-            Unmanaged.passUnretained(self).toOpaque(),
-            nil,
-            nil,
-            0,
-            &newQueue
-        )
-
-        guard createStatus == noErr, let newQueue else {
-            return createStatus
-        }
-
-        var allocatedBuffers: [AudioQueueBufferRef] = []
-        for _ in 0..<AppConstants.processTapReplayBufferCount {
-            var buffer: AudioQueueBufferRef?
-            let allocateStatus = AudioQueueAllocateBuffer(
-                newQueue,
-                AppConstants.processTapReplayBufferByteSize,
-                &buffer
-            )
-
-            guard allocateStatus == noErr, let buffer else {
-                AudioQueueDispose(newQueue, true)
-                return allocateStatus
-            }
-
-            allocatedBuffers.append(buffer)
-        }
-
-        lock.lock()
-        queue = newQueue
-        availableBuffers = allocatedBuffers
-        lock.unlock()
-
-        return noErr
+        requestedTargetGain = gain
+        renderTargetGain = gain
+        // Same frame count the ramp uses for its fade-out.
+        fadeOutFrameCount = max(1, Int((AppConstants.processTapLiveFadeOutDuration * rampSampleRate).rounded()))
+        self.resampler = resampler
     }
 
-    func enqueue(_ inputData: UnsafePointer<AudioBufferList>, gain: Float, hadRealAudioInput: Bool) {
-        lock.lock()
-        // Latch under the lock we already hold here — no extra synchronisation on the callback.
-        if hadRealAudioInput {
-            hasObservedRealAudioInput = true
-        }
-        guard !isStopped,
-              let queue,
-              let outputFormat,
-              let buffer = availableBuffers.popLast() else {
-            droppedBufferCount += 1
-            lock.unlock()
-            return
-        }
-        lock.unlock()
+    /// The resampler's published diagnostics, or nil on the equal-rate path. Any thread.
+    func resampleSnapshot() -> ProcessTapDirectResampleSnapshot? {
+        resampler?.snapshot()
+    }
 
-        guard copy(inputData, into: buffer, format: outputFormat, gain: gain) else {
-            incrementCopyFailureCount()
-            recycle(buffer)
-            return
-        }
-
-        let enqueueStatus = AudioQueueEnqueueBuffer(queue, buffer, 0, nil)
-        if enqueueStatus == noErr {
-            recordSuccessfulEnqueueAndStartIfReady(queue)
-        } else {
-            incrementEnqueueFailureCount()
-            recycle(buffer)
-        }
+    func updateTargetGain(_ gain: Float) {
+        controlLock.lock()
+        requestedTargetGain = gain
+        controlLock.unlock()
     }
 
     func beginFadeOut() {
-        gainRampLock.lock()
-        gainRamp.beginFadeOut()
-        gainRampLock.unlock()
+        controlLock.lock()
+        isFadeOutRequested = true
+        controlLock.unlock()
     }
 
-    func recycle(_ buffer: AudioQueueBufferRef) {
-        lock.lock()
-        guard !isStopped else {
-            lock.unlock()
-            return
-        }
-
-        availableBuffers.append(buffer)
-        // If playback has started and every buffer is back in the pool, nothing is queued ahead of
-        // the device — the queue has drained (underrun proxy). The `!isStopped` guard above keeps
-        // the natural drain during teardown from counting; `hasObservedRealAudioInput` keeps a
-        // silent/no-audio session from counting; and the startup-warmup gate keeps a brand-new
-        // queue's first-cadence drain (the residual per-app-restart Starv) from counting until it
-        // has enqueued enough buffers to be considered warmed up. `enqueuedBufferCount` is mutated
-        // only under this same lock, so reading it here is consistent.
-        if ProcessTapStarvation.shouldCount(
-            isStarted: isStarted,
-            poolIsFull: availableBuffers.count >= AppConstants.processTapReplayBufferCount,
-            hasObservedRealAudioInput: hasObservedRealAudioInput,
-            hasCompletedStartupWarmup: enqueuedBufferCount >= AppConstants.processTapReplayStartupWarmupBufferCount
-        ) {
-            outputStarvationCount += 1
-        }
-        lock.unlock()
-    }
-
-    func stop() {
-        lock.lock()
-        guard !isStopped else {
-            lock.unlock()
-            return
-        }
-
-        isStopped = true
-        let queueToStop = queue
-        let wasStarted = isStarted
-        queue = nil
-        availableBuffers.removeAll()
-        lock.unlock()
-
-        guard let queueToStop else {
-            return
-        }
-
-        if wasStarted {
-            AudioQueueStop(queueToStop, true)
-        }
-        AudioQueueDispose(queueToStop, true)
-    }
-
-    func snapshot() -> ProcessTapLiveOutputSnapshot {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-
-        return ProcessTapLiveOutputSnapshot(
-            enqueuedBufferCount: enqueuedBufferCount,
-            droppedBufferCount: droppedBufferCount,
-            enqueueFailureCount: enqueueFailureCount,
-            copyFailureCount: copyFailureCount,
-            outputStarvationCount: outputStarvationCount,
-            // Real audio is flowing but the fresh queue is still establishing cadence: the neutral
-            // "Starting audio…" window during which a transient drain is not counted as starvation.
-            isWithinStartupWarmup: hasObservedRealAudioInput
-                && enqueuedBufferCount < AppConstants.processTapReplayStartupWarmupBufferCount
-        )
-    }
-
-    private func recordSuccessfulEnqueueAndStartIfReady(_ queue: AudioQueueRef) {
-        var shouldStart = false
-
-        lock.lock()
-        enqueuedBufferCount += 1
-        if !isStarted && enqueuedBufferCount >= AppConstants.processTapLivePrimingBufferCount {
-            isStarted = true
-            shouldStart = true
-        }
-        lock.unlock()
-
-        guard shouldStart else {
-            return
-        }
-
-        let startStatus = AudioQueueStart(queue, nil)
-        if startStatus != noErr {
-            incrementEnqueueFailureCount()
+    /// Teardown only (never the audio thread): after the fade-out sleep, polls until the IOProc has
+    /// rendered the whole fade-out ramp, for at most `fadeOutRenderedMaxPolls` short polls.
+    func waitForFadeOutToRender() {
+        var polls = 0
+        while !hasRenderedFadeOut(), polls < Self.fadeOutRenderedMaxPolls {
+            Thread.sleep(forTimeInterval: Self.fadeOutRenderedPollInterval)
+            polls += 1
         }
     }
 
-    private func incrementEnqueueFailureCount() {
-        lock.lock()
-        enqueueFailureCount += 1
-        lock.unlock()
-    }
-
-    private func incrementCopyFailureCount() {
-        lock.lock()
-        copyFailureCount += 1
-        lock.unlock()
-    }
-
-    private func copy(
+    /// IOProc only. Writes every output frame (silence where there is no tap input).
+    func render(
         _ inputData: UnsafePointer<AudioBufferList>,
-        into outputBuffer: AudioQueueBufferRef,
-        format: ProcessTapLiveOutputFormat,
-        gain: Float
-    ) -> Bool {
-        let outputData = outputBuffer.pointee.mAudioData
-        let outputSamples = outputData.assumingMemoryBound(to: Float32.self)
+        into outputData: UnsafeMutablePointer<AudioBufferList>
+    ) {
+        if controlLock.`try`() {
+            renderTargetGain = requestedTargetGain
+            let fadeOutRequested = isFadeOutRequested
+            controlLock.unlock()
 
-        gainRampLock.lock()
-        defer {
-            gainRampLock.unlock()
+            if fadeOutRequested, !isRenderingFadeOut {
+                isRenderingFadeOut = true
+                gainRamp.beginFadeOut()
+            }
         }
 
         var gainProvider = ProcessTapLiveFrameGainProvider(
             gainRamp: gainRamp,
-            targetGain: gain
+            targetGain: renderTargetGain
         )
-        guard let result = ProcessTapOutputBufferCopier.copy(
-            inputData,
-            into: outputSamples,
-            outputByteCapacity: outputBuffer.pointee.mAudioDataBytesCapacity,
-            outputChannelCount: format.channelCount,
-            gainProvider: &gainProvider
-        ) else {
-            return false
+        let result: ProcessTapDirectOutputRenderResult
+        if let resampler {
+            let outputFrameCount = ProcessTapDirectOutputCopier.outputFrameCount(in: outputData)
+            if let resampledData = resampler.process(inputData, outputFrameCount: outputFrameCount) {
+                result = ProcessTapDirectOutputCopier.render(
+                    resampledData,
+                    into: outputData,
+                    gainProvider: &gainProvider
+                )
+            } else {
+                result = ProcessTapDirectOutputCopier.renderSilence(into: outputData)
+            }
+        } else {
+            result = ProcessTapDirectOutputCopier.render(
+                inputData,
+                into: outputData,
+                gainProvider: &gainProvider
+            )
+        }
+        gainRamp = gainProvider.gainRamp
+
+        guard isRenderingFadeOut, !hasPublishedFadeOutRendered else {
+            return
         }
 
-        gainRamp = gainProvider.gainRamp
-        outputBuffer.pointee.mAudioDataByteSize = result.outputByteSize
-        return true
+        fadeOutFramesRendered += result.outputFrameCount
+        if fadeOutFramesRendered >= fadeOutFrameCount, controlLock.`try`() {
+            isFadeOutRendered = true
+            controlLock.unlock()
+            hasPublishedFadeOutRendered = true
+        }
+    }
+
+    private func hasRenderedFadeOut() -> Bool {
+        controlLock.lock()
+        defer {
+            controlLock.unlock()
+        }
+
+        return isFadeOutRendered
     }
 }
 
-private struct ProcessTapLiveFrameGainProvider: ProcessTapOutputFrameGainProviding {
+struct ProcessTapLiveFrameGainProvider: ProcessTapOutputFrameGainProviding {
     var gainRamp: ProcessTapLiveGainRamp
     let targetGain: Float
 
@@ -951,7 +1042,7 @@ private struct ProcessTapLiveFrameGainProvider: ProcessTapOutputFrameGainProvidi
     }
 }
 
-private struct ProcessTapLiveGainRamp {
+struct ProcessTapLiveGainRamp {
     private var fadeInRemainingFrames = 0
     private var fadeInTotalFrames = 1
     private var fadeOutRemainingFrames = 0
@@ -1022,20 +1113,7 @@ private struct ProcessTapLiveGainRamp {
     }
 }
 
-private func processTapLiveAudioQueueCallback(
-    userData: UnsafeMutableRawPointer?,
-    queue: AudioQueueRef,
-    buffer: AudioQueueBufferRef
-) {
-    guard let userData else {
-        return
-    }
-
-    let outputQueue = Unmanaged<ProcessTapLiveOutputQueue>.fromOpaque(userData).takeUnretainedValue()
-    outputQueue.recycle(buffer)
-}
-
-private struct ProcessTapLiveOutputSnapshot {
+struct ProcessTapLiveOutputSnapshot {
     let enqueuedBufferCount: Int
     let droppedBufferCount: Int
     let enqueueFailureCount: Int

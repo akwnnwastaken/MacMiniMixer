@@ -50,6 +50,8 @@ struct MixerPanelView: View {
         .animation(.snappy(duration: 0.18), value: viewModel.statusMessage)
         .animation(.snappy(duration: 0.18), value: viewModel.isProcessTapLiveControlActive)
         .onAppear {
+            // Product live diagnostics are only published while the Advanced section is on screen.
+            viewModel.setLiveDiagnosticsDisplayVisible(isShowingAdvanced)
             viewModel.refreshApplications()
             viewModel.refreshOutputDevices()
             viewModel.refreshSystemOutputVolume()
@@ -61,6 +63,7 @@ struct MixerPanelView: View {
             await runOutputDeviceRefreshLoop()
         }
         .onDisappear {
+            viewModel.setLiveDiagnosticsDisplayVisible(false)
             viewModel.stopTwoAppReadinessForPanelClose()
         }
     }
@@ -71,9 +74,11 @@ struct MixerPanelView: View {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
                 Text(AppConstants.appTitle)
                     .font(.headline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
             }
 
             Spacer()
@@ -87,6 +92,9 @@ struct MixerPanelView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Output devices"))
+            .accessibilityValue(Text(isShowingOutputDevices ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text(isShowingOutputDevices ? "Hides the output device list" : "Shows the output device list"))
             .foregroundStyle(isShowingOutputDevices ? .blue : .secondary)
             .background(
                 Circle()
@@ -158,6 +166,7 @@ struct MixerPanelView: View {
                 Text("System Output")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
 
                 if !viewModel.isSystemOutputVolumeWritable {
                     nonWritableVolumeBadge
@@ -169,6 +178,7 @@ struct MixerPanelView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                    .accessibilityLabel(Text("Output device: \(viewModel.selectedOutputDeviceName)"))
             }
 
             HStack(spacing: AppConstants.Layout.rowSpacing) {
@@ -231,8 +241,10 @@ struct MixerPanelView: View {
             Capsule(style: .continuous)
                 .fill(Color.orange.opacity(0.12))
         )
+        .accessibilityElement(children: .ignore)
         .help("This output device does not expose a writable volume API. Use the device's own controls to change volume.")
         .accessibilityLabel(Text("Volume is read-only on this output device"))
+        .accessibilityHint(Text("This device does not allow volume changes from MacMiniMixer. Use the device's own controls to change volume."))
     }
 
     private var appMixerSection: some View {
@@ -241,6 +253,7 @@ struct MixerPanelView: View {
                 Text("Applications")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
 
                 Spacer()
 
@@ -256,6 +269,8 @@ struct MixerPanelView: View {
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
                 .help("Show all regular running apps")
+                .accessibilityLabel(Text("Show all apps"))
+                .accessibilityHint(Text("When off, only audio-relevant apps are listed"))
             }
             .padding(.horizontal, 2)
 
@@ -311,7 +326,10 @@ struct MixerPanelView: View {
             .controlSize(.small)
             .font(.caption.weight(.semibold))
             .foregroundStyle(viewModel.isExperimentalRealAppControlEnabled ? .orange : .secondary)
+            .accessibilityLabel(Text("Real app control, experimental"))
+            .accessibilityHint(Text(realAppControlSpokenHint))
 
+            // Visual-only "Exp" badge; the toggle's accessibility label already says "experimental".
             Text("Exp")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.orange.opacity(0.9))
@@ -321,6 +339,7 @@ struct MixerPanelView: View {
                     Capsule(style: .continuous)
                         .fill(Color.orange.opacity(0.12))
                 )
+                .accessibilityHidden(true)
 
             Spacer(minLength: 0)
         }
@@ -340,9 +359,11 @@ struct MixerPanelView: View {
     private var advancedSection: some View {
         VStack(alignment: .leading, spacing: isShowingAdvanced ? 8 : 0) {
             Button {
+                let showsAdvanced = !isShowingAdvanced
                 withAnimation(.snappy(duration: 0.16)) {
-                    isShowingAdvanced.toggle()
+                    isShowingAdvanced = showsAdvanced
                 }
+                viewModel.setLiveDiagnosticsDisplayVisible(showsAdvanced)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "wrench.and.screwdriver")
@@ -364,6 +385,11 @@ struct MixerPanelView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Advanced"))
+            .accessibilityValue(Text(isShowingAdvanced ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text(isShowingAdvanced
+                ? "Hides the experimental diagnostic tools"
+                : "Shows the experimental diagnostic tools"))
 
             if isShowingAdvanced {
                 VStack(alignment: .leading, spacing: 8) {
@@ -521,11 +547,15 @@ struct MixerPanelView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(message.style.tint)
                 .frame(width: 14)
+                .accessibilityHidden(true)
 
+            // The icon is hidden; its severity is spoken as a prefix instead. The label also keeps
+            // the full message even when the visible single line is truncated.
             Text(message.text)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .accessibilityLabel(Text(statusSpokenLabel(message)))
 
             Spacer(minLength: 0)
 
@@ -561,6 +591,14 @@ struct MixerPanelView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.blue)
         .accessibilityHint(Text("Opens Privacy and Security settings to grant System Audio Recording"))
+    }
+
+    private func statusSpokenLabel(_ message: MixerStatusMessage) -> String {
+        "\(message.style.spokenName): \(message.text)"
+    }
+
+    private var realAppControlSpokenHint: String {
+        "Experimental. When on, real per-app control starts only when you interact with an app row. Turning it off stops any active real control."
     }
 
     private func perform(_ action: MixerStatusMessage.Action) {
@@ -627,6 +665,18 @@ private extension MixerStatusMessage.Style {
             return .green
         case .warning:
             return .orange
+        }
+    }
+
+    /// Spoken severity for the status banner, replacing the hidden icon.
+    var spokenName: String {
+        switch self {
+        case .info:
+            return "Info"
+        case .success:
+            return "Success"
+        case .warning:
+            return "Warning"
         }
     }
 }

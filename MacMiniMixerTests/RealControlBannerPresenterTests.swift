@@ -79,6 +79,31 @@ final class RealControlBannerPresenterTests: XCTestCase {
         )
     }
 
+    // No app-count limit: a large N still collapses to one visible line ("first two +N more") while
+    // the accessibility label keeps every name in order, so nothing is lost for assistive tech.
+    func testSevenProductAppsSummarizeFirstTwoPlusFiveMoreAndListAllForAccessibility() {
+        let names = ["Safari", "Music", "Podcasts", "Spotify", "Zoom", "Slack", "YouTube"]
+        let presentation = RealControlBannerPresenter.make(
+            confirmedProductRealControlAppNames: names,
+            isAdvancedManualLiveControlActive: false,
+            activeLiveControlAppName: nil,
+            isLiveControlActive: true
+        )
+
+        XCTAssertEqual(
+            presentation,
+            RealControlBannerPresentation(
+                mode: .product,
+                appNames: names,
+                confirmedCount: 7,
+                summaryText: "Real control: Safari, Music +5 more",
+                stopButtonTitle: "Stop All",
+                accessibilityLabel: "Real control active for 7 apps: Safari, Music, Podcasts, Spotify, Zoom, Slack, YouTube",
+                stopAccessibilityLabel: "Stop real control for all apps"
+            )
+        )
+    }
+
     func testAdvancedManualLiveControlUsesSingleAppWording() {
         let presentation = RealControlBannerPresenter.make(
             confirmedProductRealControlAppNames: [],

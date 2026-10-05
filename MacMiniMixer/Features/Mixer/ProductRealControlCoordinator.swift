@@ -40,13 +40,15 @@ final class ProductRealControlCoordinator {
         startSettleGate: ProductRealStartSettling,
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility,
         sideEffects: ProductRealControlSideEffects,
-        context: ProductRealControlContext
+        context: ProductRealControlContext,
+        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions
     ) {
         // The facade stores none of these dependencies directly — they are threaded straight into the
         // two sub-coordinators, which share the single state store and the same weak seam. Neither
         // sub-coordinator holds a reference to the other; the three Start↔Stop cross-edges are wired
         // below as narrow closures. Constructed with their default no-op callbacks so nothing captures
-        // `self` before initialization completes.
+        // `self` before initialization completes. `maxConcurrentSessions` (nil = unlimited, the
+        // product default) only feeds the start preflight; it defaults so `MixerViewModel` is unchanged.
         self.startCoordinator = ProductRealStartCoordinator(
             stateStore: stateStore,
             liveSessionManager: liveSessionManager,
@@ -54,7 +56,8 @@ final class ProductRealControlCoordinator {
             startSettleGate: startSettleGate,
             processTapEligibility: processTapEligibility,
             sideEffects: sideEffects,
-            context: context
+            context: context,
+            maxConcurrentSessions: maxConcurrentSessions
         )
         self.stopCoordinator = ProductRealStopCoordinator(
             stateStore: stateStore,
@@ -116,6 +119,17 @@ final class ProductRealControlCoordinator {
     /// is not directly eligible. Forwards to the start coordinator.
     func startResolvedExperimentalControl(for app: MixerAppItem, allowsCachedLookup: Bool = true) {
         startCoordinator.startResolvedExperimentalControl(for: app, allowsCachedLookup: allowsCachedLookup)
+    }
+
+    /// Slider / mute driven automatic Product Real start (queued behind any in-flight resolution or
+    /// start). Forwards to the start coordinator.
+    func requestAutomaticStart(for appID: MixerAppItem.ID) {
+        startCoordinator.requestAutomaticStart(for: appID)
+    }
+
+    /// Drops every queued (not yet started) Product Real start. Forwards to the start coordinator.
+    func clearQueuedStarts() {
+        startCoordinator.clearQueuedStarts()
     }
 
     /// Cancels an in-flight app-audio resolution and clears resolving state. Forwards to the start coordinator.

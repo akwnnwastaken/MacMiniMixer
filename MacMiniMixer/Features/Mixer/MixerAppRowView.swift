@@ -223,6 +223,8 @@ struct MixerAppRowView: View {
                         .stroke(Color.orange.opacity(0.2), lineWidth: 1)
                 )
         )
+        // Single element so the label below is not repeated on both the spinner and the text.
+        .accessibilityElement(children: .ignore)
         .help("Finding the audio helper for \(app.name)")
         .accessibilityLabel(Text("Resolving real app control for \(app.name)"))
     }

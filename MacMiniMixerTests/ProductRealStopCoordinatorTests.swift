@@ -153,6 +153,22 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.diagnostics?.callbackCount, 9)
     }
 
+    // Only per-callback live diagnostics are gated on the Advanced display being visible; the stop
+    // display cleanup still carries the stopped session's final diagnostics while it is hidden.
+    func testStopDisplayCleanupCarriesDiagnosticsWhileLiveDiagnosticsDisplayHidden() {
+        let harness = makeStopHarness()
+        harness.context.isLiveDiagnosticsDisplayVisible = false
+        let (_, _, sidA, _) = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA, result: makeResult(.liveControlStopped), diagnostics: makeDiagnostics(callbackCount: 13)
+        )
+
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.count, 1)
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.result.outcome, .liveControlStopped)
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.first?.diagnostics?.callbackCount, 13)
+    }
+
     func testHandleProductLiveControlStoppedAppExitInvalidatesCachedTarget() {
         let harness = makeStopHarness()
         let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)
@@ -222,6 +238,52 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
 
         // The exited resolving target routes a `.targetExited` cancel through the facade-wired closure.
         XCTAssertEqual(harness.cancelResolutionSpy.reasons, [.targetExited])
+    }
+
+    // MARK: - Queued start lane
+
+    func testPerAppStopRemovesQueuedStartWithoutEngineStop() async {
+        let harness = makeStopHarness()
+        harness.stateStore.productRealControlState.enqueueStart(for: "a", origin: .toggle)
+        harness.stateStore.productRealControlState.enqueueStart(for: "b", origin: .automatic)
+
+        harness.coordinator.stopExperimentalControl(for: "a")
+        await Task.yield()
+
+        // Only the stopped app's queued start is dropped; nothing reached the engine or the settle gate.
+        XCTAssertEqual(harness.stateStore.productRealControlState.queuedStartAppIDs, ["b"])
+        XCTAssertFalse(harness.stateStore.productRealControlState.isOperationPending(for: "a"))
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+        XCTAssertEqual(harness.settleGate.registerStopCount, 0)
+    }
+
+    func testExitedQueuedAppIsRemovedWhileOthersKeepTheirPlace() {
+        let harness = makeStopHarness()
+        let appA = makeApp(id: "a", name: "Alpha", pid: 1)
+        let appC = makeApp(id: "c", name: "Charlie", pid: 3)
+        harness.stateStore.productRealControlState.enqueueStart(for: "a", origin: .automatic)
+        harness.stateStore.productRealControlState.enqueueStart(for: "b", origin: .toggle)
+        harness.stateStore.productRealControlState.enqueueStart(for: "c", origin: .automatic)
+        // "b" exited (dropped from the refreshed running-app list).
+        harness.context.apps = [appA, appC]
+
+        harness.coordinator.stopRealControlForExitedTargetApps()
+
+        XCTAssertEqual(harness.stateStore.productRealControlState.queuedStartAppIDs, ["a", "c"])
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+        XCTAssertTrue(harness.cancelResolutionSpy.reasons.isEmpty)
+    }
+
+    func testHardStopTeardownClearsQueuedStarts() {
+        let harness = makeStopHarness()
+        _ = makeTwoConfirmedSessions(harness)
+        harness.stateStore.productRealControlState.enqueueStart(for: "c", origin: .automatic)
+        harness.stateStore.productRealControlState.enqueueStart(for: "d", origin: .toggle)
+
+        harness.coordinator.tearDownProductStateForHardStop()
+
+        XCTAssertTrue(harness.stateStore.productRealControlState.queuedStarts.isEmpty)
+        XCTAssertFalse(harness.stateStore.productRealControlState.isOperationPending(for: "c"))
     }
 
     // MARK: - Hard-teardown state reset

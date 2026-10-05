@@ -28,7 +28,7 @@
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
-		9B7D1A3C2C8F4A9A8B2D0101 /* MockAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */; };
+		9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */; };
 		9B7D1A3E2C8F4A9A8B2D0101 /* ApplicationListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */; };
 		9B7D1A402C8F4A9A8B2D0101 /* MockApplicationLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */; };
 		9B7D1A422C8F4A9A8B2D0101 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */; };
@@ -40,18 +40,14 @@
 		9B7D1A562C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */; };
 		9B7D1A582C8F4A9A8B2D0101 /* SystemVolumeReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */; };
 		9B7D1A5A2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */; };
-		9B7D1A5C2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5B2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift */; };
 		9B7D1A5E2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */; };
 		9B7D1A602C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5F2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift */; };
-		9B7D1A622C8F4A9A8B2D0101 /* MockSystemVolumeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A612C8F4A9A8B2D0101 /* MockSystemVolumeController.swift */; };
 		9B7D1A642C8F4A9A8B2D0101 /* OutputDeviceControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */; };
 		9B7D1A662C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */; };
-		9B7D1A682C8F4A9A8B2D0101 /* MockOutputDeviceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A672C8F4A9A8B2D0101 /* MockOutputDeviceController.swift */; };
 		9B7D1A6A2C8F4A9A8B2D0101 /* MixerStatusMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */; };
 		9B7D1A6D2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */; };
 		9B7D1A6F2C8F4A9A8B2D0101 /* ProcessTapTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */; };
 		9B7D1A712C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */; };
-		9B7D1A732C8F4A9A8B2D0101 /* MockProcessTapTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */; };
 		9B7D1A752C8F4A9A8B2D0101 /* ProcessTapTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */; };
 		9B7D1A782C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */; };
 		9B7D1A7A2C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A792C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift */; };
@@ -60,6 +56,7 @@
 		9B7D1A802C8F4A9A8B2D0101 /* ProcessTapLiveState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */; };
 		9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */; };
 		9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */; };
+		9B7D1B202C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */; };
 		9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */; };
 		9B7D1A882C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */; };
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
@@ -136,7 +133,7 @@
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
-		9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAudioController.swift; sourceTree = "<group>"; };
+		9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewAudioStateController.swift; sourceTree = "<group>"; };
 		9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationListing.swift; sourceTree = "<group>"; };
 		9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockApplicationLister.swift; sourceTree = "<group>"; };
 		9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
@@ -148,18 +145,14 @@
 		9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockOutputDeviceLister.swift; sourceTree = "<group>"; };
 		9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeReading.swift; sourceTree = "<group>"; };
 		9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSystemVolumeReader.swift; sourceTree = "<group>"; };
-		9B7D1A5B2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSystemVolumeReader.swift; sourceTree = "<group>"; };
 		9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeControlling.swift; sourceTree = "<group>"; };
 		9B7D1A5F2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSystemVolumeController.swift; sourceTree = "<group>"; };
-		9B7D1A612C8F4A9A8B2D0101 /* MockSystemVolumeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSystemVolumeController.swift; sourceTree = "<group>"; };
 		9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceControlling.swift; sourceTree = "<group>"; };
 		9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioOutputDeviceController.swift; sourceTree = "<group>"; };
-		9B7D1A672C8F4A9A8B2D0101 /* MockOutputDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockOutputDeviceController.swift; sourceTree = "<group>"; };
 		9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerStatusMessage.swift; sourceTree = "<group>"; };
 		9B7D1A6C2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTestResult.swift; sourceTree = "<group>"; };
 		9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTesting.swift; sourceTree = "<group>"; };
 		9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapTester.swift; sourceTree = "<group>"; };
-		9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockProcessTapTester.swift; sourceTree = "<group>"; };
 		9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTestView.swift; sourceTree = "<group>"; };
 		9B7D1A762C8F4A9A8B2D0101 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayResult.swift; sourceTree = "<group>"; };
@@ -169,6 +162,7 @@
 		9B7D1A7F2C8F4A9A8B2D0101 /* ProcessTapLiveState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveState.swift; sourceTree = "<group>"; };
 		9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveControlling.swift; sourceTree = "<group>"; };
 		9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapLiveController.swift; sourceTree = "<group>"; };
+		9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLegacyAudioQueueOutput.swift; sourceTree = "<group>"; };
 		9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLifecycle.swift; sourceTree = "<group>"; };
 		9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionState.swift; sourceTree = "<group>"; };
 		9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManager.swift; sourceTree = "<group>"; };
@@ -344,20 +338,17 @@
 			children = (
 				9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */,
 				9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */,
-				9B7D1A3B2C8F4A9A8B2D0101 /* MockAudioController.swift */,
+				9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */,
 				9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */,
 				9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */,
 				9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */,
 				9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */,
 				9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */,
-				9B7D1A672C8F4A9A8B2D0101 /* MockOutputDeviceController.swift */,
 				9B7D1A6B2C8F4A9A8B2D0101 /* ProcessTap */,
 				9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */,
 				9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */,
-				9B7D1A5B2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift */,
 				9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */,
 				9B7D1A5F2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift */,
-				9B7D1A612C8F4A9A8B2D0101 /* MockSystemVolumeController.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -371,7 +362,6 @@
 				9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */,
 				9B7D1A6E2C8F4A9A8B2D0101 /* ProcessTapTesting.swift */,
 				9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */,
-				9B7D1A722C8F4A9A8B2D0101 /* MockProcessTapTester.swift */,
 				9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */,
 				9B7D1A792C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift */,
 				9B7D1A7B2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift */,
@@ -381,6 +371,7 @@
 				9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */,
 				9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */,
 				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
+				9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */,
 				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
 				9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */,
 				9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */,
@@ -566,7 +557,7 @@
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
-				9B7D1A3C2C8F4A9A8B2D0101 /* MockAudioController.swift in Sources */,
+				9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */,
 				9B7D1A3E2C8F4A9A8B2D0101 /* ApplicationListing.swift in Sources */,
 				9B7D1A402C8F4A9A8B2D0101 /* MockApplicationLister.swift in Sources */,
 				9B7D1A422C8F4A9A8B2D0101 /* AppConstants.swift in Sources */,
@@ -578,18 +569,14 @@
 				9B7D1A562C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift in Sources */,
 				9B7D1A582C8F4A9A8B2D0101 /* SystemVolumeReading.swift in Sources */,
 				9B7D1A5A2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift in Sources */,
-				9B7D1A5C2C8F4A9A8B2D0101 /* MockSystemVolumeReader.swift in Sources */,
 				9B7D1A5E2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift in Sources */,
 				9B7D1A602C8F4A9A8B2D0101 /* CoreAudioSystemVolumeController.swift in Sources */,
-				9B7D1A622C8F4A9A8B2D0101 /* MockSystemVolumeController.swift in Sources */,
 				9B7D1A642C8F4A9A8B2D0101 /* OutputDeviceControlling.swift in Sources */,
 				9B7D1A662C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift in Sources */,
-				9B7D1A682C8F4A9A8B2D0101 /* MockOutputDeviceController.swift in Sources */,
 				9B7D1A6A2C8F4A9A8B2D0101 /* MixerStatusMessage.swift in Sources */,
 				9B7D1A6D2C8F4A9A8B2D0101 /* ProcessTapTestResult.swift in Sources */,
 				9B7D1A6F2C8F4A9A8B2D0101 /* ProcessTapTesting.swift in Sources */,
 				9B7D1A712C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift in Sources */,
-				9B7D1A732C8F4A9A8B2D0101 /* MockProcessTapTester.swift in Sources */,
 				9B7D1A752C8F4A9A8B2D0101 /* ProcessTapTestView.swift in Sources */,
 				9B7D1A782C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift in Sources */,
 				9B7D1A7A2C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift in Sources */,
@@ -600,6 +587,7 @@
 				9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */,
 				9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */,
 				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
+				9B7D1B202C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift in Sources */,
 				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
 				9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */,
 				9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */,
