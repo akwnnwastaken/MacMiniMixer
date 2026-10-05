@@ -488,6 +488,11 @@ With Real Control active, the live Advanced diagnostics card shows a second line
 "Gap … · Late … · Starv …", and the stop-result detail begins with `maxGap …ms, late …, starv …`.
 Use this to check for glitches that the drop/failure counters miss.
 
+> With the default direct output engine (§21) there is no output queue: `Queued` shows 0, and
+> `Starv` / `Drops` only count the in-engine resampler's FIFO underruns / overflows (always 0 when
+> the HAL passes the tap through at the device rate). So a clean `Starv 0` is weaker evidence than it
+> was on the `AudioQueue` path — **listen**, and check the log (§21).
+
 - **Values to record** (per run): `maxGap` (ms), `late`, `starv`, `drops`, `fail`, audible
   glitch yes/no, panel state, and CPU with the panel closed vs open.
 - **PASS**: `starv` 0 (or very low) and `drops`/`fail` 0; **no audible glitch**; clean stop. A
@@ -648,9 +653,12 @@ guarded flow — record it as a regression if it happens.
 
 ## 19. Many-app Product Real Control (no app-count limit — N-session characterization)
 
-Product Real Control has **no app-count limit** (owner decision). Real-hardware evidence so far
-stops at three sessions (§14.6, §16, §16.5); this section is the gate for more. Nothing here has
-been run yet — record only what you measure.
+Product Real Control has **no app-count limit** (owner decision). Real-hardware resource evidence so
+far stops at three sessions (§14.6, §16, §16.5, all measured before the direct output engine); the
+direct engine was only listened to with up to six sessions (§21). This section is the gate for more.
+Nothing here has been run yet — record only what you measure. Also confirm in the log that every
+session started with `output=direct` (§21 step 2); a session on the legacy `AudioQueue` path is not
+comparable.
 
 Setup:
 - **Release** build, single MacMiniMixer process (as in §16.1). Activity Monitor open on the
@@ -745,8 +753,84 @@ draft release — downloaded **in a browser** so it carries the quarantine flag 
 
 ---
 
+## 21. Direct output engine check (live output path)
+
+Use after any change to the live audio path, on a new output device or sample rate, or whenever
+something crackles. The default live output is the **direct aggregate output engine** (one aggregate
+IOProc = output device + tap, writing straight to the device, no `AudioQueue`); the legacy
+`AudioQueue` path is only a fallback. Record the output device, its sample rate (Audio MIDI Setup),
+the macOS version and the Mac for every run.
+
+Setup:
+- A **Release** build (or the packaged zip, §20), System Audio Recording granted, global "Real app
+  control" ON.
+- Two to six apps playing audio continuously (e.g. Spotify, Music, a browser/YouTube row, a Safari
+  web app).
+- A Terminal for the log command (the live start line is `info` level, so `--info --debug` is
+  needed):
+
+  ```bash
+  log show --last 30m --info --debug --predicate 'process == "MacMiniMixer"'
+  ```
+
+Steps:
+1. **One session.** Move one row's slider to start Real control, then open the panel → Advanced and
+   read the live diagnostics line.
+   - **Expected**: `Queued 0` (the queue-only counters report 0 in direct mode), Drops 0, Fail 0,
+     Starv 0; the app plays at its slider's gain; no audible crackle.
+2. **Log lines.** Run the log command.
+   - **Expected** for every started session: "Live control start requested … `output=direct`" and
+     "Live control started … `output=direct` rate=<device rate> … tapRate=<tap rate>
+     resample=<true|false>".
+   - **Expected** about 2 s after a start where the tap and device rates differ (for example built-in
+     speakers at 44.1 kHz): one notice "Live control direct resample report … `path=passthrough`
+     … avgTapFramesPerCycle ≈ avgOutputFramesPerCycle … measuredRatio=1.00000 … `underruns=0
+     overflows=0`" (the HAL already delivers the tap at the aggregate's rate). `path=converting` means
+     the HAL delivered a different rate — record `measuredRatio` against `expectedRatio` and any
+     underruns; it has not been seen on real hardware yet. With equal rates there is no report line
+     (`resample=false`).
+   - **Red flag**: "Live control direct output unavailable, falling back to AudioQueue … reason=…" —
+     record the reason. Expected only for an output device with input streams or a real setup failure.
+3. **Several sessions, repeated rounds.** Start 3–6 apps in quick succession (rows queue, §19 step
+   1), then per-app stop and Stop All, and start them again — three rounds. Listen the whole time,
+   especially right after a second session starts (where the old path crackled).
+   - **Expected**: every start logs `output=direct`, no fallbacks, `underruns=0 overflows=0` in each
+     report, no Core Audio error/overload lines, no audible crackle.
+4. **Sample rates.** Repeat steps 1–3 with the output device at 48 kHz and at 44.1 kHz (built-in
+   speakers default to 44.1 kHz). MacMiniMixer must **not** change the device's sample rate itself.
+   - **Expected**: crackle-free at both; record `path=` for each.
+5. **A second output device.** Switch the default output to another device (headphones, HDMI/USB DAC,
+   Bluetooth); sessions stop on the device change (§12.1), then restart them.
+   - Record: device, sample rate, the `output=` / `path=` lines, crackle yes/no. A device with input
+     streams is expected to log "falling back to AudioQueue … output device has input streams" and
+     `output=audioQueue`; crackle there is a known limit of the legacy path.
+6. **A/B fallback switch.** `defaults write com.example.MacMiniMixer MacMiniMixerLiveOutputMode
+   audioQueue`, quit and reopen MacMiniMixer, start a session.
+   - **Expected**: log shows `output=audioQueue` and the Advanced `Queued` count rises. Remove the key
+     (`defaults delete com.example.MacMiniMixer MacMiniMixerLiveOutputMode`) and reopen.
+7. **Resample switch** (device at 44.1 kHz). `defaults write com.example.MacMiniMixer
+   MacMiniMixerDirectResample off`, reopen, start a session.
+   - **Expected**: "falling back to AudioQueue … reason=sample rate mismatch …" and
+     `output=audioQueue`. Remove the key and reopen.
+
+**Red flags**: any crackle with `output=direct`; an unexpected fallback; `underruns` or `overflows` > 0;
+Core Audio errors in the log; an app silent after stopping (orphan tap — see §17).
+
+> Reference (owner's ad-hoc runs, one MacBook Pro, listening + unified log; not a CPU or latency
+> measurement): built-in speakers at **48 kHz**, five sessions (two Safari web apps, Safari, Spotify,
+> Music), three rounds — every start `output=direct rate=48000`, no fallbacks, no Core Audio
+> errors, no crackle. Built-in speakers at the default **44.1 kHz**, up to six sessions with repeated
+> stop/start rounds — `path=passthrough` (512 tap frames per 512 output frames, `measuredRatio=1.00000`),
+> `underruns=0 overflows=0`, no crackle. A second output device at 48 kHz with Firefox, Safari, Spotify,
+> Music and YouTube — crackle-free; every start on that device logged `output=direct rate=48000 resample=false`.
+
+---
+
 ## Notes
 
+- To read the app's recent log in Terminal (Release or Debug):
+  `log show --last 30m --info --debug --predicate 'process == "MacMiniMixer"'` (see §21 for the lines
+  worth looking for).
 - All Process Tap tests require macOS 14.2 or later. On older macOS, all Process Tap
   actions should return "Process Tap requires macOS 14.2 or later" without crashing.
 - System Audio Recording permission must be granted. If not granted, tap creation returns

@@ -2,13 +2,15 @@
 
 MacMiniMixer is a native Swift + SwiftUI macOS menu bar audio utility inspired by the Windows Volume Mixer. It is designed as an open-source, technical macOS project for users who understand experimental system-level audio tools.
 
-The app is not targeting the Mac App Store. It uses native macOS APIs directly, avoids private APIs, and currently has no third-party dependencies.
+The app is not targeting the Mac App Store. It uses native macOS APIs directly, avoids private APIs (with one disclosed grey area: an undocumented `proc_pidinfo` flavor, see [Known Limitations](#known-limitations-and-caveats)), and currently has no third-party dependencies.
 
 ## Current Status
 
 MacMiniMixer is at an **internal v0.14 Product Real stability checkpoint**, plus further unreleased
 work tracked under `[Unreleased]` in `CHANGELOG.md` (no app-count limit, a queued start lane,
-release packaging, accessibility). None of this is a public release: no tag has been cut and the
+every audio process of an app tapped together and attributed by resource coalition, a **direct
+aggregate output engine** that removed the random crackle, release packaging, accessibility). None
+of this is a public release: no tag has been cut and the
 app's marketing version is unchanged (`0.13`). It remains experimental and is not a finished Windows
 Volume Mixer replacement.
 
@@ -23,14 +25,19 @@ What works today:
   replay and gain — with **no app-count limit** (owner decision; `maxConcurrentLiveSessions` is
   `nil`). When the global Real App Control toggle is ON, interacting with an eligible app row starts
   a real session for that row, and any number of rows can be Real at once. Each session owns its own
-  tap, private aggregate device, IOProc, and replay `AudioQueue`, so CPU grows with every active app.
+  process tap (over every audio process of that app), private aggregate device, and IOProc, so CPU
+  grows with every active app. By default the aggregate is the default output device plus the tap and
+  its one IOProc writes the gained audio straight to the device (no `AudioQueue`); a legacy
+  `AudioQueue` path remains as a fallback (see [Architecture Notes](#architecture-notes)).
   Starts go through a single **start lane**: while one app is still resolving or starting, further
   start requests are queued (the row shows its pending badge) and start one after another instead of
   being rejected. The active banner summarizes three or more apps as "first two names +N more" with
   "Stop All".
 - Browser/helper-row resolution (YouTube/Safari-style rows whose visible PID is not tap-eligible)
   behind the global toggle and only after explicit interaction, keeping helper PIDs/process names
-  hidden from the main UI.
+  hidden from the main UI. Multi-process apps (browsers, Electron apps) are tapped through the HAL's
+  own process list and attributed by resource coalition, so Safari and a Safari web app, or Chrome and
+  a Chrome PWA/Canary, can each be Real at once.
 - A collapsed Advanced section with Process Tap diagnostics, Mute/Replay probes, manual one-app Live
   Control, helper discovery, and a separate two-session Two-App Readiness diagnostic.
 - VoiceOver labels, values, and hints across the main panel and the Advanced diagnostics.
@@ -45,10 +52,16 @@ Stability checkpoint status:
   underrun. See `CHANGELOG.md` (`[v0.14] - Unreleased`) for details.
 - A normal-use three-session long-run smoke **passed (with caveat)** on one Mac: Drops/Fail/Starv
   stayed 0 during normal use and no `sudo killall coreaudiod` was needed.
-- **Real-hardware evidence stops at three concurrent sessions.** More sessions are allowed and are
-  covered by fake-backed tests (for example a 7-app end-to-end test), but CPU, Drops/Fail/Starv,
-  and teardown timing with more than three real sessions have **not** been measured yet. Product
-  Real Control remains experimental and opt-in.
+- **Direct output engine, owner's listening tests on one Mac:** crackle-free (no crackle heard,
+  `underruns=0 overflows=0` in the log) at 48 kHz and at the built-in speakers' default 44.1 kHz, with
+  up to **six concurrent sessions** (Safari, Spotify, YouTube and two Netflix Safari web apps, Music),
+  and also on a second output device at 48 kHz with Firefox, Safari, Spotify, Music and YouTube (every start logged `output=direct rate=48000 resample=false`). Before this engine the `AudioQueue` path crackled at
+  random, typically when a second session started.
+- **Resource evidence still stops at three concurrent sessions.** More sessions are allowed and are
+  covered by fake-backed tests (for example a 7-app end-to-end test) and, for audio quality only, by
+  the listening tests above, but CPU, memory, teardown timing, Stop All and sleep/wake with more than
+  three real sessions have **not** been measured yet. Product Real Control remains experimental and
+  opt-in.
 
 What is still mock / UI-only:
 
@@ -96,8 +109,13 @@ starts merely because an app appears.
 - Experimental Mute Probe that may briefly suppress the selected app during a user-triggered test
 - Experimental Replay Probe with fixed gain choices: 25%, 50%, 75%, and 100%
 - Experimental one-app Live Control session with Start/Stop, selected gain, smoothing, safety timeout, and cleanup
-- `ProcessTapLiveSessionManager` multi-session engine (one tap, private aggregate device, IOProc, and
-  `AudioQueue` per session) behind Product Real Control
+- `ProcessTapLiveSessionManager` multi-session engine (one tap, private aggregate device, and IOProc
+  per session; an `AudioQueue` only on the legacy fallback path) behind Product Real Control
+- Direct aggregate output engine: the tapped audio is gained and written to the output device from one
+  IOProc on one clock, with in-engine sample-rate conversion (or passthrough) when the tap and device
+  rates differ
+- Per-app audio process discovery through the HAL process-object list, attributed by resource
+  coalition (Safari vs Safari web apps, Chrome vs PWAs/Canary), with a bundle-id fallback
 - Advanced Two-App Readiness test for short-lived multi-session diagnostics
 - Isolated Advanced readiness path with up to two short-lived diagnostic live sessions
 - Per-session Two-App Readiness diagnostics: app name, state, callbacks, peak/RMS, queued buffers, drops, failures, and gain
@@ -171,7 +189,7 @@ Mock-only today:
 
 By default, the global Real app control mode is OFF. In that mode, app rows are UI state only unless the user explicitly starts manual Live control from Advanced. Moving a normal row slider does not change Safari, Music, Spotify, Chrome, Discord, or any other app's real audio.
 
-When the global mode is ON, moving an eligible app row slider or clicking mute on an eligible inactive row can start a real experimental Process Tap live session for that app. There is **no app-count limit** (owner decision; `maxConcurrentLiveSessions` is `nil`): interacting with another eligible app starts an additional session, and every Real app keeps running until it is stopped. Starts are serialized through a single start lane: while one app is still resolving its audio helper or starting its session, further start requests (slider, mute, or row toggle) are queued in order, the queued rows show the pending badge, and each one is re-checked and started when the lane frees up. Stop All, turning Real App Control off, an output-device change, sleep, quitting MacMiniMixer, closing the panel, or quitting the queued app drops queued starts (a queued row's own toggle is ignored while it waits, like any pending row). Every Real app adds its own tap, private aggregate device, IOProc, and `AudioQueue`, so CPU and Core Audio load grow with each one; a start that fails for resource reasons shows the normal per-app "Could not start live control for this app" warning. For visible tap-eligible apps, this uses the visible app PID directly. For YouTube/Safari-style browser rows whose visible PID is not tap-eligible, MacMiniMixer may resolve an audio helper PID internally after the user interaction, keep the row labeled as the visible app, and hide helper PID/process details from the main UI. For each active row the app's audio is captured, the original stream is suppressed, processed audio is replayed, the row slider maps to live gain, and the row mute maps to gain 0. Non-active rows remain preview/UI-state only.
+When the global mode is ON, moving an eligible app row slider or clicking mute on an eligible inactive row can start a real experimental Process Tap live session for that app. There is **no app-count limit** (owner decision; `maxConcurrentLiveSessions` is `nil`): interacting with another eligible app starts an additional session, and every Real app keeps running until it is stopped. Starts are serialized through a single start lane: while one app is still resolving its audio helper or starting its session, further start requests (slider, mute, or row toggle) are queued in order, the queued rows show the pending badge, and each one is re-checked and started when the lane frees up. Stop All, turning Real App Control off, an output-device change, sleep, quitting MacMiniMixer, closing the panel, or quitting the queued app drops queued starts (a queued row's own toggle is ignored while it waits, like any pending row). Every Real app adds its own tap, private aggregate device, and IOProc (and an `AudioQueue` only on the legacy fallback path), so CPU and Core Audio load grow with each one; a start that fails for resource reasons shows the normal per-app "Could not start live control for this app" warning. For visible tap-eligible apps, this uses the visible app PID directly. For YouTube/Safari-style browser rows whose visible PID is not tap-eligible, MacMiniMixer may resolve an audio helper PID internally after the user interaction, keep the row labeled as the visible app, and hide helper PID/process details from the main UI. For each active row the app's audio is captured, the original stream is suppressed, processed audio is replayed, the row slider maps to live gain, and the row mute maps to gain 0. Non-active rows remain preview/UI-state only.
 
 The Advanced diagnostics section can create short-lived Core Audio process tap diagnostics for a selected running app. During diagnostic tests, it creates temporary private Core Audio resources, shows a live diagnostic level meter, reports callback count plus peak/RMS levels, and then cleans up.
 
@@ -179,7 +197,7 @@ The Advanced Two-App Readiness test is separate from the main mixer. It uses an 
 
 Safari, YouTube, and other browser/web surfaces may not be tap-eligible through the visible app PID because their audio can be rendered by helper/content processes instead of the visible app process. In the main product path, helper resolution is available only behind the global Real App Control toggle and only after user interaction. In Advanced, helper targets remain manually selectable or auto-detected for diagnostics. Helper mappings are not persisted across app launches.
 
-Replay Probe, manual Live Control, and global opt-in row control go further: they can temporarily suppress the selected app's original output, replay captured audio through `AudioQueue`, and apply gain. These paths are experimental and user-triggered. Replay Probe and the Advanced manual Live Control are one-app; global opt-in Product Real Control has no app-count limit, but a row only becomes real after the user interacts with it. None of them make every row a real mixer control by default.
+Replay Probe, manual Live Control, and global opt-in row control go further: they can temporarily suppress the selected app's original output, replay captured audio (Replay Probe through an `AudioQueue`; live control through the output device's own IOProc by default), and apply gain. These paths are experimental and user-triggered. Replay Probe and the Advanced manual Live Control are one-app; global opt-in Product Real Control has no app-count limit, but a row only becomes real after the user interacts with it. None of them make every row a real mixer control by default.
 
 The app includes `NSAudioCaptureUsageDescription` for system audio capture experiments. It does not request system audio recording permission on launch. macOS may ask for System Audio Recording permission when the user explicitly runs a diagnostic or live control action.
 
@@ -187,7 +205,48 @@ The app includes `NSAudioCaptureUsageDescription` for system audio capture exper
 
 Product Real Control runs any number of concurrent live sessions through
 `ProcessTapLiveSessionManager`; each session owns its own Core Audio process tap, private aggregate
-device, IOProc, and replay `AudioQueue`.
+device, and IOProc. How the tapped audio gets back out depends on the live output mode:
+
+- **Direct aggregate output (default).** One private aggregate = the default output device
+  (main/clock sub-device, drift compensated) + the process tap. One IOProc reads the tap from
+  `inInputData` and writes the faded/gained samples to `outOutputData`, so input and output share one
+  clock and there is no `AudioQueue` and no cross-thread hand-off. This replaced the earlier
+  two-clock design (tap-only aggregate IOProc → cross-thread → `AudioQueue` on the output device's
+  clock), whose unavoidable underruns were the random crackle. If the tap's rate differs from the
+  device's, the IOProc converts inside the engine (the device's own rate is never changed); on the
+  real hardware tested the HAL already delivers the tap at the aggregate's rate, which the engine
+  detects and copies straight through (`path=passthrough`).
+- **Legacy `AudioQueue` output (fallback, scheduled for removal).** Used when
+  `MacMiniMixerLiveOutputMode=audioQueue` is set, when the output device also has input streams
+  (headsets/interfaces with a microphone — the tap stream's position in the aggregate's input list is
+  not documented, and the wrong one would play the microphone), or when the direct setup fails
+  (formats/rates it cannot render, or any aggregate/IOProc step). Its code lives in
+  `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift`. Replay Probe keeps
+  its own separate `AudioQueue`.
+- **Per-app process attribution.** A visible app row is mapped to the Core Audio process objects that
+  render its audio (the HAL's own client list), then tapped together in one multi-process tap.
+  Matching order: the app's pid, never another running row's own app pid, descendants, then the
+  **resource coalition** (`proc_pidinfo` + `PROC_PIDCOALITIONINFO`) — when both coalition ids are
+  known, equal means "same app" and no bundle rule is consulted. Only when a coalition id is unknown
+  does the **bundle-id fallback** apply (exact bundle id or an allow-listed helper; never sub-apps or
+  sibling channels; never another row's exact bundle id; Safari's `com.apple.WebKit.*` rule only while
+  no other WebKit-owning row runs).
+
+Two `defaults write` switches (read when a live controller is created, so restart the app after
+changing them; the bundle identifier is currently `com.example.MacMiniMixer`):
+
+```bash
+# Force the legacy AudioQueue output path (A/B fallback); remove the key to return to direct output
+defaults write com.example.MacMiniMixer MacMiniMixerLiveOutputMode audioQueue
+defaults delete com.example.MacMiniMixer MacMiniMixerLiveOutputMode
+
+# Do not convert sample rates inside the direct engine: a tap/device rate mismatch then falls back
+# to the AudioQueue path (the behavior before in-engine conversion existed)
+defaults write com.example.MacMiniMixer MacMiniMixerDirectResample off
+defaults delete com.example.MacMiniMixer MacMiniMixerDirectResample
+```
+
+Other architecture notes:
 
 - `ProcessTapLiveSessionManager` wraps the Core Audio live controller and tracks per-session state.
 - `ProcessTapLiveSessionID` and `ProcessTapLiveSessionState` back per-session tracking.
@@ -221,7 +280,7 @@ device, IOProc, and replay `AudioQueue`.
 - Process Tap resource cleanup is guarded for idempotent, thread-safe cleanup.
 - Process Tap availability is guarded so Process Tap features require macOS 14.2 or later while non-Process-Tap app features can still be built with the macOS 13.0 deployment target.
 - Shared Process Tap diagnostics accumulation keeps callback/peak/RMS semantics consistent.
-- Shared Process Tap output buffer copying covers Float32 interleaved/planar sample copying while Replay and Live `AudioQueue` owners remain separate.
+- Shared Process Tap output buffer copying covers Float32 interleaved/planar sample copying while the Replay and legacy Live `AudioQueue` owners remain separate. The direct engine's real-time-safe copy/gain/channel-mapping (`ProcessTapDirectOutputCopier`) and sample-rate resampler (`ProcessTapDirectOutputResampler`) live in the same file.
 - `AdvancedHelperDiscoveryCoordinator` owns helper discovery, manual helper probe, Find audio helper, and Advanced helper target state.
 - `SystemOutputCoordinator` owns system volume/device state and pure volume/device operations.
 - `AdvancedProcessTapDiagnosticsCoordinator` owns Process Tap Test, Mute Probe, and Replay Probe.
@@ -253,10 +312,27 @@ The current project is a native macOS Xcode project. It does not use Flutter and
 ## Known Limitations and Caveats
 
 - **Product Real Control is experimental and opt-in** (the global toggle is OFF by default). It has
-  **no app-count limit**, but every Real app adds its own tap, private aggregate device, IOProc, and
-  `AudioQueue`, so CPU and Core Audio load grow with each active app. Real-hardware characterization
-  only covers up to **three** concurrent sessions; behavior with more (CPU, Drops/Fail/Starv,
-  output-device change, Stop All, sleep/quit timing) has **not** been measured yet.
+  **no app-count limit**, but every Real app adds its own tap, private aggregate device, and IOProc
+  (plus an `AudioQueue` on the legacy fallback path), so CPU and Core Audio load grow with each active
+  app. Real-hardware resource characterization only covers up to **three** concurrent sessions;
+  behavior with more (CPU, memory, Drops/Fail/Starv, output-device change, Stop All, sleep/quit
+  timing) has **not** been measured yet. Up to six sessions were only listened to for crackle (none
+  heard, underruns 0) with the direct engine.
+- **The direct output engine is checked on a few setups only.** Crackle-free on one Mac at 48 kHz and
+  at the default 44.1 kHz on built-in speakers, and on a second output device at 48 kHz; other
+  devices, sample rates, aggregate/clock-drift behavior and macOS versions have not been verified.
+  Output devices that also have input streams (some headsets and interfaces) still use the legacy
+  `AudioQueue` path, which can crackle; it is scheduled for removal once the direct engine covers more
+  devices. If something sounds wrong, `defaults write com.example.MacMiniMixer MacMiniMixerLiveOutputMode
+  audioQueue` switches back for comparison (see [Architecture Notes](#architecture-notes)).
+- **Per-app process attribution uses an undocumented flavor.** To keep Safari from Safari web apps
+  (and Chrome from Chrome PWAs/Canary) apart, the app asks `proc_pidinfo` for `PROC_PIDCOALITIONINFO`
+  (flavor 20, one 40-byte struct). The function is public libproc, but the flavor and struct are
+  defined only in XNU's private `proc_info_private.h` (mirrored by value in the code, checked against
+  the XNU sources, not against Apple documentation), so a future macOS could change them. A failed or
+  short read means "unknown" and attribution falls back to bundle-id rules, which are less precise.
+  Two rows whose apps share one coalition (an app launched from Terminal, a game spawned by its
+  launcher) can still contend for the same helper processes; whichever starts first gets them.
 - Product Real starts are **serialized**: with several rows requested at once, they start one after
   another (queued rows show the pending badge). A browser/helper row can take a second or more to
   resolve, and rows queued behind it wait for it.
@@ -291,14 +367,19 @@ The current project is a native macOS Xcode project. It does not use Flutter and
 4. Look for the `MacMiniMixer` icon in the macOS menu bar.
 5. Click the menu bar icon to open the mixer panel.
 
-To build the same ad-hoc signed `.zip` locally, run `scripts/package-app.sh` (output in `dist/`).
+To build the same ad-hoc signed `.zip` locally, run `scripts/package-app.sh` (output in `dist/`). It
+builds Release into its own `./.DerivedData-release` folder with code coverage explicitly off, so a
+test run's coverage instrumentation can never end up in the audio IOProc of the app you install.
+GitHub Actions can be unavailable (the repository's macOS runner minutes are limited, and docs-only
+changes skip CI), so a local `xcodebuild test` plus `scripts/package-app.sh` is the fallback.
 
 ### Prebuilt zip (CI artifact or release)
 
 1. Download a build:
    - **CI artifact:** open a green `Build` workflow run in the repository's GitHub Actions tab and
      download the `MacMiniMixer-app` artifact (kept for 14 days; you must be signed in to GitHub). It
-     contains `MacMiniMixer-<version>-<commit>.zip` and its `.sha256`.
+     contains `MacMiniMixer-<version>-<commit>.zip` and its `.sha256`. The packaging job runs only for
+     `main` pushes and manual runs.
    - **Release zip:** from GitHub Releases, once a release is published. None has been published yet;
      the release workflow only creates drafts for a maintainer to review.
 2. Unzip it and move `MacMiniMixer.app` to `/Applications`.
@@ -343,7 +424,9 @@ To build the same ad-hoc signed `.zip` locally, run `scripts/package-app.sh` (ou
 - Normal app row controls are preview/UI-state only by default and become real only for active Real rows through explicit experimental opt-in.
 - MacMiniMixer does not install a driver.
 - MacMiniMixer does not create a persistent virtual audio device.
-- MacMiniMixer does not use private APIs.
+- MacMiniMixer does not use private APIs. One disclosed grey area: per-app process attribution calls the
+  public `proc_pidinfo` with an undocumented flavor (`PROC_PIDCOALITIONINFO`, see Known Limitations);
+  if it ever fails the app falls back to bundle-id matching.
 - MacMiniMixer does not add third-party dependencies.
 
 Output device and system volume behavior is implemented through public macOS/Core Audio APIs. Per-app audio work remains experimental and intentionally limited while the architecture is researched further.
@@ -355,6 +438,9 @@ Near-term:
 - **Real-hardware characterization of many concurrent Real sessions** (for example 5–8 apps in a
   Release build): CPU, Drops/Fail/Starv, output-device change, Stop All, quitting one app, and
   sleep/wake. This is the first gate now that the app-count limit is gone.
+- **Widen real-hardware coverage of the direct output engine** (more output devices and sample
+  rates, headsets with input streams, macOS versions), then remove the legacy `AudioQueue` output
+  path (`ProcessTapLegacyAudioQueueOutput.swift`)
 - Route engine-initiated stops (output change / app exit / timeout detected inside a session)
   through the lifecycle and settle gates, then look at a faster Stop All and a shorter main-thread
   teardown at sleep/quit with many sessions
@@ -376,7 +462,7 @@ Research and experiments:
 - Refine helper confidence/scoring for auto-detected audio helpers
 - Investigate helper PID changes across tab reloads, navigation, and browser helper restarts
 - Refine browser/helper row mapping behind explicit experimental mode
-- Evaluate whether any output queue architecture should be unified later, after more manual audio regression testing
+- Evaluate whether the Replay Probe's `AudioQueue` should be unified or dropped now that live output is direct, after more manual audio regression testing
 - Evaluate independent sessions versus a centralized mixer/renderer, using many-session measurements
 - Long-run CPU, latency, buffer drop, and cleanup diagnostics with many concurrent sessions
 - Optional read-only reassessment of the remaining `MixerViewModel` responsibilities (lifecycle
@@ -403,7 +489,8 @@ Background Music and BlackHole may be studied architecturally later, but their c
 - General per-app volume mixer behavior out of the box (Real control is opt-in and per row)
 - Automatic control of every visible app
 - Production-grade multi-app real mixer behavior: simultaneous control of any number of apps exists
-  experimentally, but it is only characterized on real hardware up to three sessions
+  experimentally, but resource use is only characterized on real hardware up to three sessions (up to
+  six were only listened to for crackle)
 - Production automatic browser/helper mapping for every relevant main UI row
 - Stable tab-level YouTube/Safari mapping
 - Making normal app row sliders real by default

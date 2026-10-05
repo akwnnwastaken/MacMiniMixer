@@ -17,8 +17,15 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
   Real at once; starts go through a single **queued start lane** (one resolution or start in flight,
   the rest wait FIFO with the pending badge). Also browser/helper row resolution, Replay Probe, and
   the Two-App Readiness diagnostic.
-- Real-hardware evidence covers **up to three** concurrent sessions only; more sessions have only
-  been exercised by fake-backed tests.
+- Live audio now plays through a **direct aggregate output engine** (default; one IOProc reads the
+  tap and writes the output device on one clock, no `AudioQueue`), which removed the random crackle.
+  The old `AudioQueue` path is a legacy fallback (override `MacMiniMixerLiveOutputMode=audioQueue`,
+  output device with input streams, or a failed direct setup), scheduled for removal. An app's audio
+  processes are tapped together and attributed by resource coalition.
+- Real-hardware **resource** evidence (CPU, teardown timing) covers **up to three** concurrent
+  sessions only. The direct engine was additionally listened to with up to six sessions at 48 kHz and
+  44.1 kHz and on a second output device (no crackle); beyond that, sessions have only been exercised
+  by fake-backed tests.
 - App rows are preview/UI-state only by default. Real control requires the global "Real app control"
   toggle (OFF by default) plus explicit user interaction with a row.
 
@@ -53,7 +60,12 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Browser/helper row resolution: helper PIDs change on tab reload, browser restart, or
   navigation. Cache is validation-first but not persistent.
 - Live Control audio quality: fade-in/out ramp is tuned but not regression-tested across
-  all macOS versions.
+  all macOS versions. The direct engine is crackle-free on the owner's Mac (built-in speakers at 48
+  and 44.1 kHz, a second output device at 48 kHz) but not verified on other devices, sample rates or
+  macOS versions; devices with input streams still use the legacy `AudioQueue` path, and the
+  `path=converting` resampler branch has not been seen on real hardware (the HAL passes through).
+- Per-app process attribution: relies on an undocumented `proc_pidinfo` coalition flavor with a
+  bundle-id fallback; rows that share one coalition contend for the same helpers.
 - Two-App Readiness: works in controlled tests (Spotify + YouTube helper, 0 drops).
   It is a diagnostic, separate from Product Real Control.
 - Many concurrent Product Real sessions: allowed, but not characterized on real hardware beyond
@@ -68,8 +80,20 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 
 - **`ProcessTapResourceContext.cleanup()`** — idempotency lock is critical. Race between
   timeout, user-stop, and output-device-change paths. Touch carefully.
-- **`ProcessTapLiveOutputQueue` / `ProcessTapReplayOutputQueue`** — audio callback path.
-  Any change risks audible regression. Manual audio testing required.
+- **The direct output renderer and its IOProc** (`ProcessTapDirectOutputRenderer` in
+  `CoreAudioProcessTapLiveController.swift`, `ProcessTapDirectOutputCopier` /
+  `ProcessTapDirectOutputResampler` in `ProcessTapOutputBufferCopier.swift`) — the default live audio
+  path (one aggregate IOProc: tap in, gained audio out, one clock). Real-time rules: no allocation,
+  blocking lock, logging or array growth in the callback; control reaches it through a try-lock only.
+  Any change risks audible regression (crackle). Manual listening tests on real hardware required
+  (`docs/MANUAL_TEST_CHECKLIST.md` §21). Never change the user's output-device sample rate
+  automatically (owner decision). The legacy `ProcessTapLiveOutputQueue` (now in
+  `ProcessTapLegacyAudioQueueOutput.swift`) and `ProcessTapReplayOutputQueue` are frozen: the live
+  queue is a fallback scheduled for removal, so don't extend or "unify" it (see `docs/DECISIONS.md`,
+  "Why live output renders straight to the device through one aggregate IOProc").
+- **`AppAudioProcessMatcher` attribution** — resource-coalition matching with a bundle-id fallback.
+  It relies on an undocumented `proc_pidinfo` flavor; keep the fallback, and don't add further
+  private or undocumented calls.
 - **`ProcessTapLiveGainRamp`** — fade-in/fade-out frame math. Changes affect audio clicks.
 - **`ProcessTapDiagnosticsAccumulator`** — shared between Live and Replay paths. Changing
   measurement semantics (peak, RMS) affects all diagnostics UI.
@@ -107,11 +131,14 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 | `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
 | `MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift` | Advanced Two-App Readiness selection, target options, start/stop, snapshot/result state |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionManager.swift` | Multi-session engine (`maxSessions: Int?`) + Core Audio lifecycle gate |
-| `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live Control implementation (one controller per session) |
+| `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live Control implementation (one controller per session): direct aggregate output (default) + fallback to the legacy path, direct renderer |
+| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift` | **Legacy** `AudioQueue` live output; fallback only, scheduled for removal |
+| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveControlling.swift` | `ProcessTapLiveOutputMode` and `ProcessTapDirectResampleMode` (the two `defaults write` switches) |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLifecycle.swift` | Core Audio resource management |
-| `MacMiniMixer/Services/Audio/ProcessTap/AppAudioTargetResolving.swift` | Helper resolution + cache |
+| `MacMiniMixer/Services/Audio/ProcessTap/AppAudioTargetResolving.swift` | Helper resolution + cache; `AppAudioProcessMatcher` (HAL process list → app, coalition / bundle fallback) |
+| `MacMiniMixer/Services/Processes/SystemProcessLister.swift` | Process list/ancestry, incl. `resourceCoalitionID` (`proc_pidinfo`, undocumented flavor) |
 | `MacMiniMixer/Services/Audio/ProcessTap/HelperProcessCandidateDiscovery.swift` | Process tree scanning |
-| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapOutputBufferCopier.swift` | Shared sample copy (unit tested) |
+| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapOutputBufferCopier.swift` | Shared sample copy; direct-output copier, FIFO and sample-rate resampler (unit tested) |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapDiagnosticsAccumulator.swift` | Shared peak/RMS accumulator (unit tested) |
 | `MacMiniMixer/Services/Audio/PreviewAudioStateController.swift` | Production `AudioControlling`: in-memory preview slider/mute state, **not** an audio path |
 | `MacMiniMixer/Support/AppConstants.swift` | All timing and buffer constants, `maxConcurrentLiveSessions` |
@@ -146,6 +173,8 @@ After touching the audio path or MixerViewModel, at minimum verify:
 - Output device switching works and refreshes volume.
 - Spotify/Music direct Product Real Control starts, gain applies, per-app stop and Stop All work.
 - Several rows started quickly queue (pending badge) and then start one after another.
+- After touching the live audio path: the direct engine check in `docs/MANUAL_TEST_CHECKLIST.md` §21
+  (Advanced card `Queued 0`, log `output=direct`, `resample report … path=`, no audible crackle).
 - Product Real stops on output device change; Advanced manual Live Control also stops on its 60s
   timeout.
 - App quit during live control stops session cleanly (check Console for cleanup logs).
@@ -158,14 +187,23 @@ Full checklist: `docs/MANUAL_TEST_CHECKLIST.md`
 
 ## Safety Rules
 
-- **No private APIs.** Only public Core Audio, AudioToolbox, AppKit APIs.
+- **No private APIs.** Only public Core Audio, AudioToolbox, AppKit APIs. One disclosed grey area:
+  `proc_pidinfo` is called with the undocumented `PROC_PIDCOALITIONINFO` flavor for per-app
+  attribution (read-only, falls back to bundle-id rules); do not add anything similar.
 - **No HAL driver.** No kernel extension, no user-space HAL plug-in, no system extension.
 - **No persistent virtual audio device.** The private aggregate device is temporary and
   destroyed in cleanup. Nothing survives an app quit or crash.
 - **No audio saving.** No audio is written to disk anywhere in the codebase.
 - **No app-count cap in the product (owner decision).** Do not add one back without asking. Every
-  Real app costs its own tap + aggregate + IOProc + AudioQueue, so judge changes with Release
-  measurements, and do not claim many-session stability without real-hardware evidence.
+  Real app costs its own tap + aggregate + IOProc (+ an AudioQueue on the legacy fallback path), so
+  judge changes with Release measurements, and do not claim many-session stability without
+  real-hardware evidence.
+- **Never change the user's output-device sample rate automatically** (owner decision); the direct
+  engine converts or passes through inside the IOProc instead.
+- **Never block on CI.** GitHub Actions can be out of macOS minutes (jobs fail within seconds with no
+  runner). Re-run an infra failure at most once, then report CI as unavailable and hand over the local
+  `xcodebuild test` command; delegated agents never push, trigger or poll CI. Docs-only changes skip
+  CI anyway.
 - **Product starts stay serialized** through the queued start lane, and product create/destroy stays
   behind the settle and lifecycle gates.
 - **Advanced tools stay in Advanced.** Process Tap Test, Replay Probe, Two-App Readiness,
@@ -188,3 +226,6 @@ Full checklist: `docs/MANUAL_TEST_CHECKLIST.md`
 - [`docs/HANDOFF.md`](HANDOFF.md) — current state, guardrails, recent commits, next direction
 - [`docs/PLAN_MULTI_APP.md`](PLAN_MULTI_APP.md) — multi-app plan and its remaining hardware gates
 - [`docs/RELEASING.md`](RELEASING.md) — packaging and draft-release process
+- `.claude/skills/delegate-subagents/` (`SKILL.md`, `project-brief.md`) and `.claude/agents/` — how to
+  delegate work to cost-tiered subagents (read the brief first; it holds the cloud-session
+  constraints and guardrails)

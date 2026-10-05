@@ -21,8 +21,8 @@ Run `git reset --hard <base given in your prompt>` first and confirm with `git l
 
 ## Guardrails
 - No private APIs, no HAL driver / virtual device, no audio written to disk.
-- Don't touch without an explicit ask: the audio callback path, `ProcessTapLiveOutputQueue`,
-  `ProcessTapLiveGainRamp`, `ProcessTapResourceContext.cleanup()`, `AppConstants` timing values.
+- Don't touch without an explicit ask: the audio callback paths (`ProcessTapDirectOutputRenderer` /
+  direct IOProc, legacy `ProcessTapLegacyAudioQueueOutput.swift`), `ProcessTapLiveGainRamp`, `ProcessTapResourceContext.cleanup()`, `AppConstants` timing values.
 - Don't reintroduce a default-output Core Audio property listener (it once left system audio
   silent until `sudo killall coreaudiod`).
 - No app-count limit for Product Real Control (owner decision) — don't add a cap.

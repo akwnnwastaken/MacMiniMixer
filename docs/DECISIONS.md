@@ -54,6 +54,19 @@ session and is destroyed in `cleanup()`.
   macOS 14.2, is sufficient for all current use cases.
 - An open-source project built on private APIs would be fragile and harder to maintain.
 
+**Grey area (per-app process attribution, `6d1d265`)**: to tell Safari's processes from a Safari web
+app's (and Chrome's from Chrome PWAs'/Canary's), the app reads each process's resource coalition id
+with the public libproc function `proc_pidinfo` and the flavor `PROC_PIDCOALITIONINFO` (20). The
+function is public, but the flavor number and the `proc_pidcoalitioninfo` struct (and
+`COALITION_TYPE_RESOURCE`) are defined only in XNU's private headers
+(`bsd/sys/proc_info_private.h`, `osfmk/mach/coalition.h`), so the SDK does not expose them and the raw
+values are mirrored in `SystemProcessLister` (checked against the XNU sources, not against Apple
+documentation). It is accepted because it is read-only, needs no entitlement, and degrades safely: a
+failed or short read, or id 0, means "unknown", and `AppAudioProcessMatcher` then falls back to its
+bundle-id rules (less precise: they cannot separate sibling apps as reliably). If the flavor ever stops
+working, attribution gets worse; nothing breaks. **Would revisit if**: Apple documents a public way
+to ask which app a helper process belongs to, or the flavor changes.
+
 ---
 
 ## Why helper discovery is user-triggered
@@ -223,7 +236,9 @@ the session cap at 3.
   persistent one surfaced as a fault — never swallowed as a clean stop.
 - **Dispose the output queue after IOProc stop/destroy (P178)**: disposing the queue while the
   IOProc can still enqueue produces self-inflicted Drops/Fail during teardown. Ordering the
-  dispose after the producer is gone removes that spike.
+  dispose after the producer is gone removes that spike. (This applies to the legacy `AudioQueue`
+  path; the default direct output path has no queue and instead waits, bounded, for the IOProc to
+  render its fade-out before stopping IO.)
 - **Serialize Product Real Core Audio lifecycle operations (P181)**: each session owns a private
   aggregate device wrapping a tap; creating/destroying one churns the shared coreaudiod route.
   Overlapping a teardown with another session's setup compounded the churn and starved a
@@ -395,6 +410,17 @@ structs with duplicated buffer pool + copy logic.
 **Would revisit if**: Both paths have been validated through manual audio regression
 testing across multiple macOS versions, and the behavioral delta between them is clearly
 understood and can be expressed as a clean configuration struct.
+
+> **Superseded in part (direct output engine, `377f1a8`).** The live `AudioQueue` is no longer the
+> default live output: Product Real and Advanced live control now render through one aggregate IOProc
+> (see "Why live output renders straight to the device through one aggregate IOProc"). So the
+> "`ProcessTapLiveOutputQueue` is the audio callback path, do not change it casually" guidance
+> (also in `docs/QUICK_START_FOR_AGENTS.md`) now applies to the **direct renderer and its IOProc**
+> (`ProcessTapDirectOutputRenderer`, `ProcessTapDirectOutputCopier`, `ProcessTapDirectOutputResampler`).
+> The live queue is a **legacy fallback** (moved to `ProcessTapLegacyAudioQueueOutput.swift`) and is
+> scheduled for removal rather than for unification with the Replay queue; the Replay Probe keeps its
+> own `AudioQueue`. Until the legacy path is removed, treat it as frozen: fix only what a regression
+> in the fallback needs.
 
 ---
 
@@ -671,8 +697,9 @@ active session".
   with (global "Real app control" ON) should be controllable at the same time. With a cap of 3, the
   fourth app the user touched simply refused, which contradicts the north-star goal.
 - The engine already scaled per session: each session has its own controller, process tap, private
-  aggregate device, IOProc, and `AudioQueue`, and the manager and `ProductRealControlState` track
-  sessions as collections. Nothing in the audio path depends on a count.
+  aggregate device, IOProc, and (at that time; today only on the legacy fallback path) `AudioQueue`,
+  and the manager and `ProductRealControlState` track sessions as collections. Nothing in the audio
+  path depends on a count.
 - Several of the "N > 3 needs…" items from the cap=3 entry were addressed in code around the
   decision: the banner summarizes any N ("first two +N more", full list in the accessibility label),
   quitting one app no longer stops other sessions (`da2b06e`), the cached-helper retry works next to
@@ -792,3 +819,79 @@ Advanced surface (`processTapLiveDiagnostics` and the Advanced coordinator's pro
 **Would revisit if**: per-row live meters are added (each row then needs its own per-session
 diagnostics state instead of the single shared surface — gap D in `PLAN_MULTI_APP.md`), or users need
 to choose which session the Advanced card shows.
+
+---
+
+## Why live output renders straight to the device through one aggregate IOProc
+
+**Decision** (`377f1a8`, with in-engine sample-rate handling in `da6ed70`): The default live output
+path of Product Real and Advanced live control is the **direct aggregate output engine**: one private
+aggregate device whose main/clock sub-device is the default output device and which also contains the
+process tap (drift compensated), and **one IOProc** that reads the tap from `inInputData` and writes
+the faded/gained samples to `outOutputData`. There is no `AudioQueue` and no cross-thread buffer
+hand-off. The old tap-only aggregate + `AudioQueue` path stays as a **legacy fallback** (used when
+`MacMiniMixerLiveOutputMode=audioQueue` is set, when the output device has input streams, or when the
+direct setup fails) and is scheduled for removal.
+
+**Context — random crackle came from two clocks.** The previous live path ran a tap-only aggregate
+whose IOProc (tap clock) copied buffers across threads into a separate `AudioQueue` that runs on the
+output device's clock. Two free-running clocks joined by a hand-off will underrun sooner or later, so
+Product Real Control crackled at random, typically when a second session started. The earlier
+hardening (P177–P182, the toggle guard) addressed teardown/startup transients and made the symptoms
+measurable, but could not remove a drift between two clocks that is built into the structure.
+
+**Reasoning**:
+- It follows Apple's own structure for tap playback: aggregate = output device (main sub-device, so
+  it provides the clock) + tap with drift compensation. Input and output are then delivered in the
+  same callback on one clock, so there is no queue depth to tune and nothing to underrun between
+  threads.
+- Gain and fades stay what they were: the renderer reuses `ProcessTapLiveGainRamp` (fade-in on start,
+  fade-out before stop) and receives gain/fade requests through a try-lock only, so the audio thread
+  still never blocks, allocates or logs. The copy itself is a pure, real-time-safe function
+  (`ProcessTapDirectOutputCopier`) that handles interleaved/non-interleaved layouts, mono/stereo
+  mapping, extra channels (zeroed) and short/missing input (silence), and is unit-tested.
+- **Fallback instead of failure.** Anything the direct path cannot do safely falls back to the
+  legacy path (after tearing down every direct-path resource) rather than failing the start. The
+  important case is an output device that also has **input streams** (headsets, interfaces with a
+  microphone): the aggregate's input list then holds the device's microphone as well as the tap, the
+  order is not documented, and the wrong stream would play the microphone, so only output-only devices
+  use the direct path. Unsupported formats/rates and any aggregate/IOProc failure fall back the same
+  way, and the reason is logged.
+- **Never change the user's device sample rate** (owner decision). At the default 44.1 kHz on
+  built-in speakers the aggregate's tap stream *reports* 48 kHz. The first direct version rejected
+  that as a "sample rate mismatch" and fell back to the crackly path. The engine now accepts differing
+  rates (ratio within 1/8..8) and converts inside the IOProc with `ProcessTapDirectOutputResampler`
+  (preallocated FIFO + `AudioConverter`, created and warmed up off the audio thread; underruns render
+  silence and are counted). The real-hardware log then showed the HAL already delivers the tap at the
+  aggregate's rate — 512 tap frames per 512 output frames every cycle, `measuredRatio=1.00000` — so
+  the "mismatch" was a property of the reported format, not of the audio. The resampler therefore
+  **measures** the first cycles and passes frames straight through (`path=passthrough`) when it sees
+  one tap frame per output frame; it keeps the converter only as a safety net for a HAL that does
+  deliver a different rate (assuming the reported rate would otherwise play at the wrong speed).
+- **Safety valves without a rebuild:** `defaults write <bundle id> MacMiniMixerLiveOutputMode
+  audioQueue` (force the legacy path, for A/B listening) and `MacMiniMixerDirectResample off`
+  (restore "rate mismatch → fall back"). Both are read when a controller is created.
+- Teardown ordering is unchanged in spirit: the direct path fades out inside the IOProc and waits,
+  bounded, for the ramp to render before stopping IO, so the device never stops on a non-zero sample.
+
+**Evidence** (one MacBook Pro, owner's listening tests plus the unified log; **not** CPU or
+latency measurements): at 48 kHz, five concurrent sessions (two Safari web apps, Safari, Spotify,
+Music) over three rounds, every start `output=direct`, no fallbacks, no Core Audio errors, no crackle;
+at the default 44.1 kHz, up to six concurrent sessions with repeated stop/start rounds,
+`path=passthrough`, `underruns=0 overflows=0`, no crackle; and crackle-free on a second output device
+at 48 kHz with Firefox, Safari, Spotify, Music and YouTube (every start on that device logged `output=direct rate=48000 resample=false`).
+
+**What it does not mean**:
+- It is not verified on other Macs, output devices, sample rates or macOS versions, and says nothing
+  about CPU, memory, Stop All or sleep timing with more than three sessions — the many-session gates
+  in "Why there is no Product Real app-count limit" are unchanged.
+- Devices with input streams still use the legacy path, which can still crackle there.
+- The converting path (`path=converting`) has unit tests but has not been seen on real hardware,
+  because every tested device passed through.
+
+**Would revisit if**: a device or macOS version crackles on the direct path (compare with
+`MacMiniMixerLiveOutputMode=audioQueue`, and read the `output=` / `direct resample report` log
+lines), or a HAL starts delivering the tap at a different rate (`path=converting` with underruns).
+**Open question for the owner before the legacy path is removed:** what happens on devices with input
+streams — support them directly (that needs a reliable way to find the tap stream inside the
+aggregate's input list) or accept no live control there.

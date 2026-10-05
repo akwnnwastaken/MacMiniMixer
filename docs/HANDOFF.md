@@ -50,6 +50,16 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   with e.g. 5–8 apps) and the deferred engine-self-stop gating (§7), not a config value.
 - Real control stays **opt-in**: the global "Real app control" toggle defaults to OFF, and only user
   interaction with a row starts a session.
+- **Audio callback path:** the direct renderer/IOProc (`ProcessTapDirectOutputRenderer`,
+  `ProcessTapDirectOutputCopier`, `ProcessTapDirectOutputResampler`) is now the live audio path; the
+  legacy `AudioQueue` output is a frozen fallback scheduled for removal. Don't change either without
+  manual listening tests on real hardware, and **never change the user's output-device sample rate
+  automatically** (owner decision).
+- **One disclosed private-API grey area:** per-app attribution calls the public `proc_pidinfo` with the
+  undocumented `PROC_PIDCOALITIONINFO` flavor (XNU private header, mirrored by value). Keep the
+  bundle-id fallback that applies when it fails; do not add further private or undocumented calls.
+- **Never block on CI** (it may be out of macOS minutes): re-run an infra failure at most once, then
+  report CI as unavailable and run `xcodebuild test` locally (§9).
 - **No broad `MixerViewModel` refactor** without a dedicated prompt.
 - Avoid `*.xcodeproj` / `*.pbxproj` edits unless truly necessary.
 - If a local `MacMiniMixer.xcscheme` Release-profiling change appears unexpectedly, **do not stage
@@ -178,14 +188,42 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   `init` (unchanged), so a mutating call still emits exactly one `objectWillChange` (matching the old
   `@Published willSet`). The VM keeps a forwarding computed `productRealControlState` so all its
   existing call sites are unchanged.
-- Uses Core Audio **Process Tap + `.mutedWhenTapped` + AudioQueue replay/gain**. Each session owns
-  its own tap / private aggregate device / IOProc / replay AudioQueue, so CPU and Core Audio load
-  grow per active app.
+- Uses Core Audio **Process Tap + `.mutedWhenTapped`** with gain applied in the audio callback. Each
+  session owns its own tap / private aggregate device / IOProc (plus a replay `AudioQueue` only on the
+  legacy fallback path), so CPU and Core Audio load grow per active app.
+- **Direct aggregate output engine (default live output, `377f1a8` + `da6ed70`).** One private
+  aggregate = the default output device (main/clock sub-device) + the tap (drift compensated); one
+  IOProc reads the tap from `inInputData` and writes the faded/gained samples to `outOutputData`. No
+  `AudioQueue`, no cross-thread hand-off. Why: the old live path ran two clocks (tap IOProc → thread
+  hand-off → `AudioQueue` on the output clock), so underruns were inevitable = the random crackle.
+  Code: `ProcessTapLiveOutputMode` (`ProcessTapLiveControlling.swift`), `attemptDirectOutputStart` /
+  `ProcessTapDirectOutputRenderer` (`CoreAudioProcessTapLiveController.swift`),
+  `ProcessTapDirectOutputCopier` / `…FrameFIFO` / `…Resampler` (`ProcessTapOutputBufferCopier.swift`),
+  `ProcessTapResourceContext.createPrivateOutputAggregateDevice`. Falls back to the **legacy
+  `AudioQueue` path** (`ProcessTapLegacyAudioQueueOutput.swift`, scheduled for removal) when
+  `MacMiniMixerLiveOutputMode=audioQueue`, when the output device has **input streams** (the tap
+  stream's position in the aggregate's input list is not documented), or when any direct setup step
+  fails (warning log with the reason). Differing tap/output rates are converted in the IOProc, but the
+  resampler measures the first cycles and passes frames straight through when the HAL already
+  delivers one tap frame per output frame (`path=passthrough` — what real hardware does); the device's
+  sample rate is never changed. Switches (read per controller): `defaults write <bundle id>
+  MacMiniMixerLiveOutputMode audioQueue` and `MacMiniMixerDirectResample off`. In direct mode the
+  Advanced card shows `Queued 0`. Rationale: `docs/DECISIONS.md`.
+- **Per-app audio processes (`5a498c2`, `6d1d265`).** A row's audio processes come from the HAL's
+  process-object list (`AudioProcessObjectListing`), are matched by the pure `AppAudioProcessMatcher`
+  and tapped together in one multi-process tap (`ProcessTapTarget.additionalProcessIdentifiers`).
+  Attribution is by **resource coalition** (`proc_pidinfo` flavor `PROC_PIDCOALITIONINFO`, 20) when
+  both ids are known, so Safari vs a Safari web app and Chrome vs a PWA/Canary stay apart; with an
+  unknown coalition it falls back to bundle-id rules (exact id or allow-listed helper). **Grey area:**
+  that flavor is defined only in XNU's private header (mirrored by value, not Apple-documented) — keep
+  the fallback, and see `docs/DECISIONS.md` ("Why no private APIs"). Known limit: rows whose apps
+  share one coalition contend for the same helpers (first starter wins).
 - **No app-count limit (owner decision, `08d49bc`):** any number of Product Real sessions can run at
   once (`maxConcurrentLiveSessions = nil`; the product manager is built with `maxSessions: nil`). The
   active banner summarizes 3+ apps as "first two names +N more" (full list in the accessibility
-  label) with "Stop All". Fake-backed tests cover 6–8 concurrent sessions; **real hardware has only
-  been characterized up to 3** (see §7/§10).
+  label) with "Stop All". Fake-backed tests cover 6–8 concurrent sessions; **real-hardware resource
+  characterization only goes up to 3** (up to 6 were listened to for crackle with the direct engine;
+  see §6/§7/§10).
 - **Queued start lane (`774268a`):** at most one Product Real helper resolution or product start is
   *physically* in flight. A start requested meanwhile (slider/mute → `requestAutomaticStart`, or the
   row toggle; direct-PID or helper) is queued FIFO in `ProductRealControlState.queuedStarts`. Queued
@@ -224,8 +262,10 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
   `AudioControlling`) is an in-memory store for preview slider values and the system-volume display —
   it does **not** mean the app's real audio paths are fake.
 - **Normal-use 3-session long-run smoke PASSED (with caveat)** on one real Mac (Drops/Fail/Starv 0,
-  CPU ~20–35% depending on panel state, no `coreaudiod` restart). Nothing has been measured on real
-  hardware with more than 3 sessions.
+  CPU ~20–35% depending on panel state, no `coreaudiod` restart; measured on the older `AudioQueue`
+  live path). Resource use (CPU, memory, Stop All, sleep) has not been measured with more than 3
+  sessions, nor re-measured on the direct engine. Audio quality with the direct engine was listened
+  to with up to **6** sessions (no crackle, `underruns=0`), see §6.
 - **Rapid manual Real on/off toggle spam** is guarded (Prompt 194): a per-app pending-operation flag
   in `ProductRealControlState` makes toggle / slider-auto-start attempts for a row no-ops while its
   start/stop is in flight (or its start is queued), and the row shows a non-interactive "working"
@@ -237,10 +277,40 @@ changes. It is **not** a public release document — v0.14 is an internal, unrel
 - **Release packaging exists but no release is cut:** `scripts/package-app.sh`, the `Build`
   workflow's `package` job (`MacMiniMixer-app` artifact), and `release.yml` (draft release on `v*`
   tags) — see `docs/RELEASING.md` (`e0a60b4`). `MARKETING_VERSION` is still `0.13`.
+  `scripts/package-app.sh` builds into its own `./.DerivedData-release` with coverage explicitly off,
+  because a Release build made after `xcodebuild test` in the shared derived data folder had been
+  compiled with code-coverage instrumentation (including the audio IOProc) (`c6a1338`).
+- **CI is spent sparingly and may be unavailable (`fde8ceb`).** `build.yml` skips docs/`.md`/`.claude`
+  only changes, has a 30-minute timeout and `workflow_dispatch`, and runs the `package` job only for
+  `main` pushes and manual runs. Jobs had started failing within seconds with no runner assigned
+  (likely out of macOS minutes or a spending limit — not confirmed). **Rule: never block on CI** —
+  re-run an infra failure at most once, then report CI as unavailable and hand over the local
+  `xcodebuild test` command (§9). Delegated agents never push, trigger or poll CI.
+- **Delegation tooling (`0c0e724`).** `.claude/skills/delegate-subagents` (skill + shared
+  `project-brief.md`) and typed agents in `.claude/agents` pick the cheapest model that can do the
+  job: `code-scout` (haiku, read-only), `docs-writer` and `swift-editor` (sonnet), `swift-implementer`
+  (opus, only for Product Real lane/concurrency and Core Audio work). Prompts point at the brief
+  instead of repeating it; the brief holds the cloud-session constraints (no Swift toolchain, no CI
+  waiting) and guardrails.
 
 ## 5. Recent key commits
 
-Most recent (**multi-app / no-limit work, release scaffolding, cleanups** — after the split):
+Newest first (**direct output engine, per-app audio processes, tooling** — after the docs refresh
+`222b652`; every commit message is detailed, read them before touching these areas):
+
+```
+da6ed70 Convert tap sample rate inside the direct output engine
+c6a1338 Keep code-coverage instrumentation out of packaged Release builds (tag checkpoint-direct-engine-48k)
+377f1a8 Render live control straight to the output device via one aggregate IOProc
+6d1d265 Attribute an app's audio processes by resource coalition
+fde8ceb Don't block on unavailable CI; spend fewer macOS runner minutes
+0c0e724 Add subagent delegation skill and typed agents with cost-tiered models
+5a498c2 Tap all of an app's audio processes for Product Real Control
+```
+
+(Two docs-only checkpoint commits sit between these and record the real-hardware results.)
+
+Preceding (**multi-app / no-limit work, release scaffolding, cleanups** — after the split):
 
 ```
 774268a Queue Product Real starts behind a single start lane instead of rejecting them
@@ -398,14 +468,22 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 
 ## 6. Test & CI state (as of last update)
 
-- **Last full run (CI, macos-15):** **515 passed / 0 failed / 0 skipped** (code state =
-  `774268a`). History: 414 after the split (`bc533d6`), 431 after the attribution logging
+- **Last recorded full run (CI, macos-15):** **515 passed / 0 failed / 0 skipped** (code state =
+  `774268a`). The later commits (direct output engine, coalition attribution, multi-process taps)
+  added tests, but no full run or test count has been recorded since — run the suite locally and take
+  the count from the result bundle. History: 414 after the split (`bc533d6`), 431 after the attribution logging
   (`617b7f2`); the commits since then added, among others, 20 `SystemOutputCoordinatorTests`, the
   unlimited-session tests (6–8 sessions at manager / facade / VM level), the diagnostics focus /
   visibility tests, and `ProductRealStartLaneTests`.
-- **CI:** **green** (GitHub Actions `Build` workflow: `build` job with tests, then the `package` job
-  that uploads the `MacMiniMixer-app` zip). The `Release` workflow has not run against a tag (no tag
-  has been pushed).
+- **CI:** the GitHub Actions `Build` workflow (`build` job with tests, then the `package` job that
+  uploads the `MacMiniMixer-app` zip) was green at `774268a`. **Since then CI has been unreliable:**
+  jobs started failing within seconds with no runner assigned (likely out of macOS minutes or a
+  spending limit; not confirmed), so recent commits have not been verified by CI (the owner built
+  and ran them locally on real hardware). `build.yml` now skips
+  docs/`.md`/`.claude`-only changes, has a 30-minute timeout and `workflow_dispatch`, and runs
+  `package` only for `main` pushes and manual runs (`fde8ceb`). Don't wait on CI; verify locally with
+  the `xcodebuild test` command in §9. The `Release` workflow has not run against a tag (no tag has
+  been pushed).
 - An earlier README-only commit had a one-off CI failure that **passed on rerun** (a flake).
 - `xcodebuild test` exits `0` on pass, `65` on any test failure. Get exact counts from the newest
   result bundle:
@@ -414,20 +492,39 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 - **Real-hardware checkpoint 2 (`da6ed70`, tag `checkpoint-direct-engine-44k`):** direct engine on
   built-in speakers at the default **44.1 kHz**: HAL delivers the tap at the aggregate rate
   (`path=passthrough`, measured ratio 1.0), up to **6 concurrent sessions**, `underruns=0`, no crackle
-  heard. Remaining AudioQueue users: output devices with input streams (headsets/AirPods), Replay Probe.
+  heard. Remaining `AudioQueue` users: output devices with input streams (some headsets/interfaces)
+  and the Replay Probe.
+- **Second output device (after checkpoint 2, one Mac):** crackle-free at 48 kHz with Firefox, Safari,
+  Spotify, Music and YouTube. The owner's log shows every start on that device logged `output=direct rate=48000 resample=false` (device ID 227),
+  i.e. that device has no input streams and used the direct engine. CPU/latency were not measured.
 - **Real-hardware checkpoint (`c6a1338`, tag `checkpoint-direct-engine-48k`):** direct aggregate
   output engine crackle-free with **5 concurrent sessions** (Netflix/YouTube Safari web apps, Safari,
   Spotify, Music) on built-in speakers **at 48 kHz**; at 44.1 kHz the tap reports 48 kHz and the engine
   falls back to the crackly AudioQueue path. Next: in-engine resampling (do **not** change the user's
   device sample rate automatically — owner decision; that is only the fallback plan).
+  *(Superseded by checkpoint 2 above: `da6ed70` handles 44.1 kHz inside the engine, no fallback.)*
 
 ## 7. Known deferred / candidate items
 
 **Open with many sessions (needs real hardware; deliberately not changed yet — audio-adjacent):**
 
-- **No real-hardware characterization for more than 3 sessions.** CPU, memory/threads,
+- **No real-hardware resource characterization for more than 3 sessions.** CPU, memory/threads,
   Drops/Fail/Starv, output-device change, Stop All, quit-one-app, and sleep/wake with e.g. 5–8 Real
-  apps have **not** been measured. This is the first gate (§10).
+  apps have **not** been measured (only crackle/underruns were listened to and logged with up to 6
+  sessions on the direct engine, §6), and the 3-session CPU numbers predate the direct engine. This is
+  the first gate (§10).
+- **Remove the legacy `AudioQueue` live output** (`ProcessTapLegacyAudioQueueOutput.swift`) once the
+  direct engine covers more devices. Open owner question: output devices **with input streams**
+  (headsets/interfaces with a microphone) still need it — either support them directly (needs a
+  reliable way to find the tap stream in the aggregate's input list) or accept no live control
+  there. Also unverified: the `path=converting` branch on real hardware (every tested device
+  passed through), other output devices/sample rates/macOS versions, and which path the second
+  output device used (§6).
+- **Coalition attribution caveats:** it relies on an undocumented `proc_pidinfo` flavor (fallback to
+  bundle-id rules when unknown); rows whose apps share one coalition (launched from Terminal, game
+  launchers) contend for the same helpers; the matcher's bundle-id allow-list is hand-maintained.
+  Real-hardware evidence is recorded for Safari vs Safari web apps; none is recorded for Chrome vs
+  Chrome PWAs/Canary (unit tests only).
 - **Engine self-stops bypass the gates.** Stops the live controller initiates itself (output-device
   change or target-app exit detected by its diagnostics timer, timeout) go around the Core Audio
   lifecycle gate (P181) and the stop→start settle gate (P179), so many sessions can tear down
@@ -505,9 +602,15 @@ Product Real structural refactor pending**.
 
 On top of that, the owner removed the app-count limit (`08d49bc`) and the multi-session follow-ups
 landed (per-app exit handling, cached-helper retry, diagnostics focus/visibility, queued start lane).
-What is missing is **evidence**, not code: nothing has been measured on real hardware with more than
-three sessions. First re-verify live state (§9) — **do not trust the line numbers in this file;
-inspect the repo.**
+Since the last docs refresh (`222b652`) the live audio path changed too: an app's audio processes are
+tapped together and attributed by resource coalition (`5a498c2`, `6d1d265`), and the default live
+output is the **direct aggregate output engine** (`377f1a8`, `da6ed70`) — the fix for the random
+crackle (two clocks joined by an `AudioQueue` hand-off) — with the old `AudioQueue` path kept only as
+a legacy fallback. On the owner's Mac it is crackle-free at 48 kHz and 44.1 kHz with up to six
+concurrent sessions and on a second output device (§6). What is still missing is **resource
+evidence**, not code: CPU/memory/Stop All/sleep have not been measured on real hardware with more than
+three sessions, nor re-measured on the direct engine. First re-verify live state (§9) — **do not
+trust the line numbers in this file; inspect the repo.**
 
 ### What remains in `MixerViewModel` (intentional — cross-subsystem, NOT Product Real)
 
@@ -535,7 +638,8 @@ moving them into a product-scoped type would *increase* coupling:
 ### Recommended next engineering direction (conservative)
 
 1. **Real-hardware N-session characterization first** (procedure: `docs/MANUAL_TEST_CHECKLIST.md`
-   §19). Release build, one real Mac, e.g. **5–8** Real apps (mix of direct apps and a browser/helper
+   §19; confirm each session logs `output=direct`, see `docs/MANUAL_TEST_CHECKLIST.md` §21 for the
+   direct-engine check). Release build, one real Mac, e.g. **5–8** Real apps (mix of direct apps and a browser/helper
    row): start them quickly via sliders (rows should queue, then start one by one); record panel-closed
    CPU, memory, threads, and the Advanced card's Drops/Fail/Starv/Gap for the focused session; then
    per-app stop, Stop All (time until audio is back and CPU ~0%), an output-device change with all
@@ -547,6 +651,10 @@ moving them into a product-scoped type would *increase* coupling:
    not tear down at once. This is audio-adjacent: small, test-first steps, and a real-hardware retest.
 3. After that, guided by the measurements: Stop All parallelism/latency, the main-thread hard
    teardown at sleep/quit, and narrowing what the menu bar label observes.
+   In parallel and independent of the above (no code needed first): **widen real-hardware coverage of
+   the direct output engine** (more output devices and sample rates, a device with input streams,
+   record `output=` / `path=` log lines each time — checklist §21), then decide the legacy
+   `AudioQueue` removal (§7 open question about devices with input streams).
 4. Optional: a **read-only reassessment of the remaining `MixerViewModel` responsibilities** —
    (1) lifecycle / global teardown, (2) app-refresh orchestration (`refreshApplications` + its
    selection-refresh helpers), (3) shared display/status handling. **Do not force cross-subsystem

@@ -7,7 +7,13 @@ landed: **Product Real App Control has no app-count limit** (owner decision), st
 through a **queued start lane**, live diagnostics are published only for the focused session while
 the Advanced section is visible, the system-output "Read-only" badge is probed proactively,
 accessibility coverage is complete, and release packaging (ad-hoc zip, CI artifact, draft-release
-workflow) exists. What is **not** done is real-hardware evidence beyond three concurrent sessions.
+workflow) exists. Since the last docs refresh (`222b652`) an app's audio processes are tapped
+together and attributed by resource coalition, and live output now goes through a **direct aggregate
+output engine** (one IOProc on one clock, no `AudioQueue`) that removed the random crackle on the
+owner's Mac (48 kHz and 44.1 kHz, up to six sessions, a second output device); the old `AudioQueue`
+path is a legacy fallback scheduled for removal. What is **not** done is real-hardware resource
+evidence (CPU, memory, Stop All, sleep) beyond three concurrent sessions, and wider device coverage
+of the direct engine.
 This is still unreleased, **not** a public v0.14 release: `MARKETING_VERSION` is unchanged (`0.13`)
 and no tag is cut. See `CHANGELOG.md` (`[v0.14] - Unreleased` and `[Unreleased]`).
 
@@ -31,7 +37,14 @@ not yet a finished Windows Volume Mixer replacement.
 - Persistent Product Real App Control sessions while healthy.
 - Product Real App Control for any number of apps at once (no app-count limit, owner decision),
   with a queued start lane, per-app stop / Stop All, and per-app exit handling. Real-hardware
-  evidence covers up to three sessions.
+  resource evidence covers up to three sessions.
+- Direct aggregate output engine as the default live output (one aggregate IOProc: output device +
+  tap, on one clock; in-engine sample-rate conversion with passthrough detection; legacy `AudioQueue`
+  fallback; two `defaults write` switches). Crackle-free on the owner's Mac at 48 kHz and 44.1 kHz with
+  up to six sessions, and on a second output device at 48 kHz.
+- Per-app audio process discovery through the HAL process-object list, one multi-process tap per app,
+  and attribution by resource coalition (Safari vs Safari web apps, Chrome vs PWAs/Canary) with a
+  bundle-id fallback.
 - Product Real Control lifecycle characterization tests.
 - Product Real Control state/model helper extraction.
 - Advanced Helper Process Discovery, manual helper Probe, Find audio helper, and
@@ -264,7 +277,7 @@ in place; no release cut
 `NSHumanReadableCopyright`, and the release path is scripted (see "Release packaging and
 distribution" below). Remaining work: keep the changelog synchronized with each change and, when
 the owner decides to release, prepare conservative release notes without implying production-grade
-multi-app mixer support (real-hardware evidence stops at three sessions).
+multi-app mixer support (real-hardware resource evidence stops at three sessions).
 
 **Likely files**: `CHANGELOG.md`, `README.md`, `docs/*`.
 
@@ -321,10 +334,14 @@ accessibility labels) are caught.
 
 ### Real-hardware N-session characterization — next gate
 
-**Priority**: High | **Risk**: Low (measurement only) | **Status**: Not started
+**Priority**: High | **Risk**: Low (measurement only) | **Status**: Not started (resource
+measurements); crackle/underrun listening tests with the direct engine covered up to six sessions
 
-The app-count limit is gone, but nothing has been measured on real hardware with more than three
-concurrent sessions. Before claiming anything about many-app control, run a Release build on a
+The app-count limit is gone, but no CPU, memory, Stop All or sleep numbers exist for more than three
+concurrent sessions, and the three-session numbers predate the direct output engine. (With the
+direct engine the owner listened to up to six sessions at 48 kHz and 44.1 kHz — no crackle,
+`underruns=0` — which says nothing about resource use.) Before claiming anything about many-app
+control, run a Release build on a
 real Mac with e.g. **5–8** Real apps (direct apps plus at least one browser/helper row) and record
 panel-closed CPU, memory, threads, Drops/Fail/Starv/Gap, and audible glitches; then per-app stop,
 Stop All (time until audio is normal and CPU ~0%), an output-device change with all sessions
@@ -614,6 +631,49 @@ hardening (both in "Later Research / Experimental Work" above). Real control sta
 
 ---
 
+### Direct aggregate output engine and per-app audio processes — done; device coverage pending
+
+**Priority**: High | **Risk**: Medium (audio path) | **Status**: Implemented (`5a498c2`, `6d1d265`,
+`377f1a8`, `da6ed70`); crackle-free on one Mac; legacy `AudioQueue` removal and wider device coverage
+**not done**
+
+What landed (rationale in `docs/DECISIONS.md`, "Why live output renders straight to the device
+through one aggregate IOProc"):
+
+- **Direct output.** Random crackle came from two clocks (tap-only aggregate IOProc → cross-thread
+  hand-off → `AudioQueue` on the output clock). The default live path is now one private aggregate =
+  default output device (main/clock sub-device) + tap with one IOProc writing straight to the device,
+  with the existing fade-in/out and gain, and a fallback to the legacy `AudioQueue` path for devices
+  with input streams, unsupported formats or any setup failure.
+- **Sample rates.** The tap stream reports 48 kHz while built-in speakers default to 44.1 kHz. The
+  engine converts inside the IOProc but first measures the cycles; real hardware passes through
+  (`path=passthrough`, the HAL already delivers the aggregate's rate). The device's sample rate is
+  never changed (owner decision). Switches: `MacMiniMixerLiveOutputMode=audioQueue`,
+  `MacMiniMixerDirectResample=off`.
+- **Per-app audio processes.** All of an app's HAL audio processes are tapped together, attributed by
+  resource coalition (undocumented `proc_pidinfo` flavor, bundle-id fallback), so Safari and Safari web
+  apps, Chrome and PWAs/Canary can each be Real.
+- **Evidence** (owner's Mac): crackle-free at 48 kHz (5 sessions) and 44.1 kHz (up to 6), and on a
+  second output device at 48 kHz (Firefox, Safari, Spotify, Music, YouTube). Not measured: CPU,
+  memory, latency.
+
+**Next steps (none started)**:
+- Verify the direct engine on more output devices, sample rates and macOS versions; record the
+  `output=` / `resample report … path=` log lines each time (`docs/MANUAL_TEST_CHECKLIST.md` §21).
+  Includes confirming which path the second output device used.
+- Re-measure Release CPU with the direct engine (the 1/2/3-session numbers predate it) as part of the
+  N-session characterization.
+- **Remove the legacy `AudioQueue` live output** (`ProcessTapLegacyAudioQueueOutput.swift`) and the
+  `MacMiniMixerLiveOutputMode` override. Blocker/open owner question: output devices with input
+  streams (headsets/interfaces with a microphone) still depend on it; either support them directly
+  (needs a reliable way to find the tap stream in the aggregate's input list) or accept no live
+  control there.
+- Evaluate whether the Replay Probe's own `AudioQueue` should be unified or dropped afterwards.
+- Coalition caveats to keep in view: undocumented flavor (fallback exists), rows sharing one coalition
+  contend for helpers, no real-hardware evidence yet for Chrome vs PWAs/Canary.
+
+---
+
 ### Release packaging and distribution — scaffolding done; notarization future
 
 **Priority**: Medium | **Risk**: Low-Medium | **Status**: Ad-hoc packaging implemented
@@ -656,8 +716,9 @@ The app-count limit is gone by **owner decision** (`maxConcurrentLiveSessions = 
 remaining gap to the north star is **evidence and hardening, not a configuration value**:
 real-hardware N-session characterization (e.g. 5–8 apps: CPU, Drops/Fail/Starv, output change,
 Stop All, sleep/wake), then the deferred many-session hardening (engine self-stops through the
-gates, main-thread hard teardown, sequential Stop All). Real-hardware evidence currently stops at
-three sessions (see "Three-app cap (cap=3) enabled" above). Control also still requires the opt-in
+gates, main-thread hard teardown, sequential Stop All). Real-hardware resource evidence currently
+stops at three sessions (see "Three-app cap (cap=3) enabled" above); the direct output engine was
+additionally listened to with up to six sessions (no crackle). Control also still requires the opt-in
 toggle plus interaction with each row, so "every app in the list, automatically" is not a goal of
 the current design.
 

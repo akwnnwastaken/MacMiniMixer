@@ -7,9 +7,11 @@ This project is experimental and pre-1.0; version numbers track internal milesto
 rather than tagged public releases. MacMiniMixer is not a finished Windows Volume Mixer
 replacement: normal app-row sliders are UI-state/preview by default, and Product Real Control is
 experimental and opt-in. Since the `[Unreleased]` owner decision below, Product Real Control has no
-app-count limit, but real-hardware characterization only covers up to three concurrent sessions,
-so production-grade multi-app per-application control is not claimed. Older entries that say
-"capped at three" / "`N > 3` deferred" describe the state at that time.
+app-count limit. Real-hardware resource characterization (CPU, teardown timing) only covers up to
+three concurrent sessions; the direct output engine was additionally listened to (no crackle,
+underruns 0) with up to six, but not measured for CPU/memory/sleep/Stop All, so production-grade
+multi-app per-application control is not claimed. Older entries that say "capped at three" /
+"`N > 3` deferred" describe the state at that time.
 
 ## [Unreleased]
 
@@ -39,6 +41,84 @@ in-engine sample-rate conversion is the next step (owner decision: never change 
 sample rate automatically).
 
 ### Added
+- **Direct aggregate output engine (default live output path).** Product Real and Advanced live
+  control now play the tapped audio straight out of one Core Audio IOProc: a single private
+  aggregate device made of the default output device (main/clock sub-device, drift compensated)
+  plus the process tap, whose one IOProc reads the tap from `inInputData` and writes the faded and
+  gained samples to `outOutputData`. There is no `AudioQueue` and no cross-thread buffer hand-off.
+  Why: the old live path ran **two clocks** — a tap-only aggregate's IOProc (tap clock) pushed
+  buffers across threads into a separate `AudioQueue` (output-device clock) — so underruns were
+  inevitable and showed up as random crackle, typically when a second session started. The new path
+  follows Apple's tap-playback structure. New types: `ProcessTapLiveOutputMode`
+  (`.directAggregateOutput` default, `.audioQueue` legacy),
+  `ProcessTapResourceContext.createPrivateOutputAggregateDevice` (the tap-only variant stays for the
+  legacy path and the probes), `ProcessTapDirectOutputCopier` (pure, real-time-safe copy + per-frame
+  gain + channel mapping: interleaved/non-interleaved, mono↔stereo, extra channels zeroed, silence
+  for missing/short input, plus the format-compatibility check) and a direct renderer that reuses
+  `ProcessTapLiveGainRamp` (fade-in on start, fade-out before stop); gain/fade requests reach the
+  IOProc through a try-lock only. The start falls back to the legacy `AudioQueue` path when the output
+  device has input streams (the tap stream's position in the aggregate's input list cannot be
+  known, and the wrong one would play a microphone), when the formats or rates cannot be
+  rendered directly, or when any aggregate/IOProc step fails. Queue-only diagnostics (`Queued`,
+  enqueue failures, queue warmup) report 0 in direct mode (`377f1a8`).
+- **In-engine sample-rate conversion with passthrough detection.** When the tap and output rates
+  differ (the tap stream reports 48 kHz while built-in speakers run at their default 44.1 kHz) the
+  direct engine no longer falls back to `AudioQueue`: `ProcessTapDirectOutputResampler` (created and
+  warmed up off the audio thread) feeds the tap frames actually delivered into a preallocated FIFO
+  and pulls exactly the output frame count through an `AudioConverter`. If most of the first three
+  cycles that carry frames have exactly one tap frame per output frame, the frames pass through
+  unconverted (`path=passthrough`); that is what real hardware does: the HAL already hands the tap
+  over at the aggregate's rate (`measuredRatio=1.00000`). A FIFO underrun renders the missing frames
+  silent and counts as starvation; an overflow drops the oldest frames and counts as a drop. A single notice log ~2 s after start,
+  "Live control direct resample report", records the tap/output rates, the chosen `path`, average
+  frames per cycle, the measured ratio, and the underrun/overflow counts. The device's own sample
+  rate is never changed (owner decision). Equal rates keep the frame-for-frame copy (`da6ed70`).
+- **Two `defaults write` switches** (read when a live controller is created, no rebuild needed):
+  `MacMiniMixerLiveOutputMode` = `audioQueue` forces the legacy output path;
+  `MacMiniMixerDirectResample` = `off` restores the old "sample rate mismatch → `AudioQueue`
+  fallback" behavior. Both default to the direct, converting behavior (`377f1a8`, `da6ed70`).
+- **Real-hardware results for the direct engine** (one Mac, owner's listening tests; details in the
+  two checkpoint entries above): crackle-free at 48 kHz and at the default
+  44.1 kHz, with up to six concurrent sessions, and also on a second output device at 48 kHz with
+  Firefox, Safari, Spotify, Music and YouTube. Which output path that second device used was not
+  recorded here. CPU, memory, Stop All and sleep timing with more than three sessions were not
+  measured.
+- **Every audio process of an app is tapped together.** Browsers and other multi-process apps
+  (Chrome/Edge/Brave/Arc, Electron apps such as Discord/Slack/VS Code, Firefox, Safari's WebKit GPU
+  process) render audio in helper processes, so a tap over the visible PID alone captured nothing.
+  The HAL's own client list (`kAudioHardwarePropertyProcessObjectList` +
+  `kAudioProcessPropertyPID` / `BundleID` / `IsRunningOutput`, macOS 14.2+, behind an injectable
+  `AudioProcessObjectListing`) is matched to the app row by the pure `AppAudioProcessMatcher`, and
+  `ProcessTapTarget.additionalProcessIdentifiers` carries the result into **one multi-process tap**
+  (`createProcessTap(processObjectIDs:)`; the start fails only when none of the pids maps).
+  `HelperAudioTargetResolver` matches first (no probing, not cached); a non-browser app without a
+  match gets a "play audio first" message instead of the keyword-gate rejection; processes another
+  Product Real session already taps are excluded (no double tap) (`5a498c2`).
+- **Attribution by resource coalition** (`6d1d265`). Real-hardware report: a Safari row plus a
+  "YouTube" Safari web app row (`com.apple.Safari.WebApp.<UUID>`, with its own WebKit GPU/WebContent
+  processes) made whichever row started second fail with "This app's audio is already under real
+  control in another row", because the bundle-id rules over-matched (Safari took every
+  `com.apple.WebKit.*` process and the web app's own process). Same class of bug for Chrome vs Chrome
+  PWA shims (`com.google.Chrome.app.*`) and Chrome Canary. `SystemProcessInfo` gained
+  `resourceCoalitionID`, read by `SystemProcessLister` with `proc_pidinfo` flavor
+  `PROC_PIDCOALITIONINFO` (20) into a 40-byte buffer (`coalition_id[COALITION_TYPE_RESOURCE]`); a
+  failed or short read, or id 0, means unknown. **Grey area:** that flavor and struct come from
+  XNU's *private* `bsd/sys/proc_info_private.h`, so the SDK does not expose them and the raw values
+  are mirrored in code (verified against the XNU sources, not against Apple documentation). The call
+  itself is the public `proc_pidinfo` libproc function, and it degrades safely: when a coalition id
+  is unknown the matcher uses the **bundle-rule fallback** (exact bundle id or an allow-listed helper
+  such as `<app>.helper`, `.helper.*`, `.framework.*`; never `.app.*`, `.WebApp.*`, `.canary`/`.beta`/
+  `.dev`, never another row's exact bundle id, and Safari's WebKit rule only while no other
+  WebKit-owning row runs). Matcher order: exact app pid; never another running row's own app pid;
+  descendants; then, when both coalition ids are known, match iff they are equal (authoritative, no
+  bundle rules). The resolver also lists the app's own pid and logs `pid:bundle:coalition` for every
+  match; when every process is already tapped by other sessions the message is unchanged but the
+  conflicting pids and owning sessions are now logged.
+- **Project delegation tooling.** A `delegate-subagents` skill with a shared
+  `project-brief.md`, and typed agents under `.claude/agents` with cost-tiered models (`code-scout`
+  haiku read-only, `docs-writer` and `swift-editor` sonnet, `swift-implementer` opus), plus a narrowed
+  `.claude/` ignore rule so shared skills/agents are committed while worktrees and local settings
+  stay ignored (`0c0e724`). No effect on the app.
 - **Queued Product Real start lane.** At most one Product Real helper resolution or product start is
   in flight at a time; a start requested meanwhile (slider, mute, or row toggle; direct-PID or helper
   row) is queued FIFO, the row shows the existing pending badge, and the entry re-runs its full
@@ -75,6 +155,29 @@ sample rate automatically).
   (`1469eb2`).
 
 ### Changed
+- **Live output path is now the direct aggregate engine; `AudioQueue` is a legacy fallback.** A Product
+  Real or Advanced live session now owns a tap, a private output aggregate (default output device +
+  tap) and one IOProc; it owns an `AudioQueue` only when the legacy path is used (override
+  `MacMiniMixerLiveOutputMode=audioQueue`, an output device that has input streams, or a failed direct
+  setup). In direct mode the Advanced card's `Queued` count is 0 and a Product Real start logs
+  `output=direct`. The legacy `AudioQueue` output code moves to
+  `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift` and is scheduled for
+  removal once the direct engine has covered more devices. Replay Probe keeps its own separate
+  `AudioQueue`. Shared tap creation and session activation were extracted; teardown ordering is
+  unchanged (the direct path fades out in the IOProc and waits, bounded, for the ramp to render before
+  stopping IO) (`377f1a8`, `da6ed70`).
+- **Release packaging no longer inherits code-coverage instrumentation.** A local run showed the
+  Release build compiled with `-profile-generate -profile-coverage-mapping` after an `xcodebuild
+  test` in the same derived data folder, which instruments every function including the audio IOProc.
+  `scripts/package-app.sh` now builds into its own `./.DerivedData-release` and passes
+  `CLANG_ENABLE_CODE_COVERAGE=NO CLANG_COVERAGE_MAPPING=NO` explicitly (`c6a1338`).
+- **CI spends fewer macOS runner minutes and nothing waits on it.** `build.yml` skips runs for
+  docs/`.md`/`.claude`-only changes, gives the build job a 30-minute timeout, adds `workflow_dispatch`,
+  and runs the Release `package` job only for `main` pushes and manual runs. GitHub Actions jobs for
+  this repo had started failing within seconds with no runner assigned (likely out of macOS minutes
+  or a spending limit — not confirmed). New working rule: never block on unavailable CI; re-run an
+  infra failure at most once, then report CI as unavailable and run `xcodebuild test` locally;
+  delegated agents never push, trigger or poll CI (`fde8ceb`).
 - **Product Real Control has no app-count limit (owner decision).** Like the Windows Volume Mixer,
   every app the user interacts with (global "Real app control" ON) can be Real at the same time.
   `AppConstants.maxConcurrentLiveSessions` is now `Int? = nil` (unlimited),
@@ -147,6 +250,14 @@ sample rate automatically).
   `MARKETING_VERSION` unchanged; no tag/release.
 
 ### Fixed
+- **Random crackle in Product Real Control** came from the live path running two clocks (tap IOProc →
+  cross-thread hand-off → `AudioQueue` on the output device's clock). The direct aggregate output
+  engine removes the hand-off; on the owner's Mac it was crackle-free at 48 kHz and at 44.1 kHz in
+  repeated tests (`377f1a8`, `da6ed70`).
+- **Safari vs Safari web app (and Chrome vs Chrome PWAs / Canary) rows no longer steal each other's
+  audio processes.** The row that started second used to fail with "This app's audio is already under
+  real control in another row"; each row now gets only its own coalition's processes (`6d1d265`).
+- Release packages built after a local test run no longer carry coverage instrumentation (`c6a1338`).
 - Quitting the app selected in the Advanced picker no longer stops every Product Real session. The
   selection-refresh path now stops only Advanced manual control; an exited app's own product session
   is still stopped per app and every other session keeps running (`da2b06e`).
