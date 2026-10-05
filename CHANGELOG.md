@@ -5,9 +5,9 @@ All notable changes to MacMiniMixer are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project is experimental and pre-1.0; version numbers track internal milestones
 rather than tagged public releases. MacMiniMixer is not a finished Windows Volume Mixer
-replacement: normal app-row sliders are UI-state/preview by default, and Product Real Control is
-experimental and opt-in. Since the `[Unreleased]` owner decision below, Product Real Control has no
-app-count limit. Real-hardware resource characterization (CPU, teardown timing) only covers up to
+replacement: app-row sliders are UI-state/preview until you interact with an eligible row, and Product
+Real Control is experimental. Since the `[Unreleased]` owner decisions below it is always on (a row
+only becomes Real after you interact with it) and has no app-count limit. Real-hardware resource characterization (CPU, teardown timing) only covers up to
 three concurrent sessions; the direct output engine was additionally listened to (no crackle,
 underruns 0) with up to six, but not measured for CPU/memory/sleep/Stop All, so production-grade
 multi-app per-application control is not claimed. Older entries that say "capped at three" /
@@ -155,6 +155,22 @@ sample rate automatically).
   (`1469eb2`).
 
 ### Changed
+- **Real app control is always on (owner decision).** The "Real app control" toggle strip and its
+  "Exp" badge are removed from the panel; `MacMiniMixerApp` enables Product Real Control when it builds
+  the view model (`AppConstants.realAppControlEnabledAtLaunch`). Moving any eligible row's slider or
+  mute starts real control exactly as it did with the toggle on, and nothing is captured until the user
+  interacts with a row. `MixerViewModel.setExperimentalRealAppControlEnabled` and its OFF default are
+  kept, so the test suite is unchanged.
+- **Advanced is developer-only (owner decision).** The Advanced diagnostics section is not built at all
+  unless the `MacMiniMixerDeveloperMode` bool default is true (read once when the panel is created), so
+  nothing in it runs otherwise. Enable it with
+  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` and relaunch;
+  `defaults delete com.example.MacMiniMixer MacMiniMixerDeveloperMode` hides it again.
+- **Simpler panel.** The panel is now: header (title, output-device button, and a `⋯` menu holding
+  `Show all apps` and `Quit`), a compact one-line active banner ("N apps controlled" for two or more
+  apps, with `Stop`/`Stop All`; `RealControlBannerPresenter` strings and accessibility labels are
+  unchanged), status messages (including the "Open Settings" permission action), the System Output
+  row, and the Applications list. No audio-path changes.
 - **Live output path is now the direct aggregate engine; `AudioQueue` is a legacy fallback.** A Product
   Real or Advanced live session now owns a tap, a private output aggregate (default output device +
   tap) and one IOProc; it owns an `AudioQueue` only when the legacy path is used (override
