@@ -13,6 +13,8 @@ Xcode project, no third-party dependencies, public APIs only.
   `@available(macOS 14.2, *)`. SwiftUI APIs must exist on macOS 13.
 - Tests must be deterministic: no real sleeps; reuse the suites' existing gates, continuations
   and deadline-bounded waits.
+- Do not push, trigger, wait for, or poll GitHub Actions — CI may be unavailable (out of macOS
+  minutes). Finish with a committed, carefully self-reviewed change; the parent verifies it.
 
 ## If you are in a worktree
 Run `git reset --hard <base given in your prompt>` first and confirm with `git log --oneline -1`.

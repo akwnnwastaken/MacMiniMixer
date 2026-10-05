@@ -1,8 +1,20 @@
 name: Build
 
 on:
+  # Docs-only changes don't need a macOS runner (macOS minutes are limited).
   push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'LICENSE'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,6 +27,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -31,9 +44,11 @@ jobs:
 
   # Release build packaged as an ad-hoc signed .zip (not notarized), uploaded as
   # a workflow artifact for manual testing. Does not create any GitHub Release.
+  # Runs only for main and manual runs, to save macOS runner minutes on branch pushes.
   package:
     runs-on: macos-15
     needs: build
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     timeout-minutes: 30
 
     steps:

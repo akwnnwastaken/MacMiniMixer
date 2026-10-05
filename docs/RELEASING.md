@@ -21,7 +21,7 @@ GitHub Release.
 
 | Workflow | Trigger | Result |
 | --- | --- | --- |
-| `Build` → `package` job | every push / PR, after the `build` job passes | artifact `MacMiniMixer-app` (`MacMiniMixer-<version>-<sha7>.zip` + `.sha256`), kept 14 days |
+| `Build` → `package` job | pushes to `main` and manual (`workflow_dispatch`) runs, after the `build` job passes; docs-only changes skip CI | artifact `MacMiniMixer-app` (`MacMiniMixer-<version>-<sha7>.zip` + `.sha256`), kept 14 days |
 | `Release` | push of a `v*` tag | tests → zip → tag/version check → artifact + **draft** GitHub Release |
 | `Release` | manual (`workflow_dispatch`) | tests → zip → artifact only, no GitHub Release (branch runs add a `-<sha7>` suffix) |
 

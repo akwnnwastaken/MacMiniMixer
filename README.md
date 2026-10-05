@@ -34,7 +34,7 @@ What works today:
 - A collapsed Advanced section with Process Tap diagnostics, Mute/Replay probes, manual one-app Live
   Control, helper discovery, and a separate two-session Two-App Readiness diagnostic.
 - VoiceOver labels, values, and hints across the main panel and the Advanced diagnostics.
-- An ad-hoc signed (not notarized) `.zip` of every green CI build, see [How to Run](#how-to-run).
+- An ad-hoc signed (not notarized) `.zip` from CI on `main` pushes and manual runs, see [How to Run](#how-to-run).
 
 Stability checkpoint status:
 

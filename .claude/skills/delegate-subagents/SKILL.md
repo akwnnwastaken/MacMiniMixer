@@ -65,4 +65,8 @@ Target size: ≤ 40 lines for `opus` tasks, ≤ 20 lines for `sonnet`, ≤ 10 fo
 - Review its diff yourself (`git show <sha> -- MacMiniMixer/`) before cherry-picking; check
   semantic conflicts with anything merged meanwhile (protocol conformers, fakes, guards).
 - Verify with CI or, when CI cannot run, hand the user the local `xcodebuild test` command.
+- **Never block on CI.** GitHub Actions for this repo can be out of macOS minutes: a job that
+  ends within seconds with no steps and `runner_id: 0` is an infra/billing failure, not a code
+  failure. Re-run it at most once; if it fails the same way, stop waiting, tell the user CI is
+  unavailable, and give the local test + install command. Subagents never wait on or poll CI.
 - Remove its worktree and branch when merged.
