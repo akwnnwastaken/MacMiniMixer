@@ -74,6 +74,11 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      # Repeat the selected Xcode at the end of the log, where it is easy to find.
+      - name: Xcode used
+        if: always()
+        run: xcodebuild -version && xcode-select -p
+
   # Release build packaged as an ad-hoc signed .zip (not notarized), uploaded as
   # a workflow artifact for manual testing. Does not create any GitHub Release.
   # Runs only for main and manual runs, to save macOS runner minutes on branch pushes.

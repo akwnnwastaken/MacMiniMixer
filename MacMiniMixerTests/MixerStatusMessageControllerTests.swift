@@ -5,6 +5,11 @@ import XCTest
 final class MixerStatusMessageControllerTests: XCTestCase {
     // MainActor-isolated manual sleeper: each scheduled clear suspends here until the test releases
     // it, so delays are driven deterministically with no real sleeping and no timing reliance.
+    // The explicit `@MainActor` matters: a nested type does not inherit the enclosing class's global
+    // actor, and the controller calls its sleeper from a nonisolated `@Sendable` closure. Without it,
+    // two clears appended to `continuations` concurrently on the global executor, an append could be
+    // lost, and `waitUntilPending(_, 2)` then spun forever (the CI hang seen on 2026-10-06).
+    @MainActor
     private final class ManualSleeper {
         private var continuations: [CheckedContinuation<Void, Never>] = []
 
@@ -31,9 +36,22 @@ final class MixerStatusMessageControllerTests: XCTestCase {
         MixerStatusMessageController(autoClearDelay: 0) { _ in await sleeper.sleep() }
     }
 
-    /// Spins the cooperative main-actor queue until `count` clear tasks have reached the sleeper.
-    private func waitUntilPending(_ sleeper: ManualSleeper, _ count: Int) async {
+    /// Spins the cooperative main-actor queue until `count` clear tasks have reached the sleeper,
+    /// bounded by a wall-clock deadline so a missing clear fails the test instead of hanging it.
+    private func waitUntilPending(
+        _ sleeper: ManualSleeper,
+        _ count: Int,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
         while sleeper.pendingCount < count {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for \(count) pending clears (have \(sleeper.pendingCount))", file: file, line: line)
+                return
+            }
+
             await Task.yield()
         }
     }

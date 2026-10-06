@@ -16,6 +16,14 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Fixed
+- **Intermittent CI hang in `MixerStatusMessageControllerTests`.** Its test sleeper was meant to be
+  MainActor-isolated but, as a nested type, did not inherit the test class's global actor. The
+  controller calls the sleeper from a nonisolated `@Sendable` closure, so two clears could append to
+  its continuation list concurrently and lose one, leaving `waitUntilPending(_, 2)` spinning forever.
+  The sleeper is now explicitly `@MainActor`, and the wait has a 5-second deadline. Found by the new
+  60-second XCTest allowance, which named `testStaleClearDoesNotWipeNewerMessage`.
+
 ### Changed
 - **CI and release builds use the newest stable Xcode on the runner.** v0.14.1's release zip was
   built with the `macos-15` image's default Xcode, so it linked an older macOS SDK and macOS drew
