@@ -119,7 +119,7 @@ The direct engine plays at the device's own sample rate and never changes it. In
 
 ### Build from source
 
-You need Xcode 16 or later (CI uses Xcode 16 on `macos-15`). There are no packages to fetch.
+You need Xcode 16 or later; build with the newest Xcode you have, because the SDK it links decides how the controls look (CI picks the newest stable Xcode on its `macos-15` runner). There are no packages to fetch.
 
 ```bash
 git clone https://github.com/akwnnwastaken/MacMiniMixer.git

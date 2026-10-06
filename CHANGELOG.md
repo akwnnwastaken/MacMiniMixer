@@ -16,6 +16,13 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Changed
+- **CI and release builds use the newest stable Xcode on the runner.** v0.14.1's release zip was
+  built with the `macos-15` image's default Xcode, so it linked an older macOS SDK and macOS drew
+  its sliders in the older style (tick marks, pill knob) instead of the look of a local build with a
+  current Xcode. The Build and Release workflows now select the newest non-beta Xcode installed on
+  the runner and print its version.
+
 ## [v0.14.1] - 2026-10-06
 
 ### Highlights

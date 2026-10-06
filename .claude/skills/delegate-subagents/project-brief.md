@@ -5,7 +5,7 @@ Xcode project, no third-party dependencies, public APIs only.
 
 ## Environment
 - Cloud sessions run on Linux: **no Swift compiler, no Xcode**. Your code is first compiled by
-  GitHub Actions (Xcode 16, macos-15) or by the owner locally. A compile error costs a full round
+  GitHub Actions (newest stable Xcode on macos-15) or by the owner locally. A compile error costs a full round
   trip, so: verify every type, method and signature by reading the source; grep every call site,
   protocol conformer and test fake you affect; re-read your whole diff for compile errors before
   committing. CI runs only for pull requests, pushes to `main`, and manual runs (not for other

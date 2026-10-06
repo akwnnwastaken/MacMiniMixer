@@ -36,8 +36,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      # Build with the newest stable Xcode on the runner (not the image's older default), so the app
+      # links the current macOS SDK and gets the same control styles as a local build.
+      - name: Select newest stable Xcode
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1)"
+          echo "Using ${newest}"
+          sudo xcode-select -s "${newest}/Contents/Developer"
+          xcodebuild -version
 
       - name: Build MacMiniMixer
         run: xcodebuild -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configuration Debug -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO build
@@ -77,8 +83,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      # Build with the newest stable Xcode on the runner (not the image's older default), so the app
+      # links the current macOS SDK and gets the same control styles as a local build.
+      - name: Select newest stable Xcode
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1)"
+          echo "Using ${newest}"
+          sudo xcode-select -s "${newest}/Contents/Developer"
+          xcodebuild -version
 
       - name: Package MacMiniMixer (Release, ad-hoc signed)
         shell: bash
