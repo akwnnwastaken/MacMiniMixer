@@ -725,3 +725,26 @@ private final class FakeOutputDeviceController: OutputDeviceControlling {
         return shouldSucceed
     }
 }
+
+final class CoreAudioOutputDeviceListerOwnDeviceTests: XCTestCase {
+    func testMacMiniMixerAggregateDeviceUIDsAreHiddenFromTheSelector() {
+        for uid in [
+            "com.macminimixer.process-tap-live-output.4C1F2A9E-1D3B-4E5F-8A7B-0C9D8E7F6A5B",
+            "com.macminimixer.process-tap-live-control.4C1F2A9E",
+            "com.macminimixer.helper-audio-probe.4C1F2A9E",
+            "com.macminimixer.process-tap-replay-probe.4C1F2A9E",
+            "com.macminimixer.process-tap-diagnostic.4C1F2A9E",
+            "com.macminimixer.process-tap-mute-probe.4C1F2A9E"
+        ] {
+            XCTAssertTrue(CoreAudioOutputDeviceLister.isOwnAggregateDevice(uid: uid), uid)
+        }
+    }
+
+    func testOtherDeviceUIDsStayInTheSelector() {
+        XCTAssertFalse(CoreAudioOutputDeviceLister.isOwnAggregateDevice(uid: nil))
+        XCTAssertFalse(CoreAudioOutputDeviceLister.isOwnAggregateDevice(uid: "BuiltInSpeakerDevice"))
+        XCTAssertFalse(CoreAudioOutputDeviceLister.isOwnAggregateDevice(uid: "AppleUSBAudioEngine:Generic:USB Audio:1234:1"))
+        // A user's own aggregate (Audio MIDI Setup) is not ours to hide here.
+        XCTAssertFalse(CoreAudioOutputDeviceLister.isOwnAggregateDevice(uid: "~:AMS2_Aggregate:0"))
+    }
+}
