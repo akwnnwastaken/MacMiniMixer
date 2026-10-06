@@ -36,10 +36,14 @@ jobs:
       # links the current macOS SDK and gets the same control styles as a local build.
       - name: Select newest stable Xcode
         run: |
-          newest="$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1)"
-          echo "Using ${newest}"
-          sudo xcode-select -s "${newest}/Contents/Developer"
+          newest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1 || true)"
+          if [ -n "${newest}" ]; then
+            sudo xcode-select -s "${newest}/Contents/Developer"
+          else
+            echo "No /Applications/Xcode_*.app found; keeping the image default."
+          fi
           xcodebuild -version
+          echo "::notice title=Xcode::$(xcodebuild -version | tr '\n' ' ')($(xcode-select -p))"
 
       # Same guards as the Build workflow: per-test allowance, step timeout, unbuffered output.
       - name: Test MacMiniMixer

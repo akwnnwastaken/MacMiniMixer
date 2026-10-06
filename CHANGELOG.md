@@ -21,7 +21,8 @@ multi-app per-application control is not claimed. Older entries that say "capped
   built with the `macos-15` image's default Xcode, so it linked an older macOS SDK and macOS drew
   its sliders in the older style (tick marks, pill knob) instead of the look of a local build with a
   current Xcode. The Build and Release workflows now select the newest non-beta Xcode installed on
-  the runner and print its version.
+  the runner and report it as a run annotation. The published v0.14.1 zip was replaced with a build
+  from the owner's Mac (Xcode 27), which has the current look.
 
 ## [v0.14.1] - 2026-10-06
 
