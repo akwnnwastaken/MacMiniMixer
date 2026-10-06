@@ -1,49 +1,67 @@
-# MacMiniMixer
+<a id="top"></a>
 
 <p align="center">
-  <img src="MacMiniMixer/Support/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="128" height="128" alt="MacMiniMixer Icon">
+  <img src="MacMiniMixer/Support/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="144" height="144" alt="MacMiniMixer app icon">
 </p>
+
+<h1 align="center">MacMiniMixer</h1>
 
 <p align="center">
   <strong>A volume mixer for every app on your Mac.</strong>
 </p>
 
 <p align="center">
-  A lightweight macOS menu bar app that gives each app its own volume and mute — like the Windows Volume Mixer — using only public Core Audio APIs.<br>
-  No audio driver, no virtual device, no Dock icon.
+  A native, lightweight macOS menu bar app that gives each app its own volume and mute — like the Windows Volume Mixer.<br>
+  Public Core Audio APIs only: no audio driver, no virtual device, no Dock icon.
+</p>
+
+<p align="center">
+  <img alt="macOS 13 or later, per-app control on macOS 14.2 or later" src="https://img.shields.io/badge/macOS-13%2B_%7C_per--app_14.2%2B-000000?logo=apple&amp;logoColor=white">
+  <img alt="Latest release" src="https://img.shields.io/github/v/release/akwnnwastaken/MacMiniMixer?label=release&amp;color=2F80ED">
+  <img alt="Core Audio Process Taps" src="https://img.shields.io/badge/audio-Core_Audio_Process_Taps-F28C28">
+  <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6B5CE7">
+</p>
+
+<p align="center">
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v0.14/MacMiniMixer-0.14.zip"><strong>Download for macOS</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v0.14"><strong>Release notes</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#build-from-source"><strong>Build from source</strong></a>
 </p>
 
 ---
 
-## What it does
+MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn one app up, down or off without touching the rest. Its panel brings the system output, the output device and every app's volume together in one place.
 
-MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn one app up, down or off without touching the rest.
+## Features
 
-### 🎚️ Per-app volume and mute
+- **Per-app volume and mute:** Move an app's slider or click its mute, and only that app changes — turn the music down under a video call, or silence one noisy app and leave everything else alone.
+- **No app-count limit:** Control as many apps at once as you like.
+- **Browsers and web apps:** Safari and a Safari web app, or Chrome and a Chrome PWA / Canary, are separate rows that can each be controlled.
+- **Crackle-free output:** A direct output engine plays at your device's own sample rate and never changes it.
+- **Always on, nothing automatic:** There is no toggle, and nothing is captured until you touch a row. Rows you have not touched yet are a UI preview and change no audio.
+- **System output:** System volume and mute, kept in sync live while the panel is open, plus the output device list and switching, refreshed live (for example when AirPods connect).
+- **Read-only badge:** Outputs that have no writable volume are marked before you drag anything.
+- **Simple panel:** A `⋯` menu with **Show all apps** and **Quit MacMiniMixer**, and a one-line banner — "N apps controlled" — with **Stop** or **Stop All**.
+- **Menu bar only:** No Dock icon and no window. Labels and hints for VoiceOver are included.
+- **Local and private:** Audio is processed live and never written to disk.
 
-Move an app's slider or click its mute, and **only that app** changes:
+## Downloads
 
-- 🎵 Turn the music down under a video call
-- 🌐 Control browsers and web apps — Safari and a Safari web app, or Chrome and a Chrome PWA / Canary, are separate rows that can each be controlled
-- 🔇 Silence one noisy app and leave everything else alone
-- 🎧 Control as many apps at once as you like — there is **no app-count limit**
+Version **0.14** is current.
 
-Per-app control is always on, with no toggle. A row becomes *Real* only after you move its slider or click its mute; **nothing is captured before that**. Rows you have not touched yet are a UI preview and change no audio.
+| Platform | Package | Download | Release notes |
+| --- | --- | --- | --- |
+| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-0.14.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v0.14/MacMiniMixer-0.14.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v0.14/MacMiniMixer-0.14.zip.sha256) | [`v0.14`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v0.14) |
 
-### 🔊 System output
-
-The same panel controls the Mac as a whole:
-
-- 🔈 System output volume and mute, kept in sync live while the panel is open
-- 🔀 Output device list and switching, refreshed live (for example when AirPods connect)
-- 🔒 A **Read-only** badge for outputs that have no writable volume, shown before you drag anything
-
-### 🖥️ Menu bar only
-
-No Dock icon and no window. The panel header has a `⋯` menu with **Show all apps** and **Quit MacMiniMixer**; a one-line banner reads "N apps controlled" and offers **Stop** or **Stop All**. Labels and hints for VoiceOver are included.
+> [!NOTE]
+> The build is **ad-hoc signed and not notarized**, so macOS blocks the first launch — see [Installation](#installation) for the one-time steps.
 
 > [!NOTE]
 > v0.14 is pre-1.0 and experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
+
+---
 
 ## How it works
 
@@ -84,16 +102,13 @@ The direct engine plays at the device's own sample rate and never changes it. In
 
 ### Download
 
-1. Download `MacMiniMixer-0.14.zip` and `MacMiniMixer-0.14.zip.sha256` from the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
+1. Download `MacMiniMixer-0.14.zip` and `MacMiniMixer-0.14.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
 2. Check the download:
    ```bash
    shasum -a 256 -c MacMiniMixer-0.14.zip.sha256
    ```
 3. Unzip it and move `MacMiniMixer.app` to `/Applications`.
 4. Open it once (see the warning below), then look for the icon in the menu bar.
-
-> [!NOTE]
-> The repository is currently private, so releases are visible to collaborators only.
 
 > [!WARNING]
 > The app is **ad-hoc signed and not notarized**, so Gatekeeper blocks the first launch. On **macOS 13–14**, right-click the app → **Open** → **Open**. On **macOS 15 and later**, try to open it once, then go to **System Settings → Privacy & Security → Open Anyway**. Or, in Terminal:
@@ -190,7 +205,7 @@ Contributor notes live in `docs/`:
 - [QUICK_START_FOR_AGENTS.md](docs/QUICK_START_FOR_AGENTS.md) and [PLAN_MULTI_APP.md](docs/PLAN_MULTI_APP.md) — onboarding and the multi-app plan
 - [CHANGELOG.md](CHANGELOG.md) — release history; `.claude/skills/delegate-subagents/` holds the agent workflow
 
-GitHub Actions may be unavailable (macOS minutes are limited, and docs-only changes skip CI); a local `xcodebuild test` plus `scripts/package-app.sh` is the fallback.
+CI runs on pull requests and pushes to `main` (docs-only changes skip it). When GitHub Actions is unavailable, a local `xcodebuild test` plus `scripts/package-app.sh` is the fallback.
 
 ### Developer mode
 
@@ -223,5 +238,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  Made with 🎚️ so you can turn down one app, not the whole Mac.
+  Made with 🎚️ so you can turn down one app, not the whole Mac.<br>
+  <a href="#top">Back to top</a>
 </p>

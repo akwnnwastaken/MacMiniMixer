@@ -1,7 +1,7 @@
 name: Build
 
 on:
-  # macOS minutes are limited (private repo: they count 10x), so each commit is tested once:
+  # Each commit is tested once, to keep macOS runs short:
   # pushes to main, pull requests, and manual runs. Pushes to other branches and tags don't run
   # this workflow (a tag runs Release instead), and docs-only changes skip it.
   push:
