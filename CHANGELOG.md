@@ -25,6 +25,9 @@ multi-app per-application control is not claimed. Older entries that say "capped
   60-second XCTest allowance, which named `testStaleClearDoesNotWipeNewerMessage`.
 
 ### Changed
+- **GitHub Actions dependencies updated to their Node 24 releases:** `actions/checkout` v4 → v7 and
+  `actions/upload-artifact` v4 → v7 in the Build and Release workflows, which removes the "Node.js 20
+  is deprecated" warning. The inputs used here are unchanged; CI only, no app change.
 - **CI and release builds use the newest stable Xcode on the runner.** v0.14.1's release zip was
   built with the `macos-15` image's default Xcode, so it linked an older macOS SDK and macOS drew
   its sliders in the older style (tick marks, pill knob) instead of the look of a local build with a
