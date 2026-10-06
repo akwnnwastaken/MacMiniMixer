@@ -16,6 +16,14 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Fixed
+- **The output selector no longer lists MacMiniMixer's own devices.** With the direct output engine,
+  each Real app's private aggregate ("MacMiniMixer Process Tap Live Output") has output channels, so
+  it appeared in MacMiniMixer's own output device list — once per active app — and could be picked as
+  the system output. Devices whose UID starts with `com.macminimixer.` (every aggregate the app
+  creates) are now left out of the list. They were never visible to other apps (they are private to
+  the MacMiniMixer process) and disappear when their session stops.
+
 ## [v0.14] - 2026-10-06
 
 ### Highlights

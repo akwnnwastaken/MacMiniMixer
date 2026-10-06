@@ -14,6 +14,21 @@ struct CoreAudioOutputDeviceLister: OutputDeviceListing {
         "multi output device"
     ]
 
+    /// Every aggregate device MacMiniMixer creates (live output, probes, diagnostics) has a UID
+    /// under this prefix. They are private to this process, so only MacMiniMixer itself can see
+    /// them, but the direct live-output aggregate has output channels: without this check each
+    /// active app would show up in our own output selector, where it could be picked as the
+    /// system output.
+    static let ownAggregateDeviceUIDPrefix = "com.macminimixer."
+
+    static func isOwnAggregateDevice(uid: String?) -> Bool {
+        guard let uid else {
+            return false
+        }
+
+        return uid.hasPrefix(ownAggregateDeviceUIDPrefix)
+    }
+
     private let fallbackLister: OutputDeviceListing
 
     init(fallbackLister: OutputDeviceListing = MockOutputDeviceLister()) {
@@ -39,7 +54,8 @@ struct CoreAudioOutputDeviceLister: OutputDeviceListing {
                 deviceID == defaultDeviceID || hasOutputChannels(deviceID)
             }
             .compactMap { deviceID -> OutputDeviceItem? in
-                guard let name = stringProperty(kAudioObjectPropertyName, for: deviceID) else {
+                guard !Self.isOwnAggregateDevice(uid: stringProperty(kAudioDevicePropertyDeviceUID, for: deviceID)),
+                      let name = stringProperty(kAudioObjectPropertyName, for: deviceID) else {
                     return nil
                 }
 
