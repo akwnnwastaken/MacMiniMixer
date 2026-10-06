@@ -35,6 +35,7 @@ multi-app per-application control is not claimed. Older entries that say "capped
   "Waiting for app audio" state for silent apps.
 - **Better accessibility.** VoiceOver labels across the panel, and the "Read-only" badge for outputs
   without volume control shows before you touch the slider.
+- **New app icon** (three mixer sliders), shown in Finder, Launchpad and the permission prompts.
 - **Ad-hoc signed `.zip` download** with a SHA-256 checksum. Needs macOS 13.0+, and macOS 14.2+ for
   per-app control.
 
@@ -46,8 +47,10 @@ the HAL already delivers it at the aggregate's rate (512 tap frames per 512 outp
 the earlier "sample rate mismatch" fallback was a false alarm. The in-engine `AudioConverter` path stays
 as a safety net for HALs that do deliver a different rate. Owner's test: up to **six concurrent sessions**
 (Safari, Spotify, YouTube and two Netflix Safari web apps, Music) with repeated stop/start rounds, every
-start `output=direct`, `underruns=0 overflows=0`, and **no crackle heard**. Output devices that also have
-input streams (e.g. some headsets, likely AirPods) still use the AudioQueue path.
+start `output=direct`, `underruns=0 overflows=0`, and **no crackle heard**. AirPods (normal listening)
+also ran on the direct engine (`output=direct rate=48000`, five apps, no crackle heard). Output devices
+that expose input streams on the same device (some USB headsets, audio interfaces) still use the
+AudioQueue path.
 
 ### Checkpoint — direct output engine, real-hardware result (`c6a1338`, tag `checkpoint-direct-engine-48k`)
 Commits after the docs refresh (`222b652`) that are not itemized below: per-app audio processes found
@@ -64,6 +67,10 @@ in-engine sample-rate conversion is the next step (owner decision: never change 
 sample rate automatically).
 
 ### Added
+- **App icon.** `MacMiniMixer/Support/Assets.xcassets/AppIcon.appiconset` (16–1024 px, macOS
+  rounded-rect plate with the three-slider artwork); `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`.
+  The System Audio Recording usage text now describes per-app volume control instead of "future
+  experiments".
 - **Direct aggregate output engine (default live output path).** Product Real and Advanced live
   control now play the tapped audio straight out of one Core Audio IOProc: a single private
   aggregate device made of the default output device (main/clock sub-device, drift compensated)

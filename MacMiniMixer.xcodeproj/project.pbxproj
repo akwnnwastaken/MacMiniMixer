@@ -57,6 +57,7 @@
 		9B7D1A822C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A812C8F4A9A8B2D0101 /* ProcessTapLiveControlling.swift */; };
 		9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */; };
 		9B7D1B202C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */; };
+		9B7D1B222C8F4A9A8B2D0101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9B7D1B212C8F4A9A8B2D0101 /* Assets.xcassets */; };
 		9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */; };
 		9B7D1A882C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */; };
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
@@ -155,6 +156,7 @@
 		9B7D1A702C8F4A9A8B2D0101 /* CoreAudioProcessTapTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapTester.swift; sourceTree = "<group>"; };
 		9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTestView.swift; sourceTree = "<group>"; };
 		9B7D1A762C8F4A9A8B2D0101 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		9B7D1B212C8F4A9A8B2D0101 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9B7D1A772C8F4A9A8B2D0101 /* ProcessTapReplayResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayResult.swift; sourceTree = "<group>"; };
 		9B7D1A792C8F4A9A8B2D0101 /* ProcessTapReplayProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayProbing.swift; sourceTree = "<group>"; };
 		9B7D1A7B2C8F4A9A8B2D0101 /* CoreAudioProcessTapReplayProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioProcessTapReplayProbe.swift; sourceTree = "<group>"; };
@@ -285,6 +287,7 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1A762C8F4A9A8B2D0101 /* Info.plist */,
+				9B7D1B212C8F4A9A8B2D0101 /* Assets.xcassets */,
 				9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */,
 				9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */,
 				9B7D1A932C8F4A9A8B2D0101 /* Extensions */,
@@ -518,6 +521,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9B7D1B222C8F4A9A8B2D0101 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -711,7 +715,7 @@
 		9B7D1A482C8F4A9A8B2D0101 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -736,7 +740,7 @@
 		9B7D1A492C8F4A9A8B2D0101 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
