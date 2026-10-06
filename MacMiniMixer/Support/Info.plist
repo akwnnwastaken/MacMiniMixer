@@ -27,7 +27,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>MacMiniMixer needs permission to test capturing audio from selected apps for future per-app volume control experiments.</string>
+	<string>MacMiniMixer needs audio recording access to change the volume of individual apps. Audio is processed live and is never saved.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Ahmed Tuğra Kasem. MIT License.</string>
 </dict>
