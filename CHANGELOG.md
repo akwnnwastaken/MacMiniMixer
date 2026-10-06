@@ -16,6 +16,13 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v0.14.1] - 2026-10-06
+
+### Highlights
+- **Cleaner output list.** MacMiniMixer's own temporary devices ("MacMiniMixer Process Tap Live
+  Output", one per controlled app) no longer appear in the panel's output device list, where one
+  could be picked as the system output by mistake.
+
 ### Fixed
 - **The output selector no longer lists MacMiniMixer's own devices.** With the direct output engine,
   each Real app's private aggregate ("MacMiniMixer Process Tap Live Output") has output channels, so
