@@ -493,6 +493,8 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
   the `xcodebuild test` command in §9. The `Release` workflow has not run against a tag (no tag has
   been pushed).
 - An earlier README-only commit had a one-off CI failure that **passed on rerun** (a flake).
+- **Test scope:** XCTest coverage focuses on pure logic, fake-backed coordinators, and synthetic
+  buffers, not real Process Tap or device integration; no test captures real audio.
 - `xcodebuild test` exits `0` on pass, `65` on any test failure. Get exact counts from the newest
   result bundle:
   `xcrun xcresulttool get test-results summary --path "$(ls -td ./.DerivedData/Logs/Test/*.xcresult | head -1)"`
