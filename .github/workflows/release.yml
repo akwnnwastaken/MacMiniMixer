@@ -24,7 +24,7 @@ concurrency:
 jobs:
   release:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: write # create/update the draft GitHub Release
 
@@ -35,8 +35,25 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      # Same guards as the Build workflow: per-test allowance, step timeout, unbuffered output.
       - name: Test MacMiniMixer
-        run: xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS' -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO
+        timeout-minutes: 10
+        env:
+          NSUnbufferedIO: 'YES'
+        run: >-
+          xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS'
+          -derivedDataPath ./.DerivedData -resultBundlePath ./TestResults.xcresult
+          -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults-${{ github.run_id }}-${{ github.run_attempt }}
+          path: TestResults.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Package MacMiniMixer (Release, ad-hoc signed)
         id: package

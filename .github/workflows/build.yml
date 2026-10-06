@@ -1,8 +1,11 @@
 name: Build
 
 on:
-  # Docs-only changes don't need a macOS runner (macOS minutes are limited).
+  # macOS minutes are limited (private repo: they count 10x), so each commit is tested once:
+  # pushes to main, pull requests, and manual runs. Pushes to other branches and tags don't run
+  # this workflow (a tag runs Release instead), and docs-only changes skip it.
   push:
+    branches: [main]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -27,7 +30,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -39,8 +42,27 @@ jobs:
       - name: Build MacMiniMixer
         run: xcodebuild -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -configuration Debug -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO build
 
+      # The suite takes about a minute. A hung test is killed by XCTest after 60 s (named in the log,
+      # spindump in the result bundle), and the step itself stops after 10 minutes, so a hang can't
+      # burn the job's whole timeout. NSUnbufferedIO streams results live instead of in chunks.
       - name: Test MacMiniMixer
-        run: xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS' -derivedDataPath ./.DerivedData CODE_SIGNING_ALLOWED=NO
+        timeout-minutes: 10
+        env:
+          NSUnbufferedIO: 'YES'
+        run: >-
+          xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS'
+          -derivedDataPath ./.DerivedData -resultBundlePath ./TestResults.xcresult
+          -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults-${{ github.run_id }}-${{ github.run_attempt }}
+          path: TestResults.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Release build packaged as an ad-hoc signed .zip (not notarized), uploaded as
   # a workflow artifact for manual testing. Does not create any GitHub Release.

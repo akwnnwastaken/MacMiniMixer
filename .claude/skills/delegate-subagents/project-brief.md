@@ -8,7 +8,8 @@ Xcode project, no third-party dependencies, public APIs only.
   GitHub Actions (Xcode 16, macos-15) or by the owner locally. A compile error costs a full round
   trip, so: verify every type, method and signature by reading the source; grep every call site,
   protocol conformer and test fake you affect; re-read your whole diff for compile errors before
-  committing.
+  committing. CI runs only for pull requests, pushes to `main`, and manual runs (not for other
+  branch pushes or tags), and macOS minutes count 10x on this private repo.
 - Swift 5 language mode, deployment target **macOS 13.0**; Process Tap code is guarded with
   `@available(macOS 14.2, *)`. SwiftUI APIs must exist on macOS 13.
 - Tests must be deterministic: no real sleeps; reuse the suites' existing gates, continuations
