@@ -37,8 +37,9 @@ changes. It is **not** a public release document — v0.14 was released on 2026-
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
-- **v0.14 is released (2026-10-06):** `MARKETING_VERSION` is **`0.14`** and `CURRENT_PROJECT_VERSION`
-  is `2` (all 4 build configurations). Do not bump the version again until the owner asks for the
+- **v0.14.1 is released (2026-10-06):** a patch on v0.14 that hides the app's own aggregate devices
+  from the output selector. `MARKETING_VERSION` is **`0.14.1`** and `CURRENT_PROJECT_VERSION`
+  is `3` (all 4 build configurations). Do not bump the version again until the owner asks for the
   next release; new work goes under a new `[Unreleased]` CHANGELOG section.
 - **Do not reintroduce** the unsafe default-output Core Audio property listener / output-device
   observer. A prior one caused silent system audio that survived app quit and required
@@ -586,7 +587,7 @@ git log -12 --oneline
 git diff --name-only
 git diff --name-only -- '*.xcodeproj' '*.pbxproj'
 git grep -n "maxConcurrentLiveSessions" -- MacMiniMixer          # expect `Int? = nil` (unlimited)
-git grep -n "MARKETING_VERSION = 0.14" -- '*.pbxproj'            # expect 4 matches (v0.14 released)
+git grep -n "MARKETING_VERSION = 0.14.1" -- '*.pbxproj'          # expect 4 matches (v0.14.1 released)
 git tag --list 'v*'                                              # expect v0.14 once the owner has tagged it
 ```
 

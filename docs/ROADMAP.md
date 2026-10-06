@@ -1,6 +1,7 @@
 # MacMiniMixer Roadmap
 
-Current repository state: **v0.14 is released (2026-10-06)**. It contains the **Product Real
+Current repository state: **v0.14 is released (2026-10-06)**, followed the same day by the
+**v0.14.1** patch (the app's own aggregate devices no longer appear in its output selector). It contains the **Product Real
 stability checkpoint** (the P177–P182 teardown/starvation hardening baseline, Advanced diagnostics,
 fake-backed tests, and the Product Real facade/store/start/stop split) and the work on top of it:
 **Product Real App Control has no app-count limit** (owner decision), starts are serialized
