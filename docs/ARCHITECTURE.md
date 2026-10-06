@@ -87,6 +87,10 @@ surface stable. It also preserves centralized cleanup orchestration: output devi
 changes, panel close, app termination, system sleep/wake, active live sessions, helper tasks,
 Advanced tools, and readiness cleanup triggers are still coordinated from one place.
 
+Result handling uses typed outcomes/status values (for example the `.liveControlAppExited` outcome
+and the typed `.systemSleep` stop reason), not comparisons of user-facing message strings, for
+control flow.
+
 ---
 
 ## Main UI Structure
@@ -569,6 +573,10 @@ Readiness can operate against this target's PID from Advanced. The UI shows the 
 parent app name + `" helper"` label. `MixerViewModel` forwards the target to Process Tap
 diagnostics and Two-App Readiness.
 
+The Advanced helper target is manual, temporary, Advanced-only, and not persisted across launches.
+Helper-target diagnostics help evaluate feasibility; they are not a stable tab-level browser
+mapping layer.
+
 ---
 
 ## Replay Probe
@@ -627,7 +635,13 @@ target removal.
 snapshot. `onUpdate` fires on each diagnostic tick.
 
 **Stop paths**: user calls `stopAll`, timeout fires, or one session's `onStopped` fires
-(which cascades to stop the other).
+(which cascades to stop the other). An output-device change, the selected app exiting, panel close
+for the Advanced test, or app quit also stops the test.
+
+**Evidence**: Music + Spotify have run together successfully in testing, with callbacks, peak/RMS,
+queued buffers, and zero drops/failures observed. Spotify + a YouTube helper target has also run
+successfully in Advanced diagnostics. It stays an Advanced diagnostic with its own two-session
+manager; the main mixer's multi-app control goes through Product Real Control instead.
 
 `finalizeUnresolvedStoppingSessions()` ensures any session still in `.starting` or
 `.stopping` is finalized as `.failed` or `.stopped` before the snapshot is published.
@@ -968,6 +982,11 @@ On macOS < 14.2:
 - All Process Tap diagnostic UI is visible but returns `unsupportedOS` outcomes.
 - No crash or degraded state.
 
+**Permission**: the app includes `NSAudioCaptureUsageDescription` (the System Audio Recording usage
+text). It does not request System Audio Recording permission on launch; macOS may ask when the user
+explicitly runs a diagnostic or a live control action (in the product flow, the first time a row
+becomes Real).
+
 ---
 
 ## What Is Real vs Mock-Only
@@ -988,7 +1007,8 @@ On macOS < 14.2:
 
 - `PreviewAudioStateController` — per-app volume/mute state for rows without an active Product
   Real session is UI state only, no system effect. Slider moves on a row that is not tap-eligible,
-  or has not become Real, do nothing to real audio.
+  whose real start failed, or has not become Real, do nothing to real audio. (Rows are preview
+  until the user interacts with an eligible row; browser/helper targets are never main-UI rows.)
 - `MockApplicationLister`, `MockOutputDeviceLister` — fallbacks inside
   `WorkspaceApplicationLister` / `CoreAudioOutputDeviceLister`, not the main app flow. The other
   former production mocks (`MockSystemVolumeController`, `MockSystemVolumeReader`,
@@ -1017,6 +1037,15 @@ On macOS < 14.2:
   interacts with a row (real app control is always on; there is no toggle).
 - **Tab-level browser mapping**: helper PIDs are not stable across tab reloads or browser
   restarts. Cached mappings are validation-first but not persistently tracked.
+- **Production automatic browser/helper mapping for every relevant main-UI row**: browser rows are
+  resolved only after the user interacts with them, and helper targets are not main-UI rows.
+- **Production-grade shared renderer / production-ready low-latency renderer**: each Real app runs
+  its own independent session; a centralized mixer/renderer is deferred (see `docs/ROADMAP.md`).
+- **Full Windows Volume Mixer replacement behavior**: not claimed; MacMiniMixer is experimental.
+- **Installer/uninstaller**: not implemented; the packaged app is a plain `.app` in a zip (see
+  "Explicitly Deferred Large-Scope Work" in `docs/ROADMAP.md`).
+- **Per-application audio routing** (sending one app to a different output device) or any per-app
+  processing beyond the gain/mute of active Real rows.
 - **General per-app volume for all apps by default**: only rows the user has made Real (by
   interacting with them) are real. All others are preview/UI state.
 - **Notarized distribution**: packaged zips (`scripts/package-app.sh`, CI artifact, draft

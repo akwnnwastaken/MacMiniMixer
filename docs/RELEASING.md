@@ -56,8 +56,8 @@ GitHub Release.
                 MacMiniMixer.xcodeproj/project.pbxproj
       git grep -n -E 'MARKETING_VERSION|CURRENT_PROJECT_VERSION' -- '*.pbxproj'  # expect 4 + 4, all new
       ```
-- [ ] README "Current Status" and `docs/HANDOFF.md` say the version is released, not "unreleased
-      checkpoint".
+- [ ] `README.md` (the version in its status note and the zip name in "Installation") and
+      `docs/HANDOFF.md` say the version is released, not "unreleased checkpoint".
 - [ ] The release commit is pushed and its `Build` run is green. That run's `MacMiniMixer-app`
       artifact is a good final smoke test.
 

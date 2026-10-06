@@ -698,6 +698,51 @@ under the hardened runtime). A `.dmg` is optional. Keep this separate from runti
 
 ---
 
+### Unscheduled ideas (carried over from the former README roadmap)
+
+**Priority**: Not set | **Status**: Not started, unscheduled
+
+These items used to be listed in the README's Roadmap section (the README is now a user-facing
+document). They are kept here so nothing is lost; none has an owner decision or a plan yet. The other
+former README roadmap items already have their own sections above: the N-session characterization,
+widening direct-engine device coverage and removing the legacy `AudioQueue` output (including the
+Replay Probe's own queue), routing engine-initiated stops through the gates / faster Stop All /
+shorter main-thread teardown / narrowing what the menu bar label observes ("Many-session hardening"),
+Two-App Readiness with more apps, helper PID changes, long-run CPU / latency / buffer-drop
+diagnostics ("Sleep/wake and long-running resource characterization"), the optional read-only
+`MixerViewModel` reassessment, independent sessions versus a centralized mixer/renderer, and Developer
+ID signing + notarization.
+
+Polish and robustness:
+- Better UI polish.
+- More robust output device handling.
+- Continue simplifying the main UI while keeping diagnostics available in Advanced.
+- Add more characterization tests around lifecycle cleanup, app list/preview state, and status
+  behavior.
+- Refine live session reliability and latency.
+- Better app active/inactive state handling.
+- Refine automatic audio-relevant app detection, and audio activity detection improvements.
+
+Research and experiments:
+- Design a safe architecture for per-app gain/mute experiments.
+- Investigate browser/helper process discovery for Safari, YouTube, and similar web audio.
+- Refine helper candidate selection, and the confidence/scoring of auto-detected audio helpers.
+- Refine browser/helper row mapping behind an explicit experimental mode.
+- Investigate routing/replay requirements.
+- Decide whether Process Tap alone is enough or whether a virtual device/HAL approach is needed later
+  (see "Explicitly Deferred Large-Scope Work").
+- Eventual automatic real mixer behavior if it proves stable, and reducing the experimental UI over
+  time if stability improves.
+
+Longer-term:
+- Installer/uninstaller if needed (see "Explicitly Deferred Large-Scope Work").
+- Documentation for known limitations.
+- macOS version support notes.
+
+Background Music and BlackHole may be studied architecturally later, but their code is not copied.
+
+---
+
 ## North-Star Goal: Full Windows-style Multi-App Mixer
 
 The maintainer's end goal is a true Windows Volume Mixer experience: **simultaneous,
