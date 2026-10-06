@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Build with the newest stable Xcode on the runner (not the image's older default), so the app
       # links the current macOS SDK and gets the same control styles as a local build.
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload test results (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: TestResults-${{ github.run_id }}-${{ github.run_attempt }}
           path: TestResults.xcresult
@@ -90,7 +90,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Build with the newest stable Xcode on the runner (not the image's older default), so the app
       # links the current macOS SDK and gets the same control styles as a local build.
@@ -110,7 +110,7 @@ jobs:
         run: scripts/package-app.sh --label "${GITHUB_SHA::7}"
 
       - name: Upload app zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MacMiniMixer-app
           path: dist/*
