@@ -1,8 +1,11 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 struct MixerPanelView: View {
     @ObservedObject var viewModel: MixerViewModel
+    @State private var launchAtLoginStatus = SMAppService.mainApp.status
+    @State private var launchAtLoginError: String?
     @State private var isShowingOutputDevices = false
     @State private var isEditingSystemOutputSlider = false
     @State private var isShowingAdvanced = false
@@ -55,11 +58,23 @@ struct MixerPanelView: View {
         .animation(.snappy(duration: 0.18), value: viewModel.statusMessage)
         .animation(.snappy(duration: 0.18), value: viewModel.isProcessTapLiveControlActive)
         .onAppear {
+            refreshLaunchAtLoginStatus()
             // Product live diagnostics are only published while the Advanced section is on screen.
             viewModel.setLiveDiagnosticsDisplayVisible(isShowingAdvanced)
             viewModel.refreshApplications()
             viewModel.refreshOutputDevices()
             viewModel.refreshSystemOutputVolume()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshLaunchAtLoginStatus()
+        }
+        .alert("Could not update Launch at Login", isPresented: Binding(
+            get: { launchAtLoginError != nil },
+            set: { if !$0 { launchAtLoginError = nil } }
+        )) {
+            Button("OK", role: .cancel) { launchAtLoginError = nil }
+        } message: {
+            Text(launchAtLoginError ?? "")
         }
         .task {
             await runSystemVolumeRefreshLoop()
@@ -119,7 +134,7 @@ struct MixerPanelView: View {
             )
     }
 
-    /// Secondary actions (`Show all apps`, `Quit`) kept out of the main panel body.
+    /// Secondary actions kept out of the main panel body.
     private var moreMenu: some View {
         Menu {
             Toggle(
@@ -132,6 +147,22 @@ struct MixerPanelView: View {
             .help("Show all regular running apps")
             .accessibilityLabel(Text("Show all apps"))
             .accessibilityHint(Text("When off, only audio-relevant apps are listed"))
+
+            Toggle(
+                "Launch at Login",
+                isOn: Binding(
+                    get: { launchAtLoginStatus == .enabled || launchAtLoginStatus == .requiresApproval },
+                    set: { setLaunchAtLogin($0) }
+                )
+            )
+            .help("Start MacMiniMixer automatically when you log in")
+            .accessibilityHint(Text("Starts MacMiniMixer automatically when you log in"))
+
+            if launchAtLoginStatus == .requiresApproval {
+                Button("Approve Launch at Login in System Settings…") {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            }
 
             Divider()
 
@@ -152,8 +183,26 @@ struct MixerPanelView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel(Text("More options"))
-        .accessibilityHint(Text("Shows the Show all apps option and Quit"))
+        .accessibilityHint(Text("Shows Show all apps, Launch at Login, and Quit"))
         .help("More options")
+    }
+
+    private func refreshLaunchAtLoginStatus() {
+        launchAtLoginStatus = SMAppService.mainApp.status
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            launchAtLoginError = error.localizedDescription
+        }
+        // macOS owns this setting; never report success using a separate saved preference.
+        refreshLaunchAtLoginStatus()
     }
 
     private func activeLiveControlBanner(_ banner: RealControlBannerPresentation) -> some View {

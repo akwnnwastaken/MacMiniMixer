@@ -23,9 +23,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v0.14.1/MacMiniMixer-0.14.1.zip"><strong>Download for macOS</strong></a>
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.5/MacMiniMixer-2.3.5.zip"><strong>Download for macOS</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v0.14.1"><strong>Release notes</strong></a>
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.5"><strong>Release notes</strong></a>
   &nbsp;·&nbsp;
   <a href="#build-from-source"><strong>Build from source</strong></a>
 </p>
@@ -43,23 +43,24 @@ MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn
 - **Always on, nothing automatic:** There is no toggle, and nothing is captured until you touch a row. Rows you have not touched yet are a UI preview and change no audio.
 - **System output:** System volume and mute, kept in sync live while the panel is open, plus the output device list and switching, refreshed live (for example when AirPods connect).
 - **Read-only badge:** Outputs that have no writable volume are marked before you drag anything.
-- **Simple panel:** A `⋯` menu with **Show all apps** and **Quit MacMiniMixer**, and a one-line banner — "N apps controlled" — with **Stop** or **Stop All**.
+- **Simple panel:** A `⋯` menu with **Show all apps**, **Launch at Login**, and **Quit MacMiniMixer**, and a one-line banner — "N apps controlled" — with **Stop** or **Stop All**.
+- **Launch at Login:** Enable it from the `⋯` menu to start MacMiniMixer when you log in. If macOS requires approval, use the menu shortcut to System Settings.
 - **Menu bar only:** No Dock icon and no window. Labels and hints for VoiceOver are included.
 - **Local and private:** Audio is processed live and never written to disk.
 
 ## Downloads
 
-Version **0.14.1** is current.
+Version **2.3.5** is current.
 
 | Platform | Package | Download | Release notes |
 | --- | --- | --- | --- |
-| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-0.14.1.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v0.14.1/MacMiniMixer-0.14.1.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v0.14.1/MacMiniMixer-0.14.1.zip.sha256) | [`v0.14.1`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v0.14.1) |
+| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-2.3.5.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.5/MacMiniMixer-2.3.5.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.5/MacMiniMixer-2.3.5.zip.sha256) | [`v2.3.5`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.5) |
 
 > [!NOTE]
 > The build is **ad-hoc signed and not notarized**, so macOS blocks the first launch — see [Installation](#installation) for the one-time steps.
 
 > [!NOTE]
-> v0.14.1 is pre-1.0 and experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
+> v2.3.5 is experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
 
 ---
 
@@ -102,10 +103,10 @@ The direct engine plays at the device's own sample rate and never changes it. In
 
 ### Download
 
-1. Download `MacMiniMixer-0.14.1.zip` and `MacMiniMixer-0.14.1.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
+1. Download `MacMiniMixer-2.3.5.zip` and `MacMiniMixer-2.3.5.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
 2. Check the download:
    ```bash
-   shasum -a 256 -c MacMiniMixer-0.14.1.zip.sha256
+   shasum -a 256 -c MacMiniMixer-2.3.5.zip.sha256
    ```
 3. Unzip it and move `MacMiniMixer.app` to `/Applications`.
 4. Open it once (see the warning below), then look for the icon in the menu bar.
@@ -148,6 +149,8 @@ The suite covers pure logic, fake-backed coordinators and synthetic audio buffer
 4. The first time, macOS asks for **System Audio Recording** — allow it
 5. The row shows an orange **Real** badge and its slider now sets that app's real volume. Control other apps the same way — queued ones show a spinner and start one after another 🎚️
 6. Click an app's **Real** badge to stop controlling it, or **Stop All** in the banner. Choose **Quit MacMiniMixer** in the `⋯` menu to stop everything
+
+To start MacMiniMixer automatically when you log in, enable **Launch at Login** in the `⋯` menu. The setting follows the macOS login-item status; if approval is required, choose **Approve Launch at Login in System Settings…**. Turn it off in the same menu to stop automatic launches.
 
 ### Row and Menu Bar States
 

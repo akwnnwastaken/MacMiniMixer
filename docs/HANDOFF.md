@@ -2,7 +2,7 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v0.14 was released on 2026-10-06 (see
+changes. It is **not** a public release document — v2.3.5 is the release for 2026-10-10 (see
 `CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
@@ -37,10 +37,11 @@ changes. It is **not** a public release document — v0.14 was released on 2026-
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
-- **v0.14.1 is released (2026-10-06):** a patch on v0.14 that hides the app's own aggregate devices
-  from the output selector. `MARKETING_VERSION` is **`0.14.1`** and `CURRENT_PROJECT_VERSION`
-  is `3` (all 4 build configurations). Do not bump the version again until the owner asks for the
-  next release; new work goes under a new `[Unreleased]` CHANGELOG section.
+- **v2.3.5 release (2026-10-10):** adds Launch at Login in the header `⋯` menu using
+  `SMAppService.mainApp`. `MARKETING_VERSION` is **`2.3.5`** and `CURRENT_PROJECT_VERSION`
+  is `4` (all 4 build configurations). The version number was explicitly selected by the owner;
+  per-app audio remains experimental. Do not bump the version again until the owner asks.
+  Automatic launch after a real logout/login has not been verified.
 - **Do not reintroduce** the unsafe default-output Core Audio property listener / output-device
   observer. A prior one caused silent system audio that survived app quit and required
   `sudo killall coreaudiod`.
@@ -56,7 +57,7 @@ changes. It is **not** a public release document — v0.14 was released on 2026-
   stays OFF for tests). Only user interaction with a row starts a session.
 - The **Advanced section is developer-only** (owner decision, `4220c46`): it is not built unless
   `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` was run (read once
-  when the panel is created; relaunch). `Show all apps` and `Quit` live in the header `⋯` menu.
+  when the panel is created; relaunch). `Show all apps`, `Launch at Login`, and `Quit` live in the header `⋯` menu.
   Rationale: `docs/DECISIONS.md`.
 - **Audio callback path:** the direct renderer/IOProc (`ProcessTapDirectOutputRenderer`,
   `ProcessTapDirectOutputCopier`, `ProcessTapDirectOutputResampler`) is now the live audio path; the

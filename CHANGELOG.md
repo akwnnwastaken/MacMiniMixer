@@ -3,7 +3,7 @@
 All notable changes to MacMiniMixer are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This project is experimental and pre-1.0. v0.14 is the first public release (an ad-hoc signed,
+This project is experimental. v0.14 is the first public release (an ad-hoc signed,
 not notarized `.zip`, published as a GitHub pre-release); v0.10 to v0.13 were internal milestones,
 not tagged public releases. MacMiniMixer is not a finished Windows Volume Mixer replacement:
 app-row sliders are UI-state/preview until you interact with an eligible row, and Product Real
@@ -15,6 +15,18 @@ multi-app per-application control is not claimed. Older entries that say "capped
 "`N > 3` deferred" describe the state at that time.
 
 ## [Unreleased]
+
+## [v2.3.5] - 2026-10-10
+
+### Highlights
+- **Launch at Login.** Start MacMiniMixer automatically when you log in by enabling the new
+  option in the `⋯` menu. If macOS requires approval, the menu offers a shortcut to System Settings.
+- Includes the CI test reliability and build-tool updates since v0.14.1.
+
+### Added
+- **Launch at Login toggle** using macOS Service Management. The menu reads the actual system
+  registration status when the panel opens and the app becomes active, supports unregistering,
+  and shows registration errors without saving an independent preference.
 
 ### Fixed
 - **Intermittent CI hang in `MixerStatusMessageControllerTests`.** Its test sleeper was meant to be
