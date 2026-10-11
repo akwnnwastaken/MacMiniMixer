@@ -15,8 +15,9 @@ GitHub Release.
   window. The app lives in the menu bar and quits from **Quit MacMiniMixer** in the panel header's `⋯` menu.
 - It runs on **macOS 13.0+**. Product Real Control and the other Process Tap features need
   **macOS 14.2+**. Product Real Control is **experimental**.
-- The bundle identifier is still the placeholder `com.example.MacMiniMixer`. That's fine for
-  ad-hoc builds, but change it before Developer ID distribution (see [Future](#future-developer-id-signing--notarization)).
+- The app bundle identifier is `com.akwnnwastaken.macminimixer` in Debug and Release.
+  The previous `com.example.MacMiniMixer` defaults domain remains intact. Developer-only
+  overrides do not migrate automatically; use the new domain for current instructions.
 
 | Workflow | Trigger | Result |
 | --- | --- | --- |
@@ -40,6 +41,12 @@ GitHub Release.
       active, §14 sleep/wake, and the §17/§18 Product Real smokes (steps that read the Advanced card need developer mode, see
       the checklist's setup). Audio must be normal after quitting,
       with no `sudo killall coreaudiod` needed.
+- [ ] Verify the new `com.akwnnwastaken.macminimixer` identity with the **final signed build**:
+      System Audio Recording request/denial/re-enable and Process Tap capture, plus Launch at
+      Login registration, a real logout/login launch, and disabling it. Record results using
+      the bundle-identity acceptance section in `docs/MANUAL_TEST_CHECKLIST.md`. Existing
+      permissions and Login Items are not guaranteed to migrate; unsigned XCTest is not evidence
+      for either behavior.
 - [ ] `CHANGELOG.md` is final. Move the `[Unreleased]` entries into a new `## [vX.Y] - YYYY-MM-DD`
       section that opens with a short `### Highlights` list, and leave a new empty `## [Unreleased]`.
       `scripts/release-notes.sh` puts that Highlights list (or, without one, the whole section) into
@@ -202,8 +209,9 @@ The build is not notarized, so Gatekeeper blocks the first launch of a downloade
 ## Future: Developer ID signing + notarization
 
 **Documented only, not implemented.** With Developer ID signing and notarization, users get a
-normal first launch with no Gatekeeper workaround. The app also gets a stable code identity, so the
-System Audio Recording permission survives updates.
+normal first launch with no Gatekeeper workaround. A stable code identity can improve permission
+continuity, but System Audio Recording behavior across updates must be verified with the final
+signed build; it is not guaranteed by the bundle identifier alone.
 
 **Prerequisites**
 
@@ -211,8 +219,8 @@ System Audio Recording permission survives updates.
 - A **Developer ID Application** certificate, exported with its private key as a `.p12`.
 - Notarization credentials. Use an App Store Connect API key (recommended for CI), or an Apple ID
   with an app-specific password and your Team ID.
-- A real bundle identifier in place of `com.example.MacMiniMixer`. This is a `project.pbxproj`
-  change and should get its own deliberate commit.
+- The approved app bundle identifier `com.akwnnwastaken.macminimixer` is already configured.
+  Verify System Audio Recording and Launch at Login with the final signed build before shipping.
 - Hardened runtime, which notarization requires. The app target already has
   `ENABLE_HARDENED_RUNTIME = YES`, and the commands below sign with `--options runtime`. There is no
   entitlements file today. Check on a notarized build that Process Tap capture still works under

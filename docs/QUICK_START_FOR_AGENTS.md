@@ -29,7 +29,7 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Real app control is always on (owner decision; no toggle in the panel — `MacMiniMixerApp` enables it
   at launch). App rows are preview/UI-state until the user interacts with an eligible row.
 - The Advanced section is developer-only (owner decision): it is not built unless
-  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` was run (relaunch).
+  `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES` was run (relaunch).
   `Show all apps` and `Quit` live in the panel header's `⋯` menu.
 
 ---

@@ -15,8 +15,22 @@ Panel and mode notes (owner decisions):
 - `Show all apps` and `Quit MacMiniMixer` live in the header `⋯` menu.
 - **Developer mode.** The Advanced section (§7–§10 and every step that reads the Advanced
   diagnostics card) exists only in developer mode:
-  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES`, then relaunch
-  (`defaults delete com.example.MacMiniMixer MacMiniMixerDeveloperMode` hides it again).
+  `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES`, then relaunch
+  (`defaults delete com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode` hides it again).
+
+### Bundle-identity acceptance (final signed build, release gate)
+
+The app now uses `com.akwnnwastaken.macminimixer`. The old `com.example.MacMiniMixer`
+defaults domain is preserved; developer-only overrides do not migrate automatically.
+Do not treat unsigned XCTest or static source review as permission/Login Item acceptance.
+
+- With the final signed build, verify System Audio Recording's request, denial, and re-enable
+  paths and successful Process Tap capture. Record macOS version, build/signing identity, and
+  observed results; existing permission migration is not guaranteed.
+- Verify Launch at Login can be enabled, launches the intended build after an actual logout/login,
+  and can be disabled without launching at the next login. Record results, including any stale
+  Login Item behavior from the old identity; migration is not guaranteed.
+- These are maintainer-operated manual checks, not actions for the bundle-ID implementation task.
 
 ---
 
@@ -826,11 +840,11 @@ Steps:
    - Record: device, sample rate, the `output=` / `path=` lines, crackle yes/no. A device with input
      streams is expected to log "falling back to AudioQueue … output device has input streams" and
      `output=audioQueue`; crackle there is a known limit of the legacy path.
-6. **A/B fallback switch.** `defaults write com.example.MacMiniMixer MacMiniMixerLiveOutputMode
+6. **A/B fallback switch.** `defaults write com.akwnnwastaken.macminimixer MacMiniMixerLiveOutputMode
    audioQueue`, quit and reopen MacMiniMixer, start a session.
    - **Expected**: log shows `output=audioQueue` and the Advanced `Queued` count rises. Remove the key
-     (`defaults delete com.example.MacMiniMixer MacMiniMixerLiveOutputMode`) and reopen.
-7. **Resample switch** (device at 44.1 kHz). `defaults write com.example.MacMiniMixer
+     (`defaults delete com.akwnnwastaken.macminimixer MacMiniMixerLiveOutputMode`) and reopen.
+7. **Resample switch** (device at 44.1 kHz). `defaults write com.akwnnwastaken.macminimixer
    MacMiniMixerDirectResample off`, reopen, start a session.
    - **Expected**: "falling back to AudioQueue … reason=sample rate mismatch …" and
      `output=audioQueue`. Remove the key and reopen.
