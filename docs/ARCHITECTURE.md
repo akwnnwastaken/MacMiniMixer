@@ -132,7 +132,7 @@ corners. Sections from top to bottom:
    Real Control is always on) and no inline "Show all" checkbox (it lives in the header `⋯` menu).
 7. **Advanced section** — **developer mode only**: the section is not built at all unless the
    `MacMiniMixerDeveloperMode` bool default is true (read once when the panel is created; enable with
-   `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` and relaunch).
+   `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES` and relaunch).
    When built it is collapsible and contains `ProcessTapTestView`, `HelperProcessDiscoveryView`,
    `TwoAppReadinessTestView`.
 

@@ -75,7 +75,7 @@ look for its icon in the menu bar.
   mute it), and nothing is captured before that. Until then the row is a UI preview only. Every
   Real app adds its own CPU load.
 - **Advanced diagnostics are developer-only.** The Advanced section appears only in developer
-  mode: `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES`, then
+  mode: `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES`, then
   relaunch.
 - macOS asks for **System Audio Recording** permission the first time you use a Process Tap
   feature. Because this build is ad-hoc signed, macOS may ask again (or the permission may

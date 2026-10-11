@@ -16,6 +16,10 @@ changes. It is **not** a public release document — v2.3.5 is the release for 2
 - Local path: `/Users/ahmed/MacMiniMixer` on the maintainer's Mac. The path may differ by machine
   (other clones, agent worktrees, cloud sessions); adjust the `cd` in §9 accordingly.
 - Branch: `main`
+- App bundle identifier: `com.akwnnwastaken.macminimixer` (Debug and Release). The previous
+  `com.example.MacMiniMixer` defaults domain remains intact; its developer-only overrides do not
+  migrate automatically. System Audio Recording and Launch at Login must be manually verified
+  with the final signed build under the new identity; migration is not guaranteed.
 - GitHub: `akwnnwastaken/MacMiniMixer`
 - macOS **Swift + SwiftUI menu bar** app (Windows-Volume-Mixer-inspired).
 - Purpose: output device selection, real system output volume, running-app list, and **Product
@@ -56,7 +60,7 @@ changes. It is **not** a public release document — v2.3.5 is the release for 2
   enables it at launch via `AppConstants.realAppControlEnabledAtLaunch` (the view model's own default
   stays OFF for tests). Only user interaction with a row starts a session.
 - The **Advanced section is developer-only** (owner decision, `4220c46`): it is not built unless
-  `defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES` was run (read once
+  `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES` was run (read once
   when the panel is created; relaunch). `Show all apps`, `Launch at Login`, and `Quit` live in the header `⋯` menu.
   Rationale: `docs/DECISIONS.md`.
 - **Audio callback path:** the direct renderer/IOProc (`ProcessTapDirectOutputRenderer`,
@@ -562,8 +566,8 @@ test waits deadline-bounded instead of a fixed `Task.yield()` budget (removed a 
 - **Core Audio property-listener (polling → HAL) migration** — deferred / research-only.
 - **Broad `MixerViewModel` / `ProductRealControlCoordinator` extraction** — deferred.
 - Candidates, not urgent: **localization**; **keyboard navigation**; **view/snapshot** and
-  **integration** tests; a real bundle identifier before any Developer ID distribution (still
-  `com.example.MacMiniMixer`).
+  **integration** tests; final signed-build System Audio Recording and Launch at Login acceptance
+  under the approved `com.akwnnwastaken.macminimixer` identity before distribution.
 
 ## 8. Environment notes
 

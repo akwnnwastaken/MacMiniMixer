@@ -192,7 +192,7 @@ To uninstall:
 
 1. Choose **Quit MacMiniMixer** in the `⋯` menu — this stops every tap.
 2. Delete `/Applications/MacMiniMixer.app`.
-3. Optionally forget its settings: `defaults delete com.example.MacMiniMixer`
+3. Optionally forget its settings: `defaults delete com.akwnnwastaken.macminimixer`
 4. Remove MacMiniMixer from the **System Audio Recording** list in **System Settings → Privacy & Security**.
 
 ## Development
@@ -215,23 +215,27 @@ CI runs on pull requests and pushes to `main` (docs-only changes skip it). When 
 The **Advanced** diagnostics section (Process Tap tests, helper discovery, two-app readiness) is hidden by default. To show it:
 
 ```bash
-defaults write com.example.MacMiniMixer MacMiniMixerDeveloperMode -bool YES   # then relaunch
-defaults delete com.example.MacMiniMixer MacMiniMixerDeveloperMode            # hide it again
+defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES   # then relaunch
+defaults delete com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode            # hide it again
 ```
+
+The app now uses `com.akwnnwastaken.macminimixer`. The previous
+`com.example.MacMiniMixer` defaults domain is left intact; developer-only overrides there
+do not automatically carry over. Set any needed overrides explicitly in the new domain.
 
 ### Live output overrides
 
-Two more `defaults` switches are read when a live controller is created, so restart the app after changing them (the bundle identifier is currently `com.example.MacMiniMixer`):
+Two more `defaults` switches are read when a live controller is created, so restart the app after changing them (the bundle identifier is `com.akwnnwastaken.macminimixer`):
 
 ```bash
 # Force the legacy AudioQueue output path (A/B fallback); remove the key to return to direct output
-defaults write com.example.MacMiniMixer MacMiniMixerLiveOutputMode audioQueue
-defaults delete com.example.MacMiniMixer MacMiniMixerLiveOutputMode
+defaults write com.akwnnwastaken.macminimixer MacMiniMixerLiveOutputMode audioQueue
+defaults delete com.akwnnwastaken.macminimixer MacMiniMixerLiveOutputMode
 
 # Do not convert sample rates inside the direct engine: a tap/device rate mismatch then falls back
 # to the AudioQueue path (the behavior before in-engine conversion existed)
-defaults write com.example.MacMiniMixer MacMiniMixerDirectResample off
-defaults delete com.example.MacMiniMixer MacMiniMixerDirectResample
+defaults write com.akwnnwastaken.macminimixer MacMiniMixerDirectResample off
+defaults delete com.akwnnwastaken.macminimixer MacMiniMixerDirectResample
 ```
 
 ## License

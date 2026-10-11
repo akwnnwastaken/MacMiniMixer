@@ -693,9 +693,10 @@ through one aggregate IOProc"):
 - `docs/RELEASING.md`: maintainer checklist, Gatekeeper instructions for ad-hoc builds (incl. the
   macOS 15 "Open Anyway" flow), and the documented-only Developer ID + notarization steps.
 
-**Future**: Developer ID signing + notarization (needs an Apple Developer membership, a real
-bundle identifier instead of `com.example.MacMiniMixer`, and a check that Process Tap capture works
-under the hardened runtime). A `.dmg` is optional. Keep this separate from runtime audio behavior.
+**Future**: Developer ID signing + notarization (needs an Apple Developer membership and a check
+that Process Tap capture works under the hardened runtime). The approved app bundle identifier is
+`com.akwnnwastaken.macminimixer`; System Audio Recording and Launch at Login still need final
+signed-build acceptance under this identity. A `.dmg` is optional. Keep this separate from runtime audio behavior.
 
 ---
 
