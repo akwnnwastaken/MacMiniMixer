@@ -196,10 +196,6 @@ The build is not notarized, so Gatekeeper blocks the first launch of a downloade
    - **macOS 15 and later:** the right-click bypass no longer works. Double-click the app and
      dismiss the warning. Then go to **System Settings → Privacy & Security**, scroll to
      *Security*, click **Open Anyway** for MacMiniMixer, and confirm.
-   - **Terminal (any version):**
-     ```bash
-     xattr -dr com.apple.quarantine /Applications/MacMiniMixer.app
-     ```
 3. Look for the icon in the **menu bar**. There is no Dock icon or window (`LSUIElement`).
 4. macOS asks for **System Audio Recording** permission the first time a Process Tap feature runs.
    The permission is tied to the code signature, and every ad-hoc build has a different one. After
