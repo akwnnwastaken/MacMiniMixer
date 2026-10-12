@@ -2,8 +2,8 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v2.3.5 is the release for 2026-10-10 (see
-`CHANGELOG.md`).
+changes. It is **not** a public release document — v2.3.6 / build 5 is prepared for the next
+release dated 2026-10-12 (see `CHANGELOG.md`); no v2.3.6 public release or tag exists yet.
 
 > Always verify the live state before trusting this file — run the commands in
 > [§9 Verification commands](#9-verification-commands) first. Commit hashes and test counts below
@@ -41,11 +41,14 @@ changes. It is **not** a public release document — v2.3.5 is the release for 2
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
-- **v2.3.5 release (2026-10-10):** adds Launch at Login in the header `⋯` menu using
-  `SMAppService.mainApp`. `MARKETING_VERSION` is **`2.3.5`** and `CURRENT_PROJECT_VERSION`
-  is `4` (all 4 build configurations). The version number was explicitly selected by the owner;
-  per-app audio remains experimental. Do not bump the version again until the owner asks.
-  Automatic launch after a real logout/login has not been verified.
+- **v2.3.6 release preparation (2026-10-12):** removes the decorative app-icon backplate and
+  adds a green row outline plus accessible activity text for attributed Core Audio active output IO
+  while the panel is open (macOS 14.2+), not measured audible sound or the orange Real-control state.
+  `MARKETING_VERSION` is **`2.3.6`** and `CURRENT_PROJECT_VERSION` is `5` (all 4 build configurations).
+  The owner selected this version/build and the existing ad-hoc-signed, not-notarized draft-release
+  workflow; no v2.3.6 tag or public release exists yet. Per-app audio remains experimental.
+  Do not bump the version again until the owner asks. Final packaged-app System Audio Recording /
+  Process Tap, audio, and Launch at Login (including real logout/login) acceptance remain unperformed.
 - **Do not reintroduce** the unsafe default-output Core Audio property listener / output-device
   observer. A prior one caused silent system audio that survived app quit and required
   `sudo killall coreaudiod`.

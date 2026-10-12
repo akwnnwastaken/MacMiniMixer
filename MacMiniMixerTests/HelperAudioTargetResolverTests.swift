@@ -1211,6 +1211,37 @@ final class AppAudioProcessMatcherTests: XCTestCase {
         )
     }
 
+    func testQuietMatchingPreservesWithheldWebKitAttributionWithoutDiagnostics() {
+        let request = AppAudioTargetRequest(
+            appID: "bundle:com.apple.Safari", appName: "Safari", processIdentifier: 100,
+            otherRunningApps: [.init(processIdentifier: 200, bundleIdentifier: safariWebAppBundleID)]
+        )
+        let objects = [object(100, "com.apple.Safari"), object(500, "com.apple.WebKit.GPU", running: true)]
+        var diagnosticCount = 0
+        let diagnosticMatches = AppAudioProcessMatcher.matchingProcessObjects(
+            for: request, processObjects: objects, processes: [], ownProcessIdentifier: ownPID,
+            onWithheldWebKitProcesses: { reportedRequest, withheldPIDs, otherOwner in
+                diagnosticCount += 1
+                XCTAssertEqual(reportedRequest.appID, request.appID)
+                XCTAssertEqual(withheldPIDs, [500])
+                XCTAssertEqual(otherOwner, self.safariWebAppBundleID.lowercased())
+            }
+        ).map(\.processIdentifier)
+        XCTAssertEqual(diagnosticCount, 1)
+        XCTAssertEqual(diagnosticMatches, [100])
+
+        // Exercise repeated UI-style polls: nil disables the sole diagnostic side-effect path,
+        // not the conservative fallback exclusion or any other matching rule.
+        for _ in 0..<3 {
+            let quietMatches = AppAudioProcessMatcher.matchingProcessObjects(
+                for: request, processObjects: objects, processes: [], ownProcessIdentifier: ownPID,
+                onWithheldWebKitProcesses: nil
+            ).map(\.processIdentifier)
+            XCTAssertEqual(quietMatches, diagnosticMatches)
+        }
+        XCTAssertEqual(diagnosticCount, 1)
+    }
+
     // The fallback is decided per process: with Safari's coalition known, a WebKit process whose
     // coalition is unknown goes through the (guarded) bundle rules, while one in another known
     // coalition is simply not Safari's.

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MixerAppRowView: View {
     let app: MixerAppItem
+    let isOutputActive: Bool
     let isExperimentalControlActive: Bool
     let isExperimentalControlResolving: Bool
     /// A Product Real start/stop transition is in flight for this row. While true the accessory
@@ -27,6 +28,8 @@ struct MixerAppRowView: View {
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
                 .frame(width: AppConstants.Layout.appNameWidth, alignment: .leading)
+                .help(isOutputActive ? "Active audio output" : "No active audio output detected")
+                .accessibilityValue(Text(isOutputActive ? "Active audio output" : "No active audio output detected"))
 
             Slider(value: $volume, in: AppConstants.volumeRange, step: 1)
                 .disabled(isMuted || isExperimentalControlResolving)
@@ -58,9 +61,6 @@ struct MixerAppRowView: View {
     private var appIcon: some View {
         Color.clear
             .frame(width: AppConstants.Layout.rowIconSize, height: AppConstants.Layout.rowIconSize)
-            .background {
-                iconBubble
-            }
             .overlay {
                 appIconImage
                     .frame(
@@ -76,14 +76,6 @@ struct MixerAppRowView: View {
                 }
             }
             .contentShape(Circle())
-    }
-
-    private var iconBubble: some View {
-        ZStack {
-            Circle()
-                .fill(isMuted ? Color.red.opacity(0.14) : Color.white.opacity(0.12))
-        }
-        .frame(width: AppConstants.Layout.rowIconSize, height: AppConstants.Layout.rowIconSize)
     }
 
     private var mutedBadge: some View {
@@ -144,6 +136,10 @@ struct MixerAppRowView: View {
     }
 
     private var rowStrokeColor: Color {
+        if isOutputActive {
+            return Color.green.opacity(0.6)
+        }
+
         if isExperimentalControlActive {
             return Color.orange.opacity(0.26)
         }

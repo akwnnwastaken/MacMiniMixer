@@ -16,6 +16,15 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.3.6] - 2026-10-12
+
+### Highlights
+- **Cleaner app icons.** Removed the decorative circular backplate behind each app icon,
+  preserving the app artwork and mute badge.
+- **Active-output indication.** A restrained green row outline and accessible activity text
+  indicate attributed Core Audio active output IO while the panel is open (macOS 14.2+).
+  This is not a measurement of audible sound; the orange Real badge still means per-app control.
+
 ## [v2.3.5] - 2026-10-10
 
 ### Highlights

@@ -4129,19 +4129,34 @@ private final class FakeLiveControlTwoAppReadinessTester: ProcessTapTwoAppReadin
 
 /// Fake HAL process-object list for tests that run the real `HelperAudioTargetResolver`.
 private final class FakeLiveControlAudioProcessObjectLister: AudioProcessObjectListing, @unchecked Sendable {
-    let objects: [AudioProcessObjectInfo]
+    private let lock = NSLock()
+    private var storedObjects: [AudioProcessObjectInfo]
+    private var storedListCount = 0
+
+    var objects: [AudioProcessObjectInfo] {
+        get { lock.withLock { storedObjects } }
+        set { lock.withLock { storedObjects = newValue } }
+    }
+
+    var listCount: Int { lock.withLock { storedListCount } }
 
     init(objects: [AudioProcessObjectInfo]) {
-        self.objects = objects
+        self.storedObjects = objects
     }
 
     func listAudioProcessObjects() -> [AudioProcessObjectInfo] {
-        objects
+        lock.withLock {
+            storedListCount += 1
+            return storedObjects
+        }
     }
 }
 
 private final class FakeLiveControlProcessLister: ProcessListing, @unchecked Sendable {
     var processes: [SystemProcessInfo]
+    private let ancestryLock = NSLock()
+    private var storedAncestryRequests: [[Int32]] = []
+    var ancestryRequests: [[Int32]] { ancestryLock.withLock { storedAncestryRequests } }
 
     init(processes: [SystemProcessInfo] = []) {
         self.processes = processes
@@ -4149,6 +4164,220 @@ private final class FakeLiveControlProcessLister: ProcessListing, @unchecked Sen
 
     func listProcesses() -> [SystemProcessInfo] {
         processes
+    }
+
+    func listProcessAncestry(of processIdentifiers: [Int32]) -> [SystemProcessInfo] {
+        ancestryLock.withLock { storedAncestryRequests.append(processIdentifiers) }
+        return processes
+    }
+}
+
+/// Activity-only tests: all HAL/process/application inputs are fakes; no capture, live audio,
+/// eligibility reads, time sleeps, or app launch. Reuse the existing view-model fake dependencies.
+@MainActor
+final class MixerOutputActivityTests: XCTestCase {
+    private func app(_ id: String, pid: Int32) -> MixerAppItem {
+        MixerAppItem(id: "bundle:\(id)", name: "App", icon: .systemSymbol("app"),
+                     processIdentifier: pid, volume: 50)
+    }
+
+    private func object(_ pid: Int32, bundle: String? = nil, active: Bool = true) -> AudioProcessObjectInfo {
+        AudioProcessObjectInfo(objectID: UInt32(pid), processIdentifier: pid,
+                               bundleIdentifier: bundle, isRunningOutput: active)
+    }
+
+    private func process(_ pid: Int32, parent: Int32 = 1, coalition: UInt64? = nil) -> SystemProcessInfo {
+        SystemProcessInfo(processIdentifier: pid, parentProcessIdentifier: parent,
+                          name: "", executablePath: nil, resourceCoalitionID: coalition)
+    }
+
+    private func makeModel(
+        applications: FakeLiveControlApplicationLister,
+        objects: FakeLiveControlAudioProcessObjectLister,
+        processes: FakeLiveControlProcessLister = FakeLiveControlProcessLister(),
+        supported: Bool = true,
+        live: FakeLiveControlController = FakeLiveControlController()
+    ) -> MixerViewModel {
+        MixerViewModel(
+            applicationLister: applications,
+            audioController: FakeLiveControlAudioController(),
+            outputDeviceLister: FakeLiveControlOutputDeviceLister(),
+            outputDeviceController: FakeLiveControlOutputDeviceController(),
+            systemVolumeReader: FakeLiveControlSystemVolumeReader(volumeScalar: 0.5),
+            systemVolumeController: FakeLiveControlSystemVolumeController(),
+            processTapTester: FakeLiveControlProcessTapTester(),
+            processTapReplayProbe: FakeLiveControlReplayProbe(),
+            processTapLiveController: live,
+            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
+            helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
+            appAudioTargetResolver: FakeAppAudioTargetResolver(),
+            processLister: processes,
+            audioProcessObjectLister: objects,
+            isOutputActivityAvailable: { supported },
+            productRealStartSettleGate: ProductRealStartSettleGate(sleeper: { _ in }),
+            processTapEligibility: { _ in .unavailable("Fake: no eligibility reads needed") }
+        )
+    }
+
+    func testActiveInactiveTransitionsUseOutputFlagNotPresenceOrRealControl() {
+        let row = app("example.one", pid: 101)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(101, active: false)])
+        let live = FakeLiveControlController()
+        let model = makeModel(applications: .init(apps: [row]), objects: objects, live: live)
+        model.setOutputActivityVisible(true)
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        objects.objects = [object(101)]
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.activeOutputAppIDs, [row.id])
+        XCTAssertFalse(model.isExperimentalControlActive(for: row.id))
+        XCTAssertTrue(live.startedTargets.isEmpty)
+        objects.objects = [object(101, active: false)]
+        model.refreshOutputActivity()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+    }
+
+    func testChildAttributionUsesOneSharedSnapshotAndExcludesOtherRowsOwnPID() {
+        let first = app("example.one", pid: 101)
+        let second = app("example.two", pid: 102)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(301), object(102, active: false)])
+        let processes = FakeLiveControlProcessLister(processes: [
+            process(101), process(102, parent: 101), process(301, parent: 101)
+        ])
+        let model = makeModel(applications: .init(apps: [first, second]), objects: objects, processes: processes)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.activeOutputAppIDs, [first.id])
+        XCTAssertEqual(objects.listCount, 1)
+        XCTAssertEqual(processes.ancestryRequests.count, 1)
+        objects.objects = [object(102)]
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.activeOutputAppIDs, [second.id])
+        XCTAssertEqual(objects.listCount, 2)
+        XCTAssertEqual(processes.ancestryRequests.count, 2)
+    }
+
+    func testCoalitionHelpersKeepSafariAndWebAppSeparate() {
+        let safari = app("com.apple.Safari", pid: 101)
+        let webApp = app("com.apple.Safari.WebApp.example", pid: 102)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(301, bundle: "com.apple.WebKit.GPU")])
+        let processes = FakeLiveControlProcessLister(processes: [
+            process(101, coalition: 1_001), process(102, coalition: 1_002), process(301, coalition: 1_002)
+        ])
+        let model = makeModel(applications: .init(apps: [safari, webApp]), objects: objects, processes: processes)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.activeOutputAppIDs, [webApp.id])
+        objects.objects = [object(302, bundle: "com.apple.WebKit.GPU")]
+        processes.processes.append(process(302, coalition: 1_001))
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.activeOutputAppIDs, [safari.id])
+    }
+
+    func testSharedCoalitionHelperIsWithheldRatherThanLightingBothRows() {
+        let first = app("example.one", pid: 101)
+        let second = app("example.two", pid: 102)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(301)])
+        let processes = FakeLiveControlProcessLister(processes: [
+            process(101, coalition: 42), process(102, coalition: 42), process(301, coalition: 42)
+        ])
+        let model = makeModel(applications: .init(apps: [first, second]), objects: objects, processes: processes)
+        model.setOutputActivityVisible(true)
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        objects.objects.append(object(101))
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.activeOutputAppIDs, [first.id])
+    }
+
+    func testBundleHelperFallbackDoesNotLightSiblingChannelOrHiddenWebKitOwner() {
+        let chrome = app("com.google.Chrome", pid: 101)
+        let canary = app("com.google.Chrome.canary", pid: 102)
+        let applications = FakeLiveControlApplicationLister(apps: [chrome, canary])
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(301, bundle: "com.google.Chrome.canary.helper")])
+        let model = makeModel(applications: applications, objects: objects)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.activeOutputAppIDs, [canary.id])
+        objects.objects = [object(302, bundle: "com.google.Chrome.helper.renderer")]
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.activeOutputAppIDs, [chrome.id])
+
+        let safari = app("com.apple.Safari", pid: 103)
+        applications.apps = [safari]
+        model.refreshApplications()
+        objects.objects = [object(303, bundle: "com.apple.WebKit.GPU")]
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.activeOutputAppIDs, [safari.id])
+        // A newly running, not-yet-displayed web app must still prevent Safari's loose fallback.
+        applications.apps.append(app("com.apple.Safari.WebApp.example", pid: 104))
+        model.refreshOutputActivity()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+    }
+
+    func testExitAndPIDReplacementClearActivityBeforeDisplayedListRefresh() {
+        let row = app("example.one", pid: 101)
+        let applications = FakeLiveControlApplicationLister(apps: [row])
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(101)])
+        let model = makeModel(applications: applications, objects: objects)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.activeOutputAppIDs, [row.id])
+        applications.apps = []
+        model.refreshOutputActivity()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        XCTAssertEqual(model.apps.map(\.id), [row.id])
+        applications.apps = [app("example.one", pid: 102)]
+        objects.objects = [object(102)]
+        model.refreshOutputActivity()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        model.refreshApplications()
+        XCTAssertEqual(model.activeOutputAppIDs, [row.id])
+        applications.apps = []
+        model.refreshApplications()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+    }
+
+    func testUnavailableDataAndPanelCloseClearWithoutBackgroundReads() {
+        let row = app("example.one", pid: 101)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(101)])
+        let processes = FakeLiveControlProcessLister()
+        let model = makeModel(applications: .init(apps: [row]), objects: objects, processes: processes)
+        model.refreshOutputActivity()
+        XCTAssertEqual(objects.listCount, 0)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.activeOutputAppIDs, [row.id])
+        objects.objects = [] // The production lister also returns [] when the HAL query fails.
+        model.refreshOutputActivity()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        XCTAssertEqual(processes.ancestryRequests.count, 1)
+        objects.objects = [object(101)]
+        model.refreshOutputActivity()
+        model.setOutputActivityVisible(false)
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        let countAtClose = objects.listCount
+        model.refreshOutputActivity()
+        model.refreshApplications()
+        XCTAssertEqual(objects.listCount, countAtClose)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.activeOutputAppIDs, [row.id])
+    }
+
+    func testUnsupportedOSSkipsAllActivityQueries() {
+        let row = app("example.one", pid: 101)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(101)])
+        let processes = FakeLiveControlProcessLister()
+        let model = makeModel(applications: .init(apps: [row]), objects: objects, processes: processes, supported: false)
+        model.setOutputActivityVisible(true)
+        model.refreshOutputActivity()
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+        XCTAssertEqual(objects.listCount, 0)
+        XCTAssertTrue(processes.ancestryRequests.isEmpty)
+    }
+
+    func testOwnProcessAndUnrelatedAudioNeverLightARow() {
+        let row = app("example.one", pid: 101)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [
+            object(ProcessInfo.processInfo.processIdentifier, bundle: "example.one"),
+            object(701, bundle: "example.other"), object(101, active: false)
+        ])
+        let model = makeModel(applications: .init(apps: [row]), objects: objects)
+        model.setOutputActivityVisible(true)
+        XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
     }
 }
 
