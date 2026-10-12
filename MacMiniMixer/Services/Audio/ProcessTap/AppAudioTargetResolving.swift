@@ -199,7 +199,12 @@ enum AppAudioProcessMatcher {
         for request: AppAudioTargetRequest,
         processObjects: [AudioProcessObjectInfo],
         processes: [SystemProcessInfo],
-        ownProcessIdentifier: Int32
+        ownProcessIdentifier: Int32,
+        // UI polling passes nil to keep matching read-only and quiet. Resolver calls retain logging.
+        onWithheldWebKitProcesses: ((AppAudioTargetRequest, [Int32], String) -> Void)? = { request, processIdentifiers, otherOwner in
+            let withheldPIDs = processIdentifiers.map { String($0) }.joined(separator: ",")
+            AppLogger.helperResolution.info("Safari WebKit fallback withheld processes app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) withheldPIDs=\(withheldPIDs, privacy: .public) otherWebKitOwner=\(otherOwner, privacy: .public) reason=coalitionUnknown")
+        }
     ) -> [AudioProcessObjectInfo] {
         let appProcessIdentifier = request.processIdentifier.flatMap { $0 > 0 ? $0 : nil }
         let appBundleIdentifier = bundleIdentifier(forAppID: request.appID)?.lowercased()
@@ -304,8 +309,7 @@ enum AppAudioProcessMatcher {
         }
 
         if let webKitOwningOtherAppBundleIdentifier, !withheldWebKitProcessIdentifiers.isEmpty {
-            let withheldPIDs = withheldWebKitProcessIdentifiers.map { String($0) }.joined(separator: ",")
-            AppLogger.helperResolution.info("Safari WebKit fallback withheld processes app=\(request.appName, privacy: .public) pid=\(request.processIdentifier ?? -1, privacy: .public) withheldPIDs=\(withheldPIDs, privacy: .public) otherWebKitOwner=\(webKitOwningOtherAppBundleIdentifier, privacy: .public) reason=coalitionUnknown")
+            onWithheldWebKitProcesses?(request, withheldWebKitProcessIdentifiers, webKitOwningOtherAppBundleIdentifier)
         }
 
         let sortedMatches = matches.sorted { lhs, rhs in

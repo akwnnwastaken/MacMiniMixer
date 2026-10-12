@@ -4,6 +4,11 @@ import Foundation
 @MainActor
 final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
+    @Published private(set) var activeOutputAppIDs: Set<MixerAppItem.ID> = []
+    private var isOutputActivityVisible = false
+    private let audioProcessObjectLister: AudioProcessObjectListing
+    private let activityProcessLister: ProcessListing
+    private let isOutputActivityAvailable: @Sendable () -> Bool
     @Published private(set) var statusMessage: MixerStatusMessage?
     @Published private(set) var processTapLiveDiagnostics: ProcessTapLiveDiagnostics?
     @Published private(set) var advancedManualLiveControlActive = false
@@ -74,12 +79,17 @@ final class MixerViewModel: ObservableObject {
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
         appAudioTargetResolver: AppAudioTargetResolving,
         processLister: ProcessListing,
+        audioProcessObjectLister: AudioProcessObjectListing = CoreAudioProcessObjectLister(),
+        isOutputActivityAvailable: @escaping @Sendable () -> Bool = { ProcessTapCoreAudio.isProcessTapAvailable },
         productRealStartSettleGate: ProductRealStartSettling = ProductRealStartSettleGate(),
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
             ProcessTapCoreAudio.processTapEligibility(for: $0)
         }
     ) {
         self.applicationLister = applicationLister
+        self.audioProcessObjectLister = audioProcessObjectLister
+        self.activityProcessLister = processLister
+        self.isOutputActivityAvailable = isOutputActivityAvailable
         self.audioController = audioController
         self.processTapLiveController = processTapLiveController
         self.helperProcessAudioProbe = helperProcessAudioProbe
@@ -403,6 +413,61 @@ final class MixerViewModel: ObservableObject {
 
     func setShowAllApps(_ showAllApps: Bool) {
         self.showAllApps = showAllApps
+    }
+
+    func setOutputActivityVisible(_ isVisible: Bool) {
+        isOutputActivityVisible = isVisible
+        if isVisible {
+            refreshOutputActivity()
+        } else if !activeOutputAppIDs.isEmpty {
+            activeOutputAppIDs = []
+        }
+    }
+
+    /// Read-only activity, independent of preview mute/gain and Product Real sessions. One shared
+    /// HAL/ancestry snapshot per panel tick; never resolve helpers or create audio resources here.
+    func refreshOutputActivity() {
+        guard isOutputActivityVisible else { return }
+        guard isOutputActivityAvailable() else {
+            if !activeOutputAppIDs.isEmpty { activeOutputAppIDs = [] }
+            return
+        }
+
+        // Include hidden/new rows in ownership exclusions. An exited or replaced PID must not
+        // inherit the previous row's activity while the displayed app list awaits its next refresh.
+        let runningApps = applicationLister.listApplications()
+        let objects = audioProcessObjectLister.listAudioProcessObjects().filter(\.isRunningOutput)
+        let processes = objects.isEmpty ? [] : activityProcessLister.listProcessAncestry(
+            of: objects.map(\.processIdentifier) + runningApps.compactMap(\.processIdentifier)
+        )
+        var ownersByPID: [Int32: Set<MixerAppItem.ID>] = [:]
+        for app in runningApps {
+            let request = AppAudioTargetRequest(
+                appID: app.id,
+                appName: app.name,
+                processIdentifier: app.processIdentifier,
+                otherRunningApps: runningApps.filter { $0.id != app.id }.map {
+                    .init(processIdentifier: $0.processIdentifier,
+                          bundleIdentifier: AppAudioProcessMatcher.bundleIdentifier(forAppID: $0.id))
+                }
+            )
+            for object in AppAudioProcessMatcher.matchingProcessObjects(
+                for: request, processObjects: objects, processes: processes,
+                ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
+                onWithheldWebKitProcesses: nil
+            ) {
+                ownersByPID[object.processIdentifier, default: []].insert(app.id)
+            }
+        }
+        // The matcher deliberately permits shared-coalition helpers. Unlike the start lane, this
+        // display has no first-owner policy: ambiguous audio must light neither row.
+        let unambiguousOwners = Set(ownersByPID.values.filter { $0.count == 1 }.flatMap { $0 })
+        let activeIDs = Set(apps.filter { displayedApp in
+            unambiguousOwners.contains(displayedApp.id) && runningApps.contains {
+                $0.id == displayedApp.id && $0.processIdentifier == displayedApp.processIdentifier
+            }
+        }.map(\.id))
+        if activeIDs != activeOutputAppIDs { activeOutputAppIDs = activeIDs }
     }
 
     /// Records whether the Advanced live-diagnostics display is on screen (see
@@ -820,6 +885,7 @@ final class MixerViewModel: ObservableObject {
         refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: previousProcessTapAppID)
         refreshTwoAppReadinessSelectionsAfterAppRefresh()
         refreshHelperDiscoverySelectionAfterAppRefresh()
+        refreshOutputActivity()
     }
 
     /// Preserves the Advanced diagnostic selection when the previously selected app survived

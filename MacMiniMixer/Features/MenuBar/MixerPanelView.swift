@@ -62,6 +62,7 @@ struct MixerPanelView: View {
             // Product live diagnostics are only published while the Advanced section is on screen.
             viewModel.setLiveDiagnosticsDisplayVisible(isShowingAdvanced)
             viewModel.refreshApplications()
+            viewModel.setOutputActivityVisible(true)
             viewModel.refreshOutputDevices()
             viewModel.refreshSystemOutputVolume()
         }
@@ -83,6 +84,7 @@ struct MixerPanelView: View {
             await runOutputDeviceRefreshLoop()
         }
         .onDisappear {
+            viewModel.setOutputActivityVisible(false)
             viewModel.setLiveDiagnosticsDisplayVisible(false)
             viewModel.stopTwoAppReadinessForPanelClose()
         }
@@ -371,6 +373,7 @@ struct MixerPanelView: View {
                         ForEach(viewModel.visibleMixerApps) { app in
                             MixerAppRowView(
                                 app: app,
+                                isOutputActive: viewModel.activeOutputAppIDs.contains(app.id),
                                 isExperimentalControlActive: viewModel.isExperimentalControlActive(for: app.id),
                                 isExperimentalControlResolving: viewModel.isResolvingExperimentalControl(for: app.id),
                                 isExperimentalControlPending: viewModel.isExperimentalControlPending(for: app.id),
@@ -537,6 +540,7 @@ struct MixerPanelView: View {
 
             await MainActor.run {
                 refreshSystemOutputVolumeIfIdle()
+                viewModel.refreshOutputActivity()
             }
         }
     }
