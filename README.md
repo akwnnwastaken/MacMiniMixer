@@ -112,10 +112,7 @@ The direct engine plays at the device's own sample rate and never changes it. In
 4. Open it once (see the warning below), then look for the icon in the menu bar.
 
 > [!WARNING]
-> The app is **ad-hoc signed and not notarized**, so Gatekeeper blocks the first launch. On **macOS 13–14**, right-click the app → **Open** → **Open**. On **macOS 15 and later**, try to open it once, then go to **System Settings → Privacy & Security → Open Anyway**. Or, in Terminal:
-> ```bash
-> xattr -dr com.apple.quarantine /Applications/MacMiniMixer.app
-> ```
+> The app is **ad-hoc signed and not notarized**, so Gatekeeper blocks the first launch. On **macOS 13–14**, Control-click (right-click) the app → **Open** → **Open**. On **macOS 15 and later**, try to open it once, then go to **System Settings → Privacy & Security → Open Anyway**.
 > Details are in [docs/RELEASING.md](docs/RELEASING.md#5-opening-an-ad-hoc-signed-build-end-users).
 
 ### Build from source
