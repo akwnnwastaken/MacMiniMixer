@@ -286,6 +286,387 @@ final class ProcessTapLiveSessionManagerTests: XCTestCase {
         XCTAssertTrue(manager.activeSessions.isEmpty)
     }
 
+    /// Termination cancels a reserved start before controller entry, without a late live success.
+    @available(macOS 15.0, *)
+    func testHardStopWhileStartupWaitsBehindLifecycleGateCancelsStart() async throws {
+        let gate = ProductRealCoreAudioLifecycleGate()
+        let log = TestOrderedLog()
+        let release = TestAsyncReleaser()
+        let holder = Task {
+            await gate.perform {
+                log.append("gate-held")
+                await release.wait()
+                log.append("gate-released")
+            }
+        }
+        await log.waitFor { $0.contains("gate-held") }
+        let executor = LifecycleTestExecutor()
+        let controller = FakeLiveController(returnsNilForInactiveImmediateStop: true)
+        let manager = ProcessTapLiveSessionManager(maxSessions: 1, lifecycleGate: gate) {
+            log.append("factory")
+            return controller
+        }
+        let startup = Task(executorPreference: executor) {
+            await manager.startSession(
+                for: lifecycleTarget(101), gain: .defaultOption,
+                onDiagnostics: { _, _ in log.append("diagnostics") },
+                onStopped: { _, _, _ in log.append("stopped") }
+            )
+        }
+        await log.waitFor { $0.contains("factory") }
+        // The factory and reservation run without suspension on this serial task executor.
+        // Its barrier therefore observes the reservation after startup suspends at the held gate.
+        await executor.barrier()
+        let reserved = manager.activeSession
+        XCTAssertEqual(reserved?.phase, .starting)
+        XCTAssertEqual(controller.startCallCount, 0)
+        let immediate = manager.stopLiveControlNow(reason: .appTerminating)
+        XCTAssertNil(immediate, "Like the real controller, the fake has no active session to stop yet")
+        XCTAssertEqual(controller.stopReasons, [.appTerminating])
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(log.entries, ["gate-held", "factory"])
+
+        release.release()
+        await holder.value
+        let start = await startup.value
+        XCTAssertEqual(start.result.outcome, .liveControlNotActive)
+        XCTAssertNil(start.sessionID)
+        XCTAssertEqual(controller.startCallCount, 0, "Cancelled reservation must not enter controller start")
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        let stop = await manager.stopSession(id: try XCTUnwrap(reserved?.id), reason: .userStopped)
+        XCTAssertEqual(stop.outcome, .liveControlNotActive)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating])
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertEqual(log.entries, ["gate-held", "factory", "gate-released"])
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+    }
+
+    func testHardStopDuringControllerStartupRollsBackBeforeReleasingLifecycleGate() async {
+        let gate = ProductRealCoreAudioLifecycleGate()
+        let log = TestOrderedLog()
+        let release = TestAsyncReleaser()
+        let controller = FakeLiveController(returnsNilForInactiveImmediateStop: true, beforeStart: {
+            log.append("controller-enter")
+            await release.wait()
+            log.append("controller-return")
+        })
+        let manager = ProcessTapLiveSessionManager(controller: controller, lifecycleGate: gate)
+        let startup = Task {
+            await manager.startSession(
+                for: lifecycleTarget(101), gain: .defaultOption,
+                onDiagnostics: { _, _ in log.append("diagnostics") },
+                onStopped: { _, result, _ in log.append("stopped-\(result.outcome)") }
+            )
+        }
+        await log.waitFor { $0.contains("controller-enter") }
+        XCTAssertEqual(manager.activeSession?.phase, .starting)
+        XCTAssertNil(manager.stopLiveControlNow(reason: .appTerminating))
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        // This peer operation cannot enter until both the in-flight start and its rollback finish.
+        let peer = Task {
+            await gate.perform { log.append("peer-enter") }
+        }
+        release.release()
+        let start = await startup.value
+        await peer.value
+        XCTAssertEqual(start.result.outcome, .liveControlNotActive)
+        XCTAssertNil(start.sessionID)
+        XCTAssertEqual(controller.startCallCount, 1)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .appTerminating])
+        XCTAssertFalse(controller.isRunning, "Rollback must stop the late-published fake session")
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(log.entries, ["controller-enter", "controller-return", "stopped-liveControlStopped", "peer-enter"])
+        XCTAssertNil(manager.stopLiveControlNow(reason: .appTerminating), "Repeated cleanup is idempotent")
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .appTerminating])
+    }
+
+    func testHardStopDuringControllerStartupPropagatesRollbackCleanupFailureUnchanged() async throws {
+        let gate = ProductRealCoreAudioLifecycleGate()
+        let log = TestOrderedLog()
+        let release = TestAsyncReleaser()
+        let cleanupFailure = ProcessTapTestResult(
+            outcome: .tapCleanupFailed,
+            message: "cancelled startup cleanup warning",
+            detail: "fake tap destruction failed after stopping output",
+            severity: .warning
+        )
+        let controller = FakeLiveController(
+            stopResult: cleanupFailure,
+            returnsNilForInactiveImmediateStop: true,
+            beforeStart: {
+                log.append("controller-enter")
+                await release.wait()
+                log.append("controller-return")
+            }
+        )
+        let manager = ProcessTapLiveSessionManager(controller: controller, lifecycleGate: gate)
+        let startup = Task {
+            await manager.startSession(
+                for: lifecycleTarget(101), gain: .defaultOption,
+                onDiagnostics: { _, _ in log.append("diagnostics") },
+                onStopped: { _, result, _ in
+                    XCTAssertEqual(result, cleanupFailure)
+                    log.append("stopped-\(result.outcome)")
+                }
+            )
+        }
+        await log.waitFor { $0.contains("controller-enter") }
+        let reservedID = manager.activeSession?.id
+        XCTAssertEqual(manager.activeSession?.phase, .starting)
+        XCTAssertEqual(controller.startCallCount, 0)
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertNil(manager.stopLiveControlNow(reason: .appTerminating))
+        XCTAssertEqual(controller.stopReasons, [.appTerminating])
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(log.entries, ["controller-enter"], "Inactive immediate stop has no callback")
+
+        let peer = Task {
+            await gate.perform { log.append("peer-enter") }
+        }
+        release.release()
+        let start = await startup.value
+        await peer.value
+        // Equatable includes the UUID, message, detail and severity, not just the outcome.
+        XCTAssertEqual(start.result, cleanupFailure, "Rollback must not mask or reconstruct the warning")
+        XCTAssertNil(start.sessionID)
+        XCTAssertEqual(controller.startCallCount, 1)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .appTerminating])
+        // This fake models stopped output plus a resource cleanup warning, not a still-running tap.
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertNil(manager.activeSession)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(log.entries, ["controller-enter", "controller-return", "stopped-tapCleanupFailed", "peer-enter"])
+        let stop = await manager.stopSession(id: try XCTUnwrap(reservedID), reason: .userStopped)
+        XCTAssertEqual(stop.outcome, .liveControlNotActive)
+        XCTAssertNil(manager.stopLiveControlNow(reason: .appTerminating))
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .appTerminating])
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(log.entries, ["controller-enter", "controller-return", "stopped-tapCleanupFailed", "peer-enter"])
+    }
+
+    @available(macOS 15.0, *)
+    func testHardStopAfterGatedStartupRejectsActivationAndRollsBackThroughGate() async throws {
+        let gate = ProductRealCoreAudioLifecycleGate()
+        let log = TestOrderedLog()
+        let releaseStart = TestAsyncReleaser()
+        let releasePeer = TestAsyncReleaser()
+        let executor = LifecycleTestExecutor()
+        let controller = FakeLiveController(
+            returnsNilForInactiveImmediateStop: true,
+            modelsIdempotentStop: true
+        )
+        let manager = ProcessTapLiveSessionManager(
+            controller: controller, lifecycleGate: gate,
+            afterGatedStartForTesting: {
+                log.append("post-gate")
+                await releaseStart.wait()
+                log.append("activation-resuming")
+            }
+        )
+        let startup = Task(executorPreference: executor) {
+            let result = await manager.startSession(
+                for: lifecycleTarget(101), gain: .defaultOption,
+                onDiagnostics: { _, _ in log.append("diagnostics") },
+                onStopped: { _, result, _ in log.append("stopped-\(result.outcome)") }
+            )
+            log.append("startup-returned")
+            return result
+        }
+        await log.waitFor { $0.contains("post-gate") }
+        let reservedID = manager.activeSession?.id
+        XCTAssertEqual(manager.activeSession?.phase, .starting)
+        XCTAssertEqual(controller.startCallCount, 1)
+        XCTAssertTrue(controller.isRunning, "Successful gated setup has already published the fake session")
+        // A peer can enter while the caller is paused: setup has returned and released the gate.
+        let peer = Task {
+            await gate.perform {
+                log.append("peer-enter")
+                await releasePeer.wait()
+                log.append("peer-exit")
+            }
+        }
+        await log.waitFor { $0.contains("peer-enter") }
+        XCTAssertEqual(manager.stopLiveControlNow(reason: .appTerminating)?.outcome, .liveControlStopped)
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertNil(manager.activeSession)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating])
+        XCTAssertEqual(log.entries, ["post-gate", "peer-enter", "stopped-liveControlStopped"])
+
+        releaseStart.release()
+        await log.waitFor { $0.contains("activation-resuming") }
+        // On this serial executor the caller reaches its next suspension (gated rollback)
+        // before the barrier runs. Rollback must wait for the peer, not bypass the gate.
+        await executor.barrier()
+        XCTAssertEqual(controller.stopReasons, [.appTerminating])
+        XCTAssertEqual(log.entries, ["post-gate", "peer-enter", "stopped-liveControlStopped", "activation-resuming"])
+        releasePeer.release()
+        await peer.value
+        let start = await startup.value
+        XCTAssertEqual(start.result.outcome, .liveControlNotActive)
+        XCTAssertNil(start.sessionID)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .appTerminating])
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertNil(manager.activeSession)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        // Immediate stop owns the only terminal callback; async rollback sees no live session.
+        XCTAssertEqual(log.entries, ["post-gate", "peer-enter", "stopped-liveControlStopped", "activation-resuming", "peer-exit", "startup-returned"])
+        let stop = await manager.stopSession(id: try XCTUnwrap(reservedID), reason: .userStopped)
+        XCTAssertEqual(stop.outcome, .liveControlNotActive)
+        XCTAssertNil(manager.stopLiveControlNow(reason: .appTerminating))
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .appTerminating])
+    }
+
+    func testCancelledPostGateRollbackDoesNotStopReplacementOnReusedController() async throws {
+        let log = TestOrderedLog()
+        let releaseStart = TestAsyncReleaser()
+        let controller = FakeLiveController(
+            returnsNilForInactiveImmediateStop: true,
+            modelsIdempotentStop: true
+        )
+        let manager = ProcessTapLiveSessionManager(
+            controller: controller,
+            afterGatedStartForTesting: {
+                // Only A pauses. B must finish starting on this same controller before A resumes.
+                if controller.startCallCount == 1 {
+                    log.append("A-post-gate")
+                    await releaseStart.wait()
+                    log.append("A-resuming")
+                }
+            }
+        )
+        let startup = Task {
+            await manager.startSession(
+                for: lifecycleTarget(101), gain: .defaultOption,
+                onDiagnostics: { _, _ in log.append("A-diagnostics") },
+                onStopped: { id, result, _ in
+                    log.append("A-stopped-\(id.rawValue)-\(result.outcome)")
+                }
+            )
+        }
+        await log.waitFor { $0.contains("A-post-gate") }
+        let originalID = try XCTUnwrap(manager.activeSession?.id)
+        XCTAssertEqual(manager.activeSession?.phase, .starting)
+        XCTAssertTrue(controller.isRunning)
+        XCTAssertEqual(manager.stopLiveControlNow(reason: .appTerminating)?.outcome, .liveControlStopped)
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        let originalStopped = "A-stopped-\(originalID.rawValue)-liveControlStopped"
+        XCTAssertEqual(log.entries, ["A-post-gate", originalStopped])
+
+        let replacement = await manager.startSession(
+            for: lifecycleTarget(202), gain: .options[1],
+            onDiagnostics: { id, _ in log.append("B-diagnostics-\(id.rawValue)") },
+            onStopped: { id, result, _ in
+                log.append("B-stopped-\(id.rawValue)-\(result.outcome)")
+            }
+        )
+        let replacementID = try XCTUnwrap(replacement.sessionID)
+        XCTAssertNotEqual(originalID, replacementID)
+        XCTAssertEqual(replacement.result.outcome, .liveControlStarted)
+        XCTAssertEqual(controller.startCallCount, 2)
+        XCTAssertTrue(controller.isRunning)
+        XCTAssertEqual(manager.activeSessions.map(\.id), [replacementID])
+        releaseStart.release()
+        let cancelled = await startup.value
+
+        XCTAssertEqual(cancelled.result.outcome, .liveControlNotActive)
+        XCTAssertNil(cancelled.sessionID)
+        XCTAssertTrue(controller.isRunning, "A's stale rollback must not tear down B")
+        XCTAssertEqual(manager.activeSessions.map(\.id), [replacementID])
+        XCTAssertEqual(manager.activeSession?.phase, .active)
+        XCTAssertEqual(manager.activeSession?.processIdentifier, 202)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating], "No controller-wide stop is owned by A anymore")
+        XCTAssertEqual(log.entries, ["A-post-gate", originalStopped, "A-resuming"])
+        let diagnostics = ProcessTapLiveDiagnostics(
+            selectedGain: .options[1], callbackCount: 1, peakLevel: 0.5, rmsLevel: 0.25,
+            enqueuedBufferCount: 1, droppedBufferCount: 0, enqueueFailureCount: 0, copyFailureCount: 0
+        )
+        controller.emitDiagnostics(diagnostics)
+        XCTAssertEqual(manager.activeSession?.diagnostics, diagnostics)
+        let stopped = await manager.stopSession(id: replacementID, reason: .userStopped)
+        XCTAssertEqual(stopped.outcome, .liveControlStopped)
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .userStopped])
+        XCTAssertEqual(log.entries, [
+            "A-post-gate", originalStopped, "A-resuming",
+            "B-diagnostics-\(replacementID.rawValue)", "B-stopped-\(replacementID.rawValue)-liveControlStopped"
+        ])
+        let repeatedStop = await manager.stopSession(id: replacementID, reason: .userStopped)
+        XCTAssertEqual(repeatedStop.outcome, .liveControlNotActive)
+        XCTAssertNil(manager.stopLiveControlNow(reason: .appTerminating))
+        XCTAssertEqual(controller.stopReasons, [.appTerminating, .userStopped])
+        XCTAssertEqual(log.entries.count, 5, "Cleanup must not duplicate either session's terminal callback")
+    }
+
+    func testRetainedCallbacksForwardInOrderWithoutRetainingManagerAfterNormalStop() async throws {
+        let log = TestOrderedLog()
+        var owner: LiveCallbackOwner? = LiveCallbackOwner(log: log)
+        weak let weakOwner = owner
+        var controller: FakeLiveController? = FakeLiveController()
+        weak let weakController = controller
+        // Unlike the compatibility initializer, this factory does not deliberately own a controller.
+        var manager: ProcessTapLiveSessionManager? = ProcessTapLiveSessionManager(maxSessions: 1) { [weak controller] in
+            controller!
+        }
+        weak let weakManager = manager
+        let start = await manager!.startSession(
+            for: makeTarget(pid: 101), gain: .defaultOption,
+            onDiagnostics: { [owner = owner!] id, diagnostics in owner.diagnostics(id, diagnostics) },
+            onStopped: { [owner = owner!] id, result, _ in owner.stopped(id, result) }
+        )
+        let id = try XCTUnwrap(start.sessionID)
+        owner = nil
+        controller = nil
+        XCTAssertNotNil(weakController, "Active sessions deliberately own their controllers")
+        XCTAssertNotNil(weakOwner, "Stored client closures deliberately own their callback owner")
+        let retainedController = try XCTUnwrap(weakController)
+        let diagnostics = ProcessTapLiveDiagnostics(
+            selectedGain: .options[1], callbackCount: 1, peakLevel: 0.5, rmsLevel: 0.25,
+            enqueuedBufferCount: 1, droppedBufferCount: 0, enqueueFailureCount: 0, copyFailureCount: 0
+        )
+        retainedController.emitDiagnostics(diagnostics)
+        XCTAssertEqual(manager?.activeSession?.diagnostics, diagnostics)
+        let stop = await manager!.stopSession(id: id, reason: .userStopped)
+        XCTAssertEqual(stop.outcome, .liveControlStopped)
+        XCTAssertTrue(manager!.activeSessions.isEmpty)
+        XCTAssertEqual(log.entries, ["diagnostics-\(id.rawValue)", "stopped-\(id.rawValue)-liveControlStopped"])
+        manager = nil
+        XCTAssertNil(weakManager, "Retained controller callbacks must not keep the manager alive")
+        // Client forwarding is unconditional even after manager release; characterize it explicitly.
+        retainedController.emitDiagnostics(diagnostics)
+        XCTAssertEqual(log.entries, [
+            "diagnostics-\(id.rawValue)", "stopped-\(id.rawValue)-liveControlStopped", "diagnostics-\(id.rawValue)"
+        ])
+        XCTAssertNotNil(weakOwner, "An externally retained fake still owns its client closures")
+        retainedController.releaseCallbacks()
+        XCTAssertNil(weakOwner, "Terminal callback cleanup releases the external client owner")
+    }
+
+    func testNormalStopReleasesControllerWhenNoExternalOwnerRetainsIt() async throws {
+        var owner: LiveCallbackOwner? = LiveCallbackOwner(log: TestOrderedLog())
+        weak let weakOwner = owner
+        var controller: FakeLiveController? = FakeLiveController()
+        weak let weakController = controller
+        let manager = ProcessTapLiveSessionManager(maxSessions: 1) { [weak controller] in controller! }
+        let start = await manager.startSession(
+            for: makeTarget(pid: 101), gain: .defaultOption,
+            onDiagnostics: { [owner = owner!] id, diagnostics in owner.diagnostics(id, diagnostics) },
+            onStopped: { [owner = owner!] id, result, _ in owner.stopped(id, result) }
+        )
+        controller = nil
+        owner = nil
+        XCTAssertNotNil(weakController)
+        XCTAssertNotNil(weakOwner)
+        _ = await manager.stopSession(id: try XCTUnwrap(start.sessionID), reason: .userStopped)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertNil(weakController)
+        XCTAssertNil(weakOwner, "Removing the last controller owner releases its retained client callbacks")
+    }
+
     private func makeTarget(pid: Int32) -> ProcessTapTarget {
         ProcessTapTarget(
             appID: "test.app.\(pid)",
@@ -313,9 +694,14 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
     private let startResult: ProcessTapTestResult
     private let stopResult: ProcessTapTestResult
     private let callsOnStoppedDuringStop: Bool
+    private let returnsNilForInactiveImmediateStop: Bool
+    private let modelsIdempotentStop: Bool
+    private let beforeStart: (@Sendable () async -> Void)?
     private var onStopped: ((ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)?
+    private var onDiagnostics: (@Sendable (ProcessTapLiveDiagnostics) -> Void)?
 
     private var _startCallCount = 0
+    private var _isRunning = false
     private var _stopReasons: [ProcessTapLiveStopReason] = []
     private var _gainUpdates: [ProcessTapReplayGainOption] = []
     private var _startTimeoutPolicies: [ProcessTapLiveTimeoutPolicy] = []
@@ -323,12 +709,20 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
     init(
         startResult: ProcessTapTestResult = .started,
         stopResult: ProcessTapTestResult = .stopped,
-        callsOnStoppedDuringStop: Bool = true
+        callsOnStoppedDuringStop: Bool = true,
+        returnsNilForInactiveImmediateStop: Bool = false,
+        modelsIdempotentStop: Bool = false,
+        beforeStart: (@Sendable () async -> Void)? = nil
     ) {
         self.startResult = startResult
         self.stopResult = stopResult
         self.callsOnStoppedDuringStop = callsOnStoppedDuringStop
+        self.returnsNilForInactiveImmediateStop = returnsNilForInactiveImmediateStop
+        self.modelsIdempotentStop = modelsIdempotentStop
+        self.beforeStart = beforeStart
     }
+
+    var isRunning: Bool { lock.withLock { _isRunning } }
 
     var startCallCount: Int {
         lock.lock()
@@ -361,13 +755,19 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
         onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) async -> ProcessTapTestResult {
+        await beforeStart?()
         recordStart(timeoutPolicy: timeoutPolicy, onStopped: onStopped)
+        lock.withLock { self.onDiagnostics = onDiagnostics }
 
         return startResult
     }
 
     func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        let wasRunning = isRunning
         let callback = recordStop(reason: reason)
+        if modelsIdempotentStop && !wasRunning {
+            return ProcessTapTestResult(outcome: .liveControlNotActive, message: "Live control is not active", severity: .info)
+        }
 
         if callsOnStoppedDuringStop {
             callback?(stopResult, nil)
@@ -383,7 +783,9 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
     }
 
     func stopLiveControlNow(reason: ProcessTapLiveStopReason) -> ProcessTapTestResult? {
+        let wasRunning = isRunning
         let callback = recordStop(reason: reason)
+        if returnsNilForInactiveImmediateStop && !wasRunning { return nil }
 
         if callsOnStoppedDuringStop {
             callback?(stopResult, nil)
@@ -392,12 +794,25 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
         return stopResult
     }
 
+    func emitDiagnostics(_ diagnostics: ProcessTapLiveDiagnostics) {
+        let callback = lock.withLock { onDiagnostics }
+        callback?(diagnostics)
+    }
+
+    func releaseCallbacks() {
+        lock.withLock {
+            onDiagnostics = nil
+            onStopped = nil
+        }
+    }
+
     private func recordStart(
         timeoutPolicy: ProcessTapLiveTimeoutPolicy,
         onStopped: @escaping (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) {
         lock.lock()
         _startCallCount += 1
+        _isRunning = startResult.outcome == .liveControlStarted
         _startTimeoutPolicies.append(timeoutPolicy)
         self.onStopped = onStopped
         lock.unlock()
@@ -408,9 +823,38 @@ private final class FakeLiveController: ProcessTapLiveControlling, @unchecked Se
     ) -> ((ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void)? {
         lock.lock()
         _stopReasons.append(reason)
+        _isRunning = false
         let callback = onStopped
+        if modelsIdempotentStop { onStopped = nil }
         lock.unlock()
         return callback
+    }
+}
+
+private final class LiveCallbackOwner: @unchecked Sendable {
+    let log: TestOrderedLog
+    init(log: TestOrderedLog) { self.log = log }
+    func diagnostics(_ id: ProcessTapLiveSessionID, _ diagnostics: ProcessTapLiveDiagnostics) {
+        log.append("diagnostics-\(id.rawValue)")
+    }
+    func stopped(_ id: ProcessTapLiveSessionID, _ result: ProcessTapTestResult) {
+        log.append("stopped-\(id.rawValue)-\(result.outcome)")
+    }
+}
+
+/// A test-only serial task executor makes the reservation observable without polling production
+/// state or adding a production seam. The barrier runs after the current job reaches suspension.
+@available(macOS 15.0, *)
+private final class LifecycleTestExecutor: TaskExecutor {
+    private let queue = DispatchQueue(label: "MacMiniMixerTests.lifecycle-start")
+    func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
+        queue.async { job.runSynchronously(on: self.asUnownedTaskExecutor()) }
+    }
+    func barrier() async {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume() }
+        }
     }
 }
 

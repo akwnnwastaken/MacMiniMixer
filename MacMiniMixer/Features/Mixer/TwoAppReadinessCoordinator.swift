@@ -278,11 +278,11 @@ final class TwoAppReadinessCoordinator {
                 appB: targetB,
                 gain: gain,
                 duration: duration.duration
-            ) { [weak self] snapshot in
+            ) { [weak self = self] snapshot in
                 Task { @MainActor in
                     self?.setSnapshot(snapshot)
                 }
-            } onFinished: { [weak self] result, snapshot in
+            } onFinished: { [weak self = self] result, snapshot in
                 Task { @MainActor in
                     self?.handleFinished(result, snapshot: snapshot, onWarning: onWarning)
                 }

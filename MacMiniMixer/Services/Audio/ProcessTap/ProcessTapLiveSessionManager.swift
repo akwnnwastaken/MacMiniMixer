@@ -71,18 +71,30 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     /// teardown never overlaps a setup (or another teardown) and churns the shared route twice at
     /// once. Shared by all sessions here because they all target the same coreaudiod route.
     private let lifecycleGate: ProductRealCoreAudioLifecycleGate
+    /// Internal test seam: nil in production; runs after successful gated setup, before activation.
+    private let afterGatedStartForTesting: (@Sendable () async -> Void)?
     private let lock = NSLock()
     private var sessions: [ProcessTapLiveSessionID: ProcessTapLiveSessionState] = [:]
     private var controllers: [ProcessTapLiveSessionID: ProcessTapLiveControlling] = [:]
+    // A pending start retains this token even after immediate teardown removes its session.
+    // All token access is protected by the manager lock.
+    private final class PendingStart: @unchecked Sendable {
+        var stopReason: ProcessTapLiveStopReason?
+        var controllerIdentity: ObjectIdentifier?
+        var isSuperseded = false
+    }
+    private var pendingStarts: [ProcessTapLiveSessionID: PendingStart] = [:]
     private var compatibilityActiveSessionID: ProcessTapLiveSessionID?
 
     init(
         controller: ProcessTapLiveControlling,
-        lifecycleGate: ProductRealCoreAudioLifecycleGate = ProductRealCoreAudioLifecycleGate()
+        lifecycleGate: ProductRealCoreAudioLifecycleGate = ProductRealCoreAudioLifecycleGate(),
+        afterGatedStartForTesting: (@Sendable () async -> Void)? = nil
     ) {
         self.controllerFactory = { controller }
         self.maxSessions = 1
         self.lifecycleGate = lifecycleGate
+        self.afterGatedStartForTesting = afterGatedStartForTesting
     }
 
     /// - Parameter maxSessions: Concurrent-session cap; `nil` means unlimited. A non-nil value is
@@ -95,6 +107,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         self.controllerFactory = controllerFactory
         self.maxSessions = maxSessions.map { max(1, $0) }
         self.lifecycleGate = lifecycleGate
+        self.afterGatedStartForTesting = nil
     }
 
     var activeSession: ProcessTapLiveSessionState? {
@@ -139,8 +152,9 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         let sessionID = ProcessTapLiveSessionID()
         let sessionState = ProcessTapLiveSessionState(id: sessionID, target: target, gain: gain)
         let controller = controllerFactory()
+        let pendingStart = PendingStart()
 
-        guard reserveSession(sessionState, controller: controller) else {
+        guard reserveSession(sessionState, controller: controller, pendingStart: pendingStart) else {
             AppLogger.processTap.warning("Live session start rejected: max sessions reached app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public) maxSessions=\(self.maxSessionsLogDescription, privacy: .public)")
             return ProcessTapLiveSessionStartResult(
                 sessionID: nil,
@@ -155,22 +169,45 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         AppLogger.processTap.info("Live session start reserved sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public) pid=\(target.processIdentifier ?? -1, privacy: .public)")
         // Core Audio object creation (aggregate/tap/IOProc/AudioQueue) goes through the lifecycle
         // gate so it never overlaps another session's create or a teardown churning the same route.
-        let result = await lifecycleGate.perform {
-            await controller.startLiveControl(
+        var result = await lifecycleGate.perform {
+            guard self.canStart(sessionID, pendingStart: pendingStart) else {
+                return Self.cancelledStartResult
+            }
+            let result = await controller.startLiveControl(
                 for: target,
                 gain: gain,
                 timeoutPolicy: timeoutPolicy
-            ) { [weak self] diagnostics in
+            ) { [weak self = self] diagnostics in
                 self?.recordDiagnostics(diagnostics, for: sessionID)
                 onDiagnostics(sessionID, diagnostics)
-            } onStopped: { [weak self] result, diagnostics in
+            } onStopped: { [weak self = self] result, diagnostics in
                 self?.recordStopped(result, diagnostics: diagnostics, for: sessionID)
                 onStopped(sessionID, result, diagnostics)
             }
+            if result.outcome == .liveControlStarted {
+                self.supersedeEarlierStarts(pendingStart, controller: controller)
+            }
+            if result.outcome == .liveControlStarted,
+               !self.canStart(sessionID, pendingStart: pendingStart) {
+                // Immediate teardown can race with controller setup before it publishes its live
+                // session. Roll back before releasing the gate, even if that teardown saw no session.
+                return await self.rollbackCancelledStart(controller: controller, pendingStart: pendingStart)
+            }
+            return result
         }
+        if result.outcome == .liveControlStarted, let afterGatedStartForTesting {
+            await afterGatedStartForTesting()
+        }
+        // Teardown may also run after the gated operation returns but before this task resumes.
+        if result.outcome == .liveControlStarted,
+           !activateSession(sessionID, pendingStart: pendingStart, gain: gain) {
+            result = await lifecycleGate.perform {
+                await self.rollbackCancelledStart(controller: controller, pendingStart: pendingStart)
+            }
+        }
+        _ = lock.withLock { pendingStarts.removeValue(forKey: sessionID) }
 
         if result.outcome == .liveControlStarted {
-            markSession(sessionID, phase: .active, gain: gain)
             AppLogger.processTap.info("Live session active sessionID=\(sessionID.rawValue.uuidString, privacy: .public) app=\(target.appName, privacy: .public)")
             return ProcessTapLiveSessionStartResult(sessionID: sessionID, result: result)
         }
@@ -290,6 +327,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         let sessionIDs = activeSessionIDs
         let controllersToStop = sessionIDs.compactMap { controllers[$0] }
         for sessionID in sessionIDs {
+            pendingStarts[sessionID]?.stopReason = reason
             if var session = sessions[sessionID] {
                 session.phase = .stopping
                 session.stopReason = reason
@@ -332,7 +370,8 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
 
     private func reserveSession(
         _ sessionState: ProcessTapLiveSessionState,
-        controller: ProcessTapLiveControlling
+        controller: ProcessTapLiveControlling,
+        pendingStart: PendingStart
     ) -> Bool {
         lock.lock()
         defer {
@@ -347,7 +386,61 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
 
         sessions[sessionState.id] = sessionState
         controllers[sessionState.id] = controller
+        pendingStarts[sessionState.id] = pendingStart
         return true
+    }
+
+    private static var cancelledStartResult: ProcessTapTestResult {
+        ProcessTapTestResult(
+            outcome: .liveControlNotActive,
+            message: "Live control start was cancelled",
+            severity: .info
+        )
+    }
+
+    private func canStart(_ sessionID: ProcessTapLiveSessionID, pendingStart: PendingStart) -> Bool {
+        lock.withLock { pendingStart.stopReason == nil && sessions[sessionID] != nil }
+    }
+
+    /// Called inside the lifecycle gate: successful reuse transfers controller-wide rollback
+    /// ownership to this start, even if the older caller is still suspended before activation.
+    private func supersedeEarlierStarts(_ pendingStart: PendingStart, controller: ProcessTapLiveControlling) {
+        lock.withLock {
+            pendingStart.controllerIdentity = ObjectIdentifier(controller as AnyObject)
+            for earlier in pendingStarts.values where earlier !== pendingStart &&
+                earlier.controllerIdentity == pendingStart.controllerIdentity {
+                earlier.isSuperseded = true
+            }
+        }
+    }
+
+    private func rollbackCancelledStart(
+        controller: ProcessTapLiveControlling,
+        pendingStart: PendingStart
+    ) async -> ProcessTapTestResult {
+        // The gate serializes this check and stop against replacement setup. A superseded token
+        // must stay invalid even after the replacement stops and leaves the manager's sessions.
+        let reason = lock.withLock {
+            pendingStart.isSuperseded ? nil : pendingStart.stopReason ?? .userStopped
+        }
+        guard let reason else { return Self.cancelledStartResult }
+        let cleanup = await controller.stopLiveControl(reason: reason)
+        return cleanup.outcome == .tapCleanupFailed ? cleanup : Self.cancelledStartResult
+    }
+
+    /// Activation and immediate cancellation have a single ordering point under the manager lock.
+    private func activateSession(
+        _ sessionID: ProcessTapLiveSessionID,
+        pendingStart: PendingStart,
+        gain: ProcessTapReplayGainOption
+    ) -> Bool {
+        lock.withLock {
+            guard pendingStart.stopReason == nil, var session = sessions[sessionID] else { return false }
+            session.phase = .active
+            session.gain = gain
+            sessions[sessionID] = session
+            return true
+        }
     }
 
     private func controller(for sessionID: ProcessTapLiveSessionID) -> ProcessTapLiveControlling? {
