@@ -135,13 +135,28 @@ final class MixerViewModel: ObservableObject {
             self?.refreshTwoAppReadinessSelectionsAfterTargetChange(removedTargetID: removedTargetID)
         }
 
+        // `willTerminate` is posted on the main thread and AppKit calls `exit()` right after the
+        // observers return, so a deferred `Task` would never run. Tear down synchronously (same
+        // pattern as `willSleep` below) so taps/aggregates are destroyed explicitly on a normal quit.
+        // On a crash or Force Quit this never runs; the tap and aggregate are created private, so
+        // coreaudiod releases them with the process and nothing is left to sweep on next launch.
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.stopProcessTapLiveControlForTermination()
+            guard let self else {
+                return
+            }
+
+            if #available(macOS 14.0, *) {
+                MainActor.assumeIsolated {
+                    self.stopProcessTapLiveControlForTermination()
+                }
+            } else {
+                Task { @MainActor in
+                    self.stopProcessTapLiveControlForTermination()
+                }
             }
         }
 
