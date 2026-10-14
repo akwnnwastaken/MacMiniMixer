@@ -2,7 +2,7 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v2.3.8 / build 7 is the release for 2026-10-14
+changes. It is **not** a public release document — v2.4.0 / build 8 is the release for 2026-10-14
 (see `CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
@@ -41,13 +41,17 @@ changes. It is **not** a public release document — v2.3.8 / build 7 is the rel
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
-- **v2.3.8 release (2026-10-14):** new flat three-fader app icon on a transparent canvas, generated
-  by `scripts/make-app-icon.swift`; no code changes. v2.3.7 (2026-10-14) added synchronous
+- **v2.4.0 release (2026-10-14):** per-app volume 0–200% (`AppConstants.appVolumeRange`,
+  `unityAppVolume`; system output stays 0–100), `ProcessTapSoftLimiter` at every replay gain
+  multiply, gain slewing in `ProcessTapLiveGainRamp` after the fade-in (1.0 per 20 ms), and a
+  Liquid Glass panel (`LiquidGlass.swift` helpers with material fallbacks; Control Center–style
+  `VolumeSlider`; waveform indicators replace the Real badge and banner; Quit in the header).
+  v2.3.8 (2026-10-14) shipped the flat three-fader app icon (`scripts/make-app-icon.swift`). v2.3.7 (2026-10-14) added synchronous
   `willTerminate` teardown (private taps/aggregates still cover crash/Force Quit), a start/hard-stop race fix in `ProcessTapLiveSessionManager`
   (pending-start tokens, rollback through the lifecycle gate), and a System Audio Recording hint on
   the Advanced card's silent "No app audio detected" state. v2.3.6 (2026-10-12) added the
   app-icon backplate removal and the green active-output row outline (macOS 14.2+).
-  `MARKETING_VERSION` is **`2.3.8`** and `CURRENT_PROJECT_VERSION` is `7` (all 4 build configurations).
+  `MARKETING_VERSION` is **`2.4.0`** and `CURRENT_PROJECT_VERSION` is `8` (all 4 build configurations).
   The owner selected this version/build and the existing ad-hoc-signed, not-notarized release
   workflow. Per-app audio remains experimental.
   Do not bump the version again until the owner asks. Final packaged-app System Audio Recording /
