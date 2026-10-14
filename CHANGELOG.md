@@ -16,6 +16,42 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.4.0] - 2026-10-14
+
+### Highlights
+- **Boost apps up to 200%.** Drag an app's slider past the 100% notch to make it louder than its
+  own level. A soft limiter keeps boosted audio from clipping.
+- **Liquid Glass panel.** On macOS 26 and later the panel uses Liquid Glass, with thick Control
+  Center–style sliders that show the app's name and level inside the track.
+- **Simpler controls.** Small waveform buttons replace the "Real" badges and the banner, and Quit
+  is now its own button in the header.
+
+### Added
+- **Per-app boost.** Per-app volume now ranges 0–200%; 100% is the app's own level. System output
+  stays 0–100% because the device's volume cannot go higher. The boosted part of a slider is
+  orange, and dragging near 100% snaps to it.
+- **Soft limiter.** Replayed samples above 0.9 bend smoothly toward full scale instead of clipping.
+  Unboosted audio at normal levels passes through unchanged.
+- **Quit button** in the panel header.
+
+### Changed
+- **Panel design.**
+  - **Glass:** On macOS 26+ the panel draws no background of its own over the menu bar window's
+    glass. Header buttons and indicators use interactive Liquid Glass, and content sits on quiet
+    platters. macOS 13–25 use materials.
+  - **Sliders:** Thick, knobless, and drawn without the tick marks the old stepped slider showed.
+    The fill leaves the track entirely at 0%.
+  - **Mute:** Click an app's icon to mute it, or the speaker icon inside the Output slider to mute
+    system output.
+  - **Playing apps:** Shown with a green dot on the app icon instead of a row outline.
+- **Real control indicators.**
+  - **Rows:** The "Real" badge is now a small orange waveform button; click it to stop that app.
+  - **Header:** The "Real control" banner is now a waveform button in the panel header; click it to
+    stop all.
+  - **Pending and resolving:** These states show compact spinners.
+- **Gain smoothing.** After the fade-in, gain changes move at most 1.0 of gain per 20 ms, so
+  dragging a slider no longer jumps the level between audio cycles.
+
 ## [v2.3.8] - 2026-10-14
 
 ### Highlights

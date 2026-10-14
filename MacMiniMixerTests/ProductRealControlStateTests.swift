@@ -527,6 +527,25 @@ final class ProductRealControlStateTests: XCTestCase {
         XCTAssertEqual(ProductRealControlState.gainOption(for: mutedApp).percentLabel, "0%")
     }
 
+    func testGainOptionMapsBoostedVolumeAboveUnityAndClampsAtTwo() {
+        func app(volume: Double) -> MixerAppItem {
+            MixerAppItem(
+                id: "spotify",
+                name: "Spotify",
+                icon: .systemSymbol("music.note"),
+                processIdentifier: 101,
+                volume: volume,
+                isMuted: false
+            )
+        }
+
+        XCTAssertEqual(ProductRealControlState.gainOption(for: app(volume: 100)).scalar, 1.0)
+        XCTAssertEqual(ProductRealControlState.gainOption(for: app(volume: 150)).scalar, 1.5)
+        XCTAssertEqual(ProductRealControlState.gainOption(for: app(volume: 150)).percentLabel, "150%")
+        XCTAssertEqual(ProductRealControlState.gainOption(for: app(volume: 200)).scalar, 2.0)
+        XCTAssertEqual(ProductRealControlState.gainOption(for: app(volume: 250)).scalar, 2.0)
+    }
+
     // MARK: - Queued start lane
 
     func testEnqueueStartIsFIFOAndDedupesPerApp() {

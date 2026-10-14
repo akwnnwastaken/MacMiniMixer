@@ -2,7 +2,15 @@ import Foundation
 
 enum AppConstants {
     static let appTitle = "MacMiniMixer"
+    /// System output volume, 0–100. The device's volume scalar is capped at 1.0, so this range
+    /// cannot be boosted.
     static let volumeRange: ClosedRange<Double> = 0...100
+    /// Per-app volume, 0–200. Values above `unityAppVolume` boost the app above its own level: a
+    /// Real row's replayed audio is multiplied by `volume / unityAppVolume` (up to 2.0), and the
+    /// output copier soft-limits the result so it never exceeds full scale.
+    static let appVolumeRange: ClosedRange<Double> = 0...200
+    /// The per-app volume that leaves an app at its own level (gain 1.0).
+    static let unityAppVolume: Double = 100
     static let outputDeviceRefreshInterval: TimeInterval = 2
     static let systemVolumeRefreshInterval: TimeInterval = 1
     static let statusMessageAutoClearDelay: TimeInterval = 2.5
@@ -36,6 +44,9 @@ enum AppConstants {
     static let developerModeDefaultsKey = "MacMiniMixerDeveloperMode"
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
+    /// After the fade-in, a gain change (slider drag) moves toward the new target at no more than
+    /// 1.0 of gain per this duration, so jumps (e.g. 0.5 → 1.5) don't click.
+    static let processTapLiveGainSmoothingDuration: TimeInterval = 0.02
     /// Live output path for Process Tap live control (Product Real and Advanced live). The direct
     /// aggregate path renders the tap straight into the output device on one clock (no AudioQueue),
     /// which removes the two-clock hand-off behind random crackle. A/B fallback without a rebuild:
@@ -90,26 +101,28 @@ enum AppConstants {
 
     enum Layout {
         static let panelWidth: CGFloat = 352
-        static let panelPadding: CGFloat = 12
-        static let panelSpacing: CGFloat = 9
-        static let sectionSpacing: CGFloat = 8
-        static let sectionPadding: CGFloat = 10
-        static let cornerRadius: CGFloat = 14
-        static let panelCornerRadius: CGFloat = 22
+        static let panelPadding: CGFloat = 14
+        static let panelSpacing: CGFloat = 12
+        static let sectionSpacing: CGFloat = 12
+        static let sectionPadding: CGFloat = 12
+        static let cornerRadius: CGFloat = 18
+        static let panelCornerRadius: CGFloat = 20
         static let rowCornerRadius: CGFloat = 10
         static let rowSpacing: CGFloat = 8
-        static let rowInnerSpacing: CGFloat = 5
-        static let rowIconSize: CGFloat = 36
-        static let rowIconImageArtworkSize: CGFloat = 31
-        static let rowIconSymbolFrameSize: CGFloat = 36
-        static let rowIconSymbolSize: CGFloat = 18
+        static let rowInnerSpacing: CGFloat = 8
+        static let rowIconSize: CGFloat = 32
+        static let rowIconImageArtworkSize: CGFloat = 30
+        static let rowIconSymbolFrameSize: CGFloat = 32
+        static let rowIconSymbolSize: CGFloat = 16
         static let rowIconMuteBadgeSize: CGFloat = 14
-        static let rowLiveButtonSize: CGFloat = 24
+        static let appSliderHeight: CGFloat = 30
+        static let rowIndicatorSize: CGFloat = 22
+        static let outputSliderHeight: CGFloat = 36
         static let headerButtonSize: CGFloat = 28
-        static let appNameWidth: CGFloat = 66
-        static let volumeValueWidth: CGFloat = 28
+        static let deviceButtonMaxWidth: CGFloat = 200
+        static let volumeValueWidth: CGFloat = 36
         static let deviceRowSpacing: CGFloat = 2
-        static let appRowApproxHeight: CGFloat = 48
+        static let appRowApproxHeight: CGFloat = 32
         static let appListMinHeight: CGFloat = 56
         static let appListMaxHeight: CGFloat = 450
     }

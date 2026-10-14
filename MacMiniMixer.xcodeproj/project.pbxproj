@@ -10,6 +10,7 @@
 		9B7D1A2E2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A2D2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift */; };
 		9B7D1A302C8F4A9A8B2D0101 /* MenuBarRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */; };
 		9B7D1A322C8F4A9A8B2D0101 /* MixerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */; };
+		9B7D1A322C8F4A9A8B2D0301 /* LiquidGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A312C8F4A9A8B2D0301 /* LiquidGlass.swift */; };
 		9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */; };
 		9B7D1AD92C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */; };
 		9B7D1ADB2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1ADA2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift */; };
@@ -26,6 +27,7 @@
 		9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */; };
 		9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */; };
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
+		9B7D1A362C8F4A9A8B2D0201 /* VolumeSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
 		9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */; };
@@ -75,6 +77,7 @@
 		9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */; };
 		9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */; };
 		9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */; };
+		9B7D1AB02C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB32C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift */; };
 		9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */; };
 		9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */; };
 		9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */; };
@@ -116,6 +119,7 @@
 		9B7D1A2D2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMiniMixerApp.swift; sourceTree = "<group>"; };
 		9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRootView.swift; sourceTree = "<group>"; };
 		9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerPanelView.swift; sourceTree = "<group>"; };
+		9B7D1A312C8F4A9A8B2D0301 /* LiquidGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlass.swift; sourceTree = "<group>"; };
 		9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModel.swift; sourceTree = "<group>"; };
 		9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryState.swift; sourceTree = "<group>"; };
 		9B7D1ADA2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedHelperDiscoveryCoordinator.swift; sourceTree = "<group>"; };
@@ -132,6 +136,7 @@
 		9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
+		9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSlider.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
 		9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewAudioStateController.swift; sourceTree = "<group>"; };
@@ -182,6 +187,7 @@
 		9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopier.swift; sourceTree = "<group>"; };
 		9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComparableClampedTests.swift; sourceTree = "<group>"; };
+		9B7D1AB32C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSliderScaleTests.swift; sourceTree = "<group>"; };
 		9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayGainOptionTests.swift; sourceTree = "<group>"; };
 		9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopierTests.swift; sourceTree = "<group>"; };
@@ -300,6 +306,7 @@
 			children = (
 				9B7D1A2F2C8F4A9A8B2D0101 /* MenuBarRootView.swift */,
 				9B7D1A312C8F4A9A8B2D0101 /* MixerPanelView.swift */,
+				9B7D1A312C8F4A9A8B2D0301 /* LiquidGlass.swift */,
 				9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */,
 				9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */,
 				9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */,
@@ -329,6 +336,7 @@
 				9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */,
 				9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */,
 				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
+				9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */,
 				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
 				9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */,
 				9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */,
@@ -414,6 +422,7 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */,
+				9B7D1AB32C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift */,
 				9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */,
 				9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */,
 				9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */,
@@ -542,6 +551,7 @@
 				9B7D1A2E2C8F4A9A8B2D0101 /* MacMiniMixerApp.swift in Sources */,
 				9B7D1A302C8F4A9A8B2D0101 /* MenuBarRootView.swift in Sources */,
 				9B7D1A322C8F4A9A8B2D0101 /* MixerPanelView.swift in Sources */,
+				9B7D1A322C8F4A9A8B2D0301 /* LiquidGlass.swift in Sources */,
 				9B7D1A342C8F4A9A8B2D0101 /* MixerViewModel.swift in Sources */,
 				9B7D1AD92C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift in Sources */,
 				9B7D1AF52C8F4A9A8B2D0101 /* ProductRealControlState.swift in Sources */,
@@ -559,6 +569,7 @@
 				9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */,
 				9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
+				9B7D1A362C8F4A9A8B2D0201 /* VolumeSlider.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
 				9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */,
@@ -615,6 +626,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */,
+				9B7D1AB02C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift in Sources */,
 				9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */,
 				9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */,
 				9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */,
@@ -719,7 +731,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -729,7 +741,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 2.3.8;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.akwnnwastaken.macminimixer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -744,7 +756,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -754,7 +766,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 2.3.8;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.akwnnwastaken.macminimixer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -824,7 +836,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -833,7 +845,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 2.3.8;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MacMiniMixerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -848,7 +860,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -857,7 +869,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 2.3.8;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MacMiniMixerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

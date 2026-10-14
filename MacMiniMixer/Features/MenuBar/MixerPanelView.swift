@@ -20,11 +20,6 @@ struct MixerPanelView: View {
             VStack(alignment: .leading, spacing: AppConstants.Layout.sectionSpacing) {
                 header
 
-                if let banner = viewModel.realControlBannerPresentation {
-                    activeLiveControlBanner(banner)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
                 if let statusMessage = viewModel.statusMessage {
                     statusMessageView(statusMessage)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -51,8 +46,6 @@ struct MixerPanelView: View {
         .padding(AppConstants.Layout.panelPadding)
         .frame(width: AppConstants.Layout.panelWidth)
         .background(panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 10)
         .animation(.snappy(duration: 0.18), value: isShowingOutputDevices)
         .animation(.snappy(duration: 0.18), value: isShowingAdvanced)
         .animation(.snappy(duration: 0.18), value: viewModel.statusMessage)
@@ -91,49 +84,51 @@ struct MixerPanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+        HStack(spacing: 8) {
+            Text(AppConstants.appTitle)
+                .font(.system(size: 15, weight: .bold))
+                .fixedSize()
+                .accessibilityAddTraits(.isHeader)
 
-                Text(AppConstants.appTitle)
-                    .font(.headline.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+
+            GlassGroup(spacing: 8) {
+                HStack(spacing: 8) {
+                    if let banner = viewModel.realControlBannerPresentation {
+                        realControlIndicator(banner)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+
+                    outputDeviceButton
+                    moreMenu
+                    quitButton
+                }
             }
-
-            Spacer()
-
-            Button {
-                isShowingOutputDevices.toggle()
-            } label: {
-                Image(systemName: isShowingOutputDevices ? "airplayaudio.circle.fill" : "airplayaudio")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Output devices"))
-            .accessibilityValue(Text(isShowingOutputDevices ? "Expanded" : "Collapsed"))
-            .accessibilityHint(Text(isShowingOutputDevices ? "Hides the output device list" : "Shows the output device list"))
-            .foregroundStyle(isShowingOutputDevices ? .blue : .secondary)
-            .background(headerButtonBackground(isHighlighted: isShowingOutputDevices))
-            .help("Output devices")
-
-            moreMenu
         }
-        .padding(.horizontal, 3)
-        .padding(.top, 1)
+        .padding(.leading, 4)
+        .frame(height: AppConstants.Layout.headerButtonSize)
     }
 
-    private func headerButtonBackground(isHighlighted: Bool) -> some View {
-        Circle()
-            .fill(.thinMaterial.opacity(isHighlighted ? 0.95 : 0.55))
-            .overlay(
-                Circle()
-                    .stroke(.white.opacity(isHighlighted ? 0.22 : 0.12), lineWidth: 1)
-            )
+    /// Opens the output device list below the header.
+    private var outputDeviceButton: some View {
+        Button {
+            isShowingOutputDevices.toggle()
+        } label: {
+            Image(systemName: "airplayaudio")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isShowingOutputDevices ? Color.accentColor : .primary)
+                .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
+                .glassControl(
+                    in: Circle(),
+                    tint: isShowingOutputDevices ? Color.accentColor.opacity(0.22) : nil
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Output device")
+        .accessibilityLabel(Text("Output device: \(viewModel.selectedOutputDeviceName)"))
+        .accessibilityValue(Text(isShowingOutputDevices ? "Expanded" : "Collapsed"))
+        .accessibilityHint(Text(isShowingOutputDevices ? "Hides the output device list" : "Shows the output device list"))
     }
 
     /// Secondary actions kept out of the main panel body.
@@ -165,27 +160,19 @@ struct MixerPanelView: View {
                     SMAppService.openSystemSettingsLoginItems()
                 }
             }
-
-            Divider()
-
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Label("Quit MacMiniMixer", systemImage: "power")
-            }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
                 .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
-                .background(headerButtonBackground(isHighlighted: false))
+                .glassControl(in: Circle())
                 .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel(Text("More options"))
-        .accessibilityHint(Text("Shows Show all apps, Launch at Login, and Quit"))
+        .accessibilityHint(Text("Shows Show all apps and Launch at Login"))
         .help("More options")
     }
 
@@ -207,54 +194,39 @@ struct MixerPanelView: View {
         refreshLaunchAtLoginStatus()
     }
 
-    private func activeLiveControlBanner(_ banner: RealControlBannerPresentation) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 14, weight: .semibold))
+    /// Small orange indicator in the header while any app is under Real control. Hovering shows
+    /// which apps; clicking stops Real control (all apps), like the former banner's Stop button.
+    private func realControlIndicator(_ banner: RealControlBannerPresentation) -> some View {
+        Button {
+            viewModel.stopProcessTapLiveControl()
+        } label: {
+            Image(systemName: "waveform")
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.orange)
-                .frame(width: 18)
-                .accessibilityHidden(true)
-
-            Text(compactBannerText(banner))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .accessibilityLabel(Text(banner.accessibilityLabel))
-
-            Spacer(minLength: 6)
-
-            Button {
-                viewModel.stopProcessTapLiveControl()
-            } label: {
-                Text(banner.stopButtonTitle)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.orange.opacity(0.14))
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(Color.orange.opacity(0.24), lineWidth: 1)
-                            )
-                    )
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.orange)
-            .help("Stop experimental live control")
-            .accessibilityLabel(Text(banner.stopAccessibilityLabel))
+                .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
+                .glassControl(in: Circle(), tint: Color.orange.opacity(0.22))
+                .contentShape(Circle())
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(.thinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .stroke(Color.orange.opacity(0.24), lineWidth: 1)
-                )
-        )
+        .buttonStyle(.plain)
+        .help("\(compactBannerText(banner)). Click to \(banner.stopButtonTitle.lowercased()).")
+        .accessibilityLabel(Text(banner.stopAccessibilityLabel))
+        .accessibilityValue(Text(banner.accessibilityLabel))
+    }
+
+    private var quitButton: some View {
+        Button {
+            NSApplication.shared.terminate(nil)
+        } label: {
+            Image(systemName: "power")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.primary)
+                .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
+                .glassControl(in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Quit MacMiniMixer")
+        .accessibilityLabel(Text("Quit MacMiniMixer"))
     }
 
     /// One-line banner text: "N apps controlled" once two or more apps are confirmed (the full
@@ -268,69 +240,75 @@ struct MixerPanelView: View {
     }
 
     private var systemOutputSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("System Output")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Output")
+                    .font(.system(size: 13, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)
 
                 if !viewModel.isSystemOutputVolumeWritable {
                     nonWritableVolumeBadge
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                Text(viewModel.selectedOutputDeviceName)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .accessibilityLabel(Text("Output device: \(viewModel.selectedOutputDeviceName)"))
-            }
-
-            HStack(spacing: AppConstants.Layout.rowSpacing) {
                 Button {
-                    viewModel.toggleSystemOutputMuted()
+                    isShowingOutputDevices.toggle()
                 } label: {
-                    rowIcon(
-                        systemName: viewModel.isSystemOutputMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                        isMuted: viewModel.isSystemOutputMuted
-                    )
+                    Text(viewModel.selectedOutputDeviceName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 .buttonStyle(.plain)
-                .help(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output")
-                .accessibilityLabel(Text(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output"))
+                .help("Choose output device")
+                .accessibilityLabel(Text("Output device: \(viewModel.selectedOutputDeviceName)"))
+            }
+            .padding(.horizontal, 4)
 
-                Text("Output")
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .frame(width: AppConstants.Layout.appNameWidth, alignment: .leading)
-
-                Slider(
-                    value: Binding(
-                        get: { viewModel.systemVolume },
-                        set: { viewModel.setSystemVolume($0) }
-                    ),
-                    in: AppConstants.volumeRange,
-                    step: 1,
-                    onEditingChanged: { isEditing in
-                        isEditingSystemOutputSlider = isEditing
-
-                        if !isEditing {
-                            viewModel.finishSystemVolumeEditing()
-                        }
-                    }
-                )
-                .accessibilityLabel(Text("System output volume"))
-                .accessibilityValue(Text("\(Int(viewModel.systemVolume.rounded())) percent"))
-                .accessibilityHint(Text(viewModel.isSystemOutputVolumeWritable
+            VolumeSlider(
+                value: Binding(
+                    get: { viewModel.systemVolume },
+                    set: { viewModel.setSystemVolume($0) }
+                ),
+                scale: VolumeSliderScale(range: AppConstants.volumeRange, unity: nil),
+                accessibilityLabel: "System output volume",
+                accessibilityHint: viewModel.isSystemOutputVolumeWritable
                     ? "Adjusts the system output volume"
-                    : "This output device does not expose writable volume"))
+                    : "This output device does not expose writable volume",
+                height: AppConstants.Layout.outputSliderHeight,
+                systemImage: viewModel.isSystemOutputMuted ? "speaker.slash.fill" : systemVolumeSymbol,
+                isMuted: viewModel.isSystemOutputMuted,
+                onIconTap: { viewModel.toggleSystemOutputMuted() },
+                onEditingChanged: { isEditing in
+                    isEditingSystemOutputSlider = isEditing
 
-                volumeText(viewModel.systemVolume)
+                    if !isEditing {
+                        viewModel.finishSystemVolumeEditing()
+                    }
+                }
+            )
+            .help(viewModel.isSystemOutputMuted ? "Click the speaker to unmute" : "Click the speaker to mute")
+            .accessibilityAction(named: Text(viewModel.isSystemOutputMuted ? "Unmute" : "Mute")) {
+                viewModel.toggleSystemOutputMuted()
             }
         }
-        .sectionStyle(tintOpacity: 0.32)
+        .padding(AppConstants.Layout.sectionPadding)
+        .platter()
+    }
+
+    private var systemVolumeSymbol: String {
+        switch viewModel.systemVolume {
+        case ..<1:
+            return "speaker.fill"
+        case ..<34:
+            return "speaker.wave.1.fill"
+        case ..<67:
+            return "speaker.wave.2.fill"
+        default:
+            return "speaker.wave.3.fill"
+        }
     }
 
     private var nonWritableVolumeBadge: some View {
@@ -355,18 +333,46 @@ struct MixerPanelView: View {
     }
 
     private var appMixerSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Applications")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 2)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Apps")
+                    .font(.system(size: 11, weight: .semibold))
+                    .textCase(.uppercase)
+                    .kerning(0.4)
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+
+                Spacer()
+
+                if !viewModel.visibleMixerApps.isEmpty {
+                    Text("\(viewModel.visibleMixerApps.count)")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .accessibilityLabel(Text("\(viewModel.visibleMixerApps.count) apps"))
+                }
+            }
+            .padding(.horizontal, 4)
 
             if viewModel.visibleMixerApps.isEmpty {
-                Text(viewModel.apps.isEmpty ? "No running apps found" : "No audio-relevant apps found")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.appListMinHeight)
+                VStack(spacing: 4) {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+
+                    Text(viewModel.apps.isEmpty ? "No running apps found" : "No apps are playing audio")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    if !viewModel.apps.isEmpty && !viewModel.showAllApps {
+                        Button("Show all apps") {
+                            viewModel.setShowAllApps(true)
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.appListMinHeight)
             } else {
                 ScrollView(.vertical) {
                     VStack(spacing: AppConstants.Layout.rowInnerSpacing) {
@@ -391,13 +397,13 @@ struct MixerPanelView: View {
                             )
                         }
                     }
-                    .padding(.trailing, 2)
                 }
                 .scrollIndicators(.automatic)
                 .frame(height: appListHeight)
             }
         }
-        .sectionStyle(tintOpacity: 0.22)
+        .padding(AppConstants.Layout.sectionPadding)
+        .platter()
     }
 
     private var advancedSection: some View {
@@ -497,15 +503,7 @@ struct MixerPanelView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(AppConstants.Layout.sectionPadding)
-        .background(
-            RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                .fill(.thinMaterial.opacity(0.14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                        .stroke(.white.opacity(0.1), lineWidth: 1)
-                )
-        )
+        .platter()
     }
 
     private var appListHeight: CGFloat {
@@ -561,13 +559,6 @@ struct MixerPanelView: View {
         }
     }
 
-    private func volumeText(_ volume: Double) -> some View {
-        Text("\(Int(volume.rounded()))")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .frame(width: AppConstants.Layout.volumeValueWidth, alignment: .trailing)
-    }
-
     private func statusMessageView(_ message: MixerStatusMessage) -> some View {
         HStack(spacing: 7) {
             Image(systemName: message.style.iconSystemName)
@@ -590,15 +581,11 @@ struct MixerPanelView: View {
                 statusActionButton(action)
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.thinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(message.style.tint.opacity(0.22), lineWidth: 1)
-                )
+            RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
+                .fill(message.style.tint.opacity(0.12))
         )
     }
 
@@ -608,12 +595,9 @@ struct MixerPanelView: View {
         } label: {
             Text(action.label)
                 .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 9)
                 .padding(.vertical, 3)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.blue.opacity(0.14))
-                )
+                .glassControl(in: Capsule(style: .continuous), tint: Color.blue.opacity(0.18))
         }
         .buttonStyle(.plain)
         .foregroundStyle(.blue)
@@ -633,38 +617,19 @@ struct MixerPanelView: View {
         }
     }
 
+    /// On macOS 26+ the menu bar window is Liquid Glass already; the panel adds nothing over it.
+    @ViewBuilder
     private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
-                    .stroke(.white.opacity(0.24), lineWidth: 1)
-            )
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .white.opacity(0.04)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
-            }
-    }
-
-    private func rowIcon(systemName: String, isMuted: Bool) -> some View {
-        ZStack {
-            Circle()
-                .fill(.quaternary.opacity(0.5))
-
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isMuted ? .tertiary : .secondary)
+        if #available(macOS 26, *) {
+            Color.clear
+        } else {
+            RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
         }
-        .frame(width: AppConstants.Layout.rowIconSize, height: AppConstants.Layout.rowIconSize)
-        .contentShape(Circle())
-        .animation(.snappy(duration: 0.16), value: isMuted)
     }
 }
 
@@ -701,19 +666,5 @@ private extension MixerStatusMessage.Style {
         case .warning:
             return "Warning"
         }
-    }
-}
-
-private extension View {
-    func sectionStyle(tintOpacity: Double) -> some View {
-        padding(AppConstants.Layout.sectionPadding)
-            .background(
-                RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                    .fill(.thinMaterial.opacity(tintOpacity))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                            .stroke(.white.opacity(0.14), lineWidth: 1)
-                    )
-            )
     }
 }

@@ -19,6 +19,27 @@ struct ProcessTapConstantFrameGainProvider: ProcessTapOutputFrameGainProviding {
     }
 }
 
+/// Soft limiter applied to every replayed sample after gain. Below `threshold` it is the identity,
+/// so unboosted audio at normal levels passes unchanged; above it, the magnitude bends smoothly
+/// toward full scale (1.0) instead of clipping. Needed because per-app volume can boost gain to 2.0.
+///
+/// Real-time safe: pure arithmetic, no allocation or locks.
+enum ProcessTapSoftLimiter {
+    static let threshold: Float = 0.9
+
+    @inline(__always)
+    static func limit(_ sample: Float) -> Float {
+        let magnitude = abs(sample)
+        guard magnitude > threshold else {
+            return sample
+        }
+
+        let headroom = 1 - threshold
+        let limited = threshold + headroom * tanhf((magnitude - threshold) / headroom)
+        return sample < 0 ? -limited : limited
+    }
+}
+
 enum ProcessTapOutputBufferCopier {
     static func copy(
         _ inputData: UnsafePointer<AudioBufferList>,
@@ -117,8 +138,9 @@ enum ProcessTapOutputBufferCopier {
             let frameGain = gainProvider.gain(forFrame: frame)
             for outputChannel in 0..<outputChannelCount {
                 let inputChannel = min(outputChannel, inputChannelCount - 1)
-                outputSamples[(frame * outputChannelCount) + outputChannel] =
+                outputSamples[(frame * outputChannelCount) + outputChannel] = ProcessTapSoftLimiter.limit(
                     inputSamples[(frame * inputChannelCount) + inputChannel] * frameGain
+                )
             }
         }
     }
@@ -140,7 +162,8 @@ enum ProcessTapOutputBufferCopier {
                 }
 
                 let inputSamples = inputData.assumingMemoryBound(to: Float32.self)
-                outputSamples[(frame * outputChannelCount) + outputChannel] = inputSamples[frame] * frameGain
+                outputSamples[(frame * outputChannelCount) + outputChannel] =
+                    ProcessTapSoftLimiter.limit(inputSamples[frame] * frameGain)
             }
         }
     }
@@ -218,10 +241,10 @@ enum ProcessTapDirectOutputCopier {
             let rightSample = hasStereoInput ? inputRight.sample(at: frame) : leftSample
             if isMonoOutput {
                 let monoSample = hasStereoInput ? (leftSample + rightSample) * 0.5 : leftSample
-                outputLeft.write(monoSample * frameGain, at: frame)
+                outputLeft.write(ProcessTapSoftLimiter.limit(monoSample * frameGain), at: frame)
             } else {
-                outputLeft.write(leftSample * frameGain, at: frame)
-                outputRight.write(rightSample * frameGain, at: frame)
+                outputLeft.write(ProcessTapSoftLimiter.limit(leftSample * frameGain), at: frame)
+                outputRight.write(ProcessTapSoftLimiter.limit(rightSample * frameGain), at: frame)
             }
         }
 

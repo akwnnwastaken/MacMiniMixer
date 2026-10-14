@@ -45,9 +45,9 @@ struct OutputDeviceSelectorView: View {
                                 .transition(.scale.combined(with: .opacity))
                         }
                     }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .contentShape(RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous))
                     .background(rowBackground(isSelected: device.id == selectedDeviceID))
                 }
                 .buttonStyle(.plain)
@@ -57,14 +57,7 @@ struct OutputDeviceSelectorView: View {
             }
         }
         .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                        .stroke(.white.opacity(0.14), lineWidth: 1)
-                )
-        )
+        .platter()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Output devices"))
         .animation(.snappy(duration: 0.16), value: selectedDeviceID)
@@ -96,11 +89,7 @@ struct OutputDeviceSelectorView: View {
     }
 
     private func rowBackground(isSelected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.white.opacity(0.035))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.16) : Color.clear, lineWidth: 1)
-            )
+        RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
+            .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
     }
 }

@@ -23,9 +23,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.8/MacMiniMixer-2.3.8.zip"><strong>Download for macOS</strong></a>
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.4.0/MacMiniMixer-2.4.0.zip"><strong>Download for macOS</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.8"><strong>Release notes</strong></a>
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.4.0"><strong>Release notes</strong></a>
   &nbsp;·&nbsp;
   <a href="#build-from-source"><strong>Build from source</strong></a>
 </p>
@@ -36,31 +36,33 @@ MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn
 
 ## Features
 
-- **Per-app volume and mute:** Move an app's slider or click its mute, and only that app changes — turn the music down under a video call, or silence one noisy app and leave everything else alone.
+- **Per-app volume and mute:** Move an app's slider or click its icon to mute it, and only that app changes — turn the music down under a video call, or silence one noisy app and leave everything else alone.
+- **Boost up to 200%:** Drag an app past the 100% notch to make a quiet app louder than its own level. The boosted part of the slider turns orange, and a soft limiter keeps boosted audio from clipping.
 - **No app-count limit:** Control as many apps at once as you like.
 - **Browsers and web apps:** Safari and a Safari web app, or Chrome and a Chrome PWA / Canary, are separate rows that can each be controlled.
 - **Crackle-free output:** A direct output engine plays at your device's own sample rate and never changes it.
 - **Always on, nothing automatic:** There is no toggle, and nothing is captured until you touch a row. Rows you have not touched yet are a UI preview and change no audio.
 - **System output:** System volume and mute, kept in sync live while the panel is open, plus the output device list and switching, refreshed live (for example when AirPods connect).
 - **Read-only badge:** Outputs that have no writable volume are marked before you drag anything.
-- **Simple panel:** A `⋯` menu with **Show all apps**, **Launch at Login**, and **Quit MacMiniMixer**, and a one-line banner — "N apps controlled" — with **Stop** or **Stop All**.
+- **Liquid Glass panel:** On macOS 26 and later the panel uses Liquid Glass, with thick Control Center–style sliders that show each app's name and level inside the track. Earlier macOS versions get the same layout with standard materials.
+- **Simple header:** An output-device button, a `⋯` menu with **Show all apps** and **Launch at Login**, and a power button to quit. While apps are under control, a small orange waveform button appears there too; click it to stop all of them.
 - **Launch at Login:** Enable it from the `⋯` menu to start MacMiniMixer when you log in. If macOS requires approval, use the menu shortcut to System Settings.
 - **Menu bar only:** No Dock icon and no window. Labels and hints for VoiceOver are included.
 - **Local and private:** Audio is processed live and never written to disk.
 
 ## Downloads
 
-Version **2.3.8** is current.
+Version **2.4.0** is current.
 
 | Platform | Package | Download | Release notes |
 | --- | --- | --- | --- |
-| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-2.3.8.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.8/MacMiniMixer-2.3.8.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.8/MacMiniMixer-2.3.8.zip.sha256) | [`v2.3.8`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.8) |
+| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-2.4.0.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.4.0/MacMiniMixer-2.4.0.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.4.0/MacMiniMixer-2.4.0.zip.sha256) | [`v2.4.0`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.4.0) |
 
 > [!NOTE]
 > The build is **ad-hoc signed and not notarized**, so macOS blocks the first launch — see [Installation](#installation) for the one-time steps.
 
 > [!NOTE]
-> v2.3.8 is experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
+> v2.4.0 is experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
 
 ---
 
@@ -93,7 +95,7 @@ The direct engine plays at the device's own sample rate and never changes it. In
 - **Public APIs only** — No private APIs and no third-party dependencies; the one grey area is the `proc_pidinfo` flavor above.
 - **Nothing starts on its own** — No capture at launch, none because an app appears in the list, none until you interact with its row. Helper discovery and diagnostics are user-triggered.
 - **System changes are yours** — The default output device and the system volume change only when you use the output selector or the System Output controls. The device's sample rate is never touched.
-- **Clean teardown** — Sessions are torn down on system sleep, output-device change, app quit, and when the app exits. Closing the panel does not stop active control; the menu bar icon and banner show that it is active.
+- **Clean teardown** — Sessions are torn down on system sleep, output-device change, app quit, and when the app exits. Closing the panel does not stop active control; the menu bar icon and the orange waveform button in the panel header show that it is active.
 - **Permission** — macOS asks for **System Audio Recording** the first time a row becomes Real.
 
 > [!NOTE]
@@ -103,10 +105,10 @@ The direct engine plays at the device's own sample rate and never changes it. In
 
 ### Download
 
-1. Download `MacMiniMixer-2.3.8.zip` and `MacMiniMixer-2.3.8.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
+1. Download `MacMiniMixer-2.4.0.zip` and `MacMiniMixer-2.4.0.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
 2. Check the download:
    ```bash
-   shasum -a 256 -c MacMiniMixer-2.3.8.zip.sha256
+   shasum -a 256 -c MacMiniMixer-2.4.0.zip.sha256
    ```
 3. Unzip it and move `MacMiniMixer.app` to `/Applications`.
 4. Open it once (see the warning below), then look for the icon in the menu bar.
@@ -141,11 +143,13 @@ The suite covers pure logic, fake-backed coordinators and synthetic audio buffer
 ## Usage
 
 1. Launch **MacMiniMixer** — a slider icon appears in your menu bar
-2. Click the icon to open the panel: **System Output** on top, your **Applications** below (`⋯` → **Show all apps** reveals the rest)
-3. Move an app's slider or click its mute
+2. Click the icon to open the panel: **Output** on top, your **Apps** below (`⋯` → **Show all apps** reveals the rest)
+3. Move an app's slider or click its icon to mute it. Drag past the 100% notch to boost a quiet app up to 200%
 4. The first time, macOS asks for **System Audio Recording** — allow it
-5. The row shows an orange **Real** badge and its slider now sets that app's real volume. Control other apps the same way — queued ones show a spinner and start one after another 🎚️
-6. Click an app's **Real** badge to stop controlling it, or **Stop All** in the banner. Choose **Quit MacMiniMixer** in the `⋯` menu to stop everything
+5. The row shows a small orange waveform button and its slider now sets that app's real volume. Control other apps the same way — queued ones show a spinner and start one after another 🎚️
+6. Click an app's waveform button to stop controlling it, or the waveform button in the panel header to stop all of them. Click the power button in the header to quit and stop everything
+
+To mute or unmute the system output, click the speaker icon inside the Output slider.
 
 To start MacMiniMixer automatically when you log in, enable **Launch at Login** in the `⋯` menu. The setting follows the macOS login-item status; if approval is required, choose **Approve Launch at Login in System Settings…**. Turn it off in the same menu to stop automatic launches.
 
@@ -153,11 +157,14 @@ To start MacMiniMixer automatically when you log in, enable **Launch at Login** 
 
 | Where | You see | Meaning |
 |-------|---------|---------|
-| Row | slider and mute, no badge | Preview only — nothing real happens until you move the slider or click mute (eligible apps then become Real) |
-| Row | spinner and "Resolving" | Finding the audio process of a browser or helper row |
-| Row | spinner badge | A start or stop is in flight, or this row is waiting its turn in the start queue |
-| Row | orange **Real** badge | Per-app control is active; the slider is the app's real volume and mute is silence |
-| System Output | **Read-only** | This output device has no writable volume |
+| Row | slider, no indicator | Preview only — nothing real happens until you move the slider or click the icon to mute (eligible apps then become Real) |
+| Row | orange spinner | Finding the audio process of a browser or helper row |
+| Row | spinner | A start or stop is in flight, or this row is waiting its turn in the start queue |
+| Row | orange waveform button | Per-app control is active; the slider is the app's real volume and mute is silence. Click it to stop |
+| Row | green dot on the app icon | The app is playing audio |
+| Row | orange slider fill past the notch | The app is boosted above 100% |
+| Header | orange waveform button | At least one app is under control; click it to stop all |
+| Output | **Read-only** | This output device has no writable volume |
 | Menu bar | `slider.horizontal.3` 🎚️ | No app is under control |
 | Menu bar | `waveform.circle.fill` 🌊 | At least one app is under control |
 
@@ -176,7 +183,7 @@ Rows for apps that cannot be tapped stay a UI preview. An app with no audio runn
 
 - **Gatekeeper blocks the app** — see the warning under [Installation](#download).
 - **macOS asks for permission again after an update** — the permission is tied to the code signature, and every ad-hoc build has a different one. Allow it again, or remove the old MacMiniMixer entry under **System Settings → Privacy & Security → System Audio Recording** and re-enable it. A permission-denied start offers an **Open Settings** button.
-- **An app stays silent after control stops** — choose **Quit MacMiniMixer** in the `⋯` menu.
+- **An app stays silent after control stops** — quit MacMiniMixer with the power button in the panel header.
 - **Crackle on one output device** — it may be using the legacy path. Check the log for `output=direct` (good) or `output=audioQueue`:
   ```bash
   log show --last 30m --info --predicate 'process == "MacMiniMixer"'
@@ -187,7 +194,7 @@ Rows for apps that cannot be tapped stay a UI preview. An app with no audio runn
 
 To uninstall:
 
-1. Choose **Quit MacMiniMixer** in the `⋯` menu — this stops every tap.
+1. Quit MacMiniMixer with the power button in the panel header — this stops every tap.
 2. Delete `/Applications/MacMiniMixer.app`.
 3. Optionally forget its settings: `defaults delete com.akwnnwastaken.macminimixer`
 4. Remove MacMiniMixer from the **System Audio Recording** list in **System Settings → Privacy & Security**.

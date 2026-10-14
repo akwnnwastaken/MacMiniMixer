@@ -581,6 +581,20 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertEqual(harness.liveController.gainUpdates.map(\.scalar), [0.25])
     }
 
+    func testBoostedRowVolumeUpdatesGainAboveUnityAndClampsAtTwoHundred() async {
+        let harness = makeHarness()
+        harness.viewModel.setExperimentalRealAppControlEnabled(true)
+        harness.viewModel.setAppVolume(50, for: "spotify")
+        await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
+
+        harness.viewModel.setAppVolume(180, for: "spotify")
+        harness.viewModel.setAppVolume(260, for: "spotify")
+
+        XCTAssertEqual(harness.viewModel.volume(for: "spotify"), 200)
+        XCTAssertEqual(harness.liveController.gainUpdates.map(\.scalar), [1.8, 2.0])
+        XCTAssertEqual(harness.liveController.gainUpdates.map(\.percentLabel), ["180%", "200%"])
+    }
+
     func testTimeoutCallbackClearsActiveLiveState() async {
         let harness = makeHarness()
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
