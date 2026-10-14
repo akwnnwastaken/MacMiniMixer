@@ -23,9 +23,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.6/MacMiniMixer-2.3.6.zip"><strong>Download for macOS</strong></a>
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.7/MacMiniMixer-2.3.7.zip"><strong>Download for macOS</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.6"><strong>Release notes</strong></a>
+  <a href="https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.7"><strong>Release notes</strong></a>
   &nbsp;·&nbsp;
   <a href="#build-from-source"><strong>Build from source</strong></a>
 </p>
@@ -50,17 +50,17 @@ MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn
 
 ## Downloads
 
-Version **2.3.6** is prepared for the next release; its download links below will become available after publication.
+Version **2.3.7** is current.
 
 | Platform | Package | Download | Release notes |
 | --- | --- | --- | --- |
-| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-2.3.6.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.6/MacMiniMixer-2.3.6.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.6/MacMiniMixer-2.3.6.zip.sha256) | [`v2.3.6`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.6) |
+| macOS 13+ (per-app control: macOS 14.2+) | `MacMiniMixer-2.3.7.zip` | [Download ZIP](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.7/MacMiniMixer-2.3.7.zip) · [SHA-256](https://github.com/akwnnwastaken/MacMiniMixer/releases/download/v2.3.7/MacMiniMixer-2.3.7.zip.sha256) | [`v2.3.7`](https://github.com/akwnnwastaken/MacMiniMixer/releases/tag/v2.3.7) |
 
 > [!NOTE]
 > The build is **ad-hoc signed and not notarized**, so macOS blocks the first launch — see [Installation](#installation) for the one-time steps.
 
 > [!NOTE]
-> v2.3.6 is experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
+> v2.3.7 is experimental. It is not a finished Windows Volume Mixer replacement, and it is not on the Mac App Store.
 
 ---
 
@@ -103,10 +103,10 @@ The direct engine plays at the device's own sample rate and never changes it. In
 
 ### Download
 
-1. Download `MacMiniMixer-2.3.6.zip` and `MacMiniMixer-2.3.6.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
+1. Download `MacMiniMixer-2.3.7.zip` and `MacMiniMixer-2.3.7.zip.sha256` from [Downloads](#downloads) or the [Releases](https://github.com/akwnnwastaken/MacMiniMixer/releases) page.
 2. Check the download:
    ```bash
-   shasum -a 256 -c MacMiniMixer-2.3.6.zip.sha256
+   shasum -a 256 -c MacMiniMixer-2.3.7.zip.sha256
    ```
 3. Unzip it and move `MacMiniMixer.app` to `/Applications`.
 4. Open it once (see the warning below), then look for the icon in the menu bar.

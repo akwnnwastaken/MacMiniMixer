@@ -16,6 +16,33 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.3.7] - 2026-10-14
+
+### Highlights
+- **Cleaner quit.** Quitting MacMiniMixer now stops every controlled app's audio capture before
+  the app exits, instead of leaving it to macOS.
+- **Sturdier start and stop.** Sleeping the Mac, quitting, or pressing Stop All while an app's
+  control is still starting no longer lets that app become Real after everything was stopped.
+- **Permission hint in Advanced diagnostics.** When a live session receives only silence, the
+  Advanced card suggests checking System Audio Recording and offers Open System Settings.
+
+### Fixed
+- **Termination teardown never ran.** The `willTerminate` observer deferred teardown into a `Task`,
+  which never ran because AppKit exits right after the observers return. It now tears down
+  synchronously, like the `willSleep` observer. A crash or Force Quit is still covered: the taps and
+  aggregates are private to the process, so coreaudiod releases them when the process ends.
+- **Start/hard-stop race.** A hard stop could race a live session start that was waiting for, or
+  running inside, the Core Audio lifecycle gate, so the start could activate after teardown. Each
+  start now carries a pending-start token that is checked before and after controller setup. A
+  cancelled start is rolled back through the gate, and activation is ordered against cancellation
+  under the manager lock.
+
+### Added
+- **Silent-session permission hint (developer mode).** A denied System Audio Recording permission
+  can show up as silent tap buffers rather than a create error. When the Advanced live card shows
+  "No app audio detected", it now adds a hint to check the permission and an Open System Settings
+  button. The hint also appears when the app is simply not playing.
+
 ## [v2.3.6] - 2026-10-12
 
 ### Highlights
