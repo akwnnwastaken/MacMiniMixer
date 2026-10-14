@@ -2,7 +2,7 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v2.3.7 / build 6 is the release for 2026-10-14
+changes. It is **not** a public release document — v2.3.8 / build 7 is the release for 2026-10-14
 (see `CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
@@ -41,12 +41,13 @@ changes. It is **not** a public release document — v2.3.7 / build 6 is the rel
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
-- **v2.3.7 release (2026-10-14):** synchronous `willTerminate` teardown (private taps/aggregates
-  still cover crash/Force Quit), a start/hard-stop race fix in `ProcessTapLiveSessionManager`
+- **v2.3.8 release (2026-10-14):** new flat three-fader app icon on a transparent canvas, generated
+  by `scripts/make-app-icon.swift`; no code changes. v2.3.7 (2026-10-14) added synchronous
+  `willTerminate` teardown (private taps/aggregates still cover crash/Force Quit), a start/hard-stop race fix in `ProcessTapLiveSessionManager`
   (pending-start tokens, rollback through the lifecycle gate), and a System Audio Recording hint on
   the Advanced card's silent "No app audio detected" state. v2.3.6 (2026-10-12) added the
   app-icon backplate removal and the green active-output row outline (macOS 14.2+).
-  `MARKETING_VERSION` is **`2.3.7`** and `CURRENT_PROJECT_VERSION` is `6` (all 4 build configurations).
+  `MARKETING_VERSION` is **`2.3.8`** and `CURRENT_PROJECT_VERSION` is `7` (all 4 build configurations).
   The owner selected this version/build and the existing ad-hoc-signed, not-notarized release
   workflow. Per-app audio remains experimental.
   Do not bump the version again until the owner asks. Final packaged-app System Audio Recording /

@@ -16,6 +16,17 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.3.8] - 2026-10-14
+
+### Highlights
+- **New app icon.** A simpler icon: three flat faders with blue levels and white knobs, drawn on a
+  transparent canvas with no background tile.
+
+### Changed
+- **App icon.** Replaced the 3D slider icon with a flat three-fader design. The icon is now drawn
+  by `scripts/make-app-icon.swift`, which renders every asset-catalog size (16–1024 px) from
+  vector shapes; rerun it to regenerate `AppIcon.appiconset`.
+
 ## [v2.3.7] - 2026-10-14
 
 ### Highlights
