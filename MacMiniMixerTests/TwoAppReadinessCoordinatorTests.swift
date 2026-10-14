@@ -435,6 +435,105 @@ final class TwoAppReadinessCoordinatorTests: XCTestCase {
         XCTAssertTrue(idleTester.stopReasons.isEmpty)
     }
 
+    func testPendingStartupRetainsCoordinatorButStoredCallbacksDoNotAfterReturn() async {
+        let release = TestAsyncReleaser()
+        let log = TestOrderedLog()
+        let tester = FakeCoordinatorReadinessTester(startReleaser: release, startLog: log)
+        var coordinator: TwoAppReadinessCoordinator? = makeCoordinator(tester: tester)
+        weak let weakCoordinator = coordinator
+        let returned = expectation(description: "Coordinator consumed the start result")
+        let warnings = CallbackSpy<String>()
+        let changes = CallbackSpy<Void>()
+        coordinator?.setOnWillChange { [weak coordinator] in
+            changes.record(())
+            if coordinator?.result?.outcome == .running { returned.fulfill() }
+        }
+        coordinator?.startTest(
+            apps: makeCoordinatorApps(), advancedTarget: nil,
+            isProcessTapTesting: false, isLiveControlActive: false,
+            isAppAudioTargetResolving: false, onWarning: { warnings.record($0) }
+        )
+        await log.waitFor { $0.contains("start-held") }
+        coordinator = nil
+        XCTAssertNotNil(weakCoordinator, "The in-flight start task deliberately owns self across await")
+        XCTAssertEqual(weakCoordinator?.result?.outcome, .starting)
+        release.release()
+        await fulfillment(of: [returned], timeout: 5)
+        XCTAssertNil(weakCoordinator, "Returned startup must not leave a callback ownership cycle")
+        let previousChanges = changes.count
+        tester.emitUpdate()
+        tester.emitFinished(result: ProcessTapTwoAppReadinessResult(
+            outcome: .timedOut, message: "late warning", severity: .warning
+        ))
+        // Both callbacks capture an already-nil weak coordinator before making their MainActor hop.
+        // Keeping the tester/closures alive is intentional; no fake teardown masks a retain cycle.
+        XCTAssertNil(weakCoordinator)
+        XCTAssertEqual(changes.count, previousChanges)
+        XCTAssertTrue(warnings.values.isEmpty)
+    }
+
+    /// Models MixerViewModel.startTwoAppReadinessTest's [weak self] warning ownership exactly;
+    /// this is a narrow ownership probe, not a test of the view model's other dependencies.
+    func testProductionStyleWeakWarningOwnerIsReleasableDuringPendingStartup() async {
+        let release = TestAsyncReleaser()
+        let log = TestOrderedLog()
+        let tester = FakeCoordinatorReadinessTester(startReleaser: release, startLog: log)
+        let coordinator = makeCoordinator(tester: tester)
+        let warnings = CallbackSpy<String>()
+        var viewModel: ReadinessWarningOwner? = ReadinessWarningOwner(coordinator: coordinator, warnings: warnings)
+        weak let weakViewModel = viewModel
+        let returned = expectation(description: "Start returned")
+        let finished = expectation(description: "Late finish consumed by live coordinator")
+        coordinator.setOnWillChange { [weak coordinator] in
+            if coordinator?.result?.outcome == .running { returned.fulfill() }
+        }
+        viewModel?.start()
+        await log.waitFor { $0.contains("start-held") }
+        viewModel = nil
+        XCTAssertNil(weakViewModel, "Stored onWarning must not strongly retain the UI owner")
+        release.release()
+        await fulfillment(of: [returned], timeout: 5)
+        coordinator.setOnWillChange { finished.fulfill() }
+        tester.emitFinished(result: ProcessTapTwoAppReadinessResult(
+            outcome: .timedOut, message: "late warning", severity: .warning
+        ))
+        await fulfillment(of: [finished], timeout: 5)
+        XCTAssertEqual(coordinator.result?.outcome, .timedOut)
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertNil(weakViewModel)
+        XCTAssertTrue(warnings.values.isEmpty)
+    }
+
+    func testActualMixerViewModelIsReleasedWhileReadinessStartupAndCallbacksAreRetained() async {
+        let release = TestAsyncReleaser()
+        let log = TestOrderedLog()
+        let tester = FakeCoordinatorReadinessTester(startReleaser: release, startLog: log)
+        let services = ReadinessLifetimeServices()
+        var viewModel: MixerViewModel? = MixerViewModel(
+            applicationLister: services, audioController: services,
+            outputDeviceLister: services, outputDeviceController: services,
+            systemVolumeReader: services, systemVolumeController: services,
+            processTapTester: services, processTapReplayProbe: services,
+            processTapLiveController: ProcessTapLiveSessionManager(controller: services),
+            twoAppReadinessTester: tester, helperProcessAudioProbe: services,
+            appAudioTargetResolver: services, processLister: services,
+            productRealStartSettleGate: ProductRealStartSettleGate(sleeper: { _ in }),
+            processTapEligibility: { _ in .eligible }
+        )
+        weak let weakViewModel = viewModel
+        viewModel?.startTwoAppReadinessTest()
+        await log.waitFor { $0.contains("start-held") }
+        viewModel = nil
+        XCTAssertNil(weakViewModel, "Production onWarning/onWillChange closures must not own the view model")
+        release.release()
+        await log.waitFor { $0.contains("start-returning") }
+        tester.emitUpdate()
+        tester.emitFinished(result: ProcessTapTwoAppReadinessResult(
+            outcome: .timedOut, message: "late warning", severity: .warning
+        ))
+        XCTAssertNil(weakViewModel)
+    }
+
     // MARK: - Aggregate cleanup-failure reporting (Faz 4f-1)
     //
     // These exercise the pure aggregation `TwoAppReadinessState.aggregateResult(reason:snapshot:)`
@@ -689,6 +788,25 @@ private func makeAdvancedTarget(pid: Int32) -> AdvancedProcessTapTarget {
     )
 }
 
+@MainActor
+private final class ReadinessWarningOwner {
+    let coordinator: TwoAppReadinessCoordinator
+    let warnings: CallbackSpy<String>
+    init(coordinator: TwoAppReadinessCoordinator, warnings: CallbackSpy<String>) {
+        self.coordinator = coordinator
+        self.warnings = warnings
+    }
+    func start() {
+        coordinator.startTest(
+            apps: makeCoordinatorApps(), advancedTarget: nil,
+            isProcessTapTesting: false, isLiveControlActive: false,
+            isAppAudioTargetResolving: false
+        ) { [weak self] message in
+            self?.warnings.record(message)
+        }
+    }
+}
+
 /// Thread-safe sink for callbacks (onWarning / onWillChange). The coordinator invokes these
 /// from `Task { @MainActor }` continuations while the test asserts on the MainActor; recording
 /// through a lock removes the raw captured-`var` data race that made finish-callback tests flake
@@ -710,6 +828,61 @@ private final class CallbackSpy<Value>: @unchecked Sendable {
     }
 }
 
+/// Inert view-model dependencies: any capture/probe/resolve entry is a test-construction failure.
+/// No Core Audio or permission-requesting implementation is reachable from this harness.
+private final class ReadinessLifetimeServices: ApplicationListing, AudioControlling,
+    OutputDeviceListing, OutputDeviceControlling, SystemVolumeReading, SystemVolumeControlling,
+    ProcessTapTesting, ProcessTapReplayProbing, ProcessTapCandidateAudioProbing,
+    AppAudioTargetResolving, ProcessListing, ProcessTapLiveControlling, @unchecked Sendable {
+    var systemVolume: Double { 50 }
+    func listApplications() -> [MixerAppItem] { makeCoordinatorApps() }
+    func listOutputDevices() -> [OutputDeviceItem] { [] }
+    func listProcesses() -> [SystemProcessInfo] { [] }
+    func setSystemVolume(_ volume: Double) {}
+    func setVolume(_ volume: Double, for appID: MixerAppItem.ID) {}
+    func setMuted(_ isMuted: Bool, for appID: MixerAppItem.ID) {}
+    func setDefaultOutputDevice(_ device: OutputDeviceItem) -> Bool { true }
+    func readCurrentOutputVolumeScalar() -> Double? { 0.5 }
+    func setCurrentOutputVolumeScalar(_ volumeScalar: Double) -> Bool { true }
+    func testProcessTap(for target: ProcessTapTarget, mode: ProcessTapTestMode,
+                        onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void) async -> ProcessTapTestResult {
+        XCTFail("Unexpected Process Tap test")
+        return ProcessTapTestResult(outcome: .liveControlNotActive, message: "inert", severity: .info)
+    }
+    func runReplayProbe(for target: ProcessTapTarget, gain: ProcessTapReplayGainOption,
+                        onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void) async -> ProcessTapReplayResult {
+        XCTFail("Unexpected replay probe")
+        return ProcessTapReplayResult(outcome: .replayCompleted, message: "inert", severity: .info)
+    }
+    func stopCurrentReplayProbe(reason: ProcessTapReplayProbeStopReason) {}
+    func probeAudio(for target: ProcessTapTarget, duration: TimeInterval,
+                    onProgress: @escaping @Sendable (ProcessTapDiagnosticProgress) -> Void) async -> ProcessTapTestResult {
+        XCTFail("Unexpected audio probe")
+        return ProcessTapTestResult(outcome: .liveControlNotActive, message: "inert", severity: .info)
+    }
+    func stopCurrentProbe(reason: ProcessTapCandidateProbeStopReason) {}
+    func resolveTarget(for request: AppAudioTargetRequest, allowsCachedLookup: Bool,
+                       onProgress: @escaping @Sendable (AppAudioResolutionProgress) -> Void) async -> AppAudioTargetResolutionResult {
+        XCTFail("Unexpected target resolution")
+        return .unavailable("inert")
+    }
+    func cancelCurrentResolution(reason: ProcessTapCandidateProbeStopReason) {}
+    func invalidateCachedTarget(for request: AppAudioTargetRequest) {}
+    func invalidateAllCachedTargets() {}
+    func startLiveControl(for target: ProcessTapTarget, gain: ProcessTapReplayGainOption,
+                          timeoutPolicy: ProcessTapLiveTimeoutPolicy,
+                          onDiagnostics: @escaping @Sendable (ProcessTapLiveDiagnostics) -> Void,
+                          onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void) async -> ProcessTapTestResult {
+        XCTFail("Unexpected live capture")
+        return ProcessTapTestResult(outcome: .liveControlNotActive, message: "inert", severity: .info)
+    }
+    func updateLiveControlGain(_ gain: ProcessTapReplayGainOption) {}
+    func stopLiveControl(reason: ProcessTapLiveStopReason) async -> ProcessTapTestResult {
+        ProcessTapTestResult(outcome: .liveControlNotActive, message: "inert", severity: .info)
+    }
+    func stopLiveControlNow(reason: ProcessTapLiveStopReason) -> ProcessTapTestResult? { nil }
+}
+
 private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
     // The coordinator drives these methods from an off-MainActor task while tests read the
     // recorded arrays on the MainActor. Guard all mutable state with a lock and run callbacks
@@ -719,6 +892,14 @@ private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTes
     private var stopReasonsStorage: [ProcessTapLiveStopReason] = []
     private var lastSnapshot = ProcessTapTwoAppReadinessSnapshot.empty
     private var onFinished: (@Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void)?
+    private var onUpdate: (@Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void)?
+    private let startReleaser: TestAsyncReleaser?
+    private let startLog: TestOrderedLog?
+
+    init(startReleaser: TestAsyncReleaser? = nil, startLog: TestOrderedLog? = nil) {
+        self.startReleaser = startReleaser
+        self.startLog = startLog
+    }
 
     var startRequests: [(appA: ProcessTapTarget, appB: ProcessTapTarget, gain: ProcessTapReplayGainOption, duration: TimeInterval)] {
         lock.withLock { startRequestsStorage }
@@ -745,9 +926,15 @@ private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTes
         lock.withLock {
             startRequestsStorage.append((appA, appB, gain, duration))
             self.onFinished = onFinished
+            self.onUpdate = onUpdate
             lastSnapshot = snapshot
         }
+        if let startReleaser {
+            startLog?.append("start-held")
+            await startReleaser.wait()
+        }
         onUpdate(snapshot)
+        startLog?.append("start-returning")
         return ProcessTapTwoAppReadinessResult(
             outcome: .running,
             message: "Two-app test running",
@@ -776,6 +963,11 @@ private final class FakeCoordinatorReadinessTester: ProcessTapTwoAppReadinessTes
             stopReasonsStorage.append(reason)
             return stopResult(for: reason)
         }
+    }
+
+    func emitUpdate() {
+        let (snapshot, update) = lock.withLock { (lastSnapshot, onUpdate) }
+        update?(snapshot)
     }
 
     func emitFinished(result: ProcessTapTwoAppReadinessResult) {
