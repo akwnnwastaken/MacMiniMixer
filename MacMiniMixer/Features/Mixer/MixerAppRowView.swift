@@ -13,10 +13,8 @@ struct MixerAppRowView: View {
     @Binding var volume: Double
     @Binding var isMuted: Bool
 
-    @State private var isHovering = false
-
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button {
                 isMuted.toggle()
             } label: {
@@ -25,67 +23,30 @@ struct MixerAppRowView: View {
             .buttonStyle(.plain)
             .help(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)")
             .accessibilityLabel(Text(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)"))
+            .accessibilityValue(Text(isOutputActive ? "Playing audio" : "Not playing"))
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(app.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .accessibilityValue(Text(isOutputActive ? "Playing audio" : "Not playing"))
+            VolumeSlider(
+                value: $volume,
+                scale: VolumeSliderScale(range: AppConstants.appVolumeRange, unity: AppConstants.unityAppVolume),
+                accessibilityLabel: "\(app.name) volume",
+                accessibilityHint: isExperimentalControlResolving
+                    ? "Finding the audio helper for this app"
+                    : isExperimentalControlActive
+                        ? "Adjusts real audio level for this app. Above 100 percent boosts it."
+                        : "Adjusts the volume for this app. Above 100 percent boosts it.",
+                height: AppConstants.Layout.appSliderHeight,
+                title: app.name,
+                isMuted: isMuted
+            )
+            .disabled(isMuted || isExperimentalControlResolving)
 
-                    if isOutputActive {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 6, height: 6)
-                            .transition(.scale.combined(with: .opacity))
-                            .help("Playing audio")
-                            .accessibilityHidden(true)
-                    }
-
-                    Spacer(minLength: 4)
-
-                    experimentalControlAccessory
-
-                    Text("\(Int(volume.rounded()))%")
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(valueStyle)
-                        .frame(minWidth: AppConstants.Layout.volumeValueWidth, alignment: .trailing)
-                        .accessibilityHidden(true)
-                }
-
-                VolumeSlider(
-                    value: $volume,
-                    scale: VolumeSliderScale(range: AppConstants.appVolumeRange, unity: AppConstants.unityAppVolume),
-                    accessibilityLabel: "\(app.name) volume",
-                    accessibilityHint: isExperimentalControlResolving
-                        ? "Finding the audio helper for this app"
-                        : isExperimentalControlActive
-                            ? "Adjusts real audio level for this app. Above 100 percent boosts it."
-                            : "Adjusts the volume for this app. Above 100 percent boosts it."
-                )
-                .disabled(isMuted || isExperimentalControlResolving)
-            }
+            experimentalControlAccessory
         }
-        .padding(.horizontal, 8)
-        .frame(height: AppConstants.Layout.appRowApproxHeight)
-        .background(rowBackground)
-        .opacity(isMuted ? 0.72 : 1)
-        .onHover { isHovering = $0 }
         .animation(.snappy(duration: 0.16), value: isMuted)
-        .animation(.snappy(duration: 0.16), value: isHovering)
         .animation(.snappy(duration: 0.16), value: isOutputActive)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlActive)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlResolving)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlPending)
-    }
-
-    private var valueStyle: Color {
-        if isMuted {
-            return Color.secondary.opacity(0.6)
-        }
-
-        return volume > AppConstants.unityAppVolume ? .orange : .secondary
     }
 
     private var appIcon: some View {
@@ -105,7 +66,24 @@ struct MixerAppRowView: View {
                     mutedBadge
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                if isOutputActive && !isMuted {
+                    playingDot
+                }
+            }
             .contentShape(Circle())
+    }
+
+    /// Shown while Core Audio reports the app producing output.
+    private var playingDot: some View {
+        Circle()
+            .fill(Color.green)
+            .overlay(Circle().stroke(Color.black.opacity(0.25), lineWidth: 0.5))
+            .frame(width: 8, height: 8)
+            .offset(x: 1, y: -1)
+            .transition(.scale.combined(with: .opacity))
+            .help("Playing audio")
+            .accessibilityHidden(true)
     }
 
     private var mutedBadge: some View {
@@ -148,19 +126,6 @@ struct MixerAppRowView: View {
         }
     }
 
-    private var rowBackground: some View {
-        RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
-            .fill(rowBackgroundFill)
-    }
-
-    private var rowBackgroundFill: Color {
-        if isExperimentalControlActive {
-            return Color.orange.opacity(isHovering ? 0.12 : 0.08)
-        }
-
-        return isHovering ? Color.primary.opacity(0.06) : Color.clear
-    }
-
     @ViewBuilder
     private var experimentalControlAccessory: some View {
         if isExperimentalControlPending {
@@ -172,67 +137,39 @@ struct MixerAppRowView: View {
         }
     }
 
-    /// Non-interactive badge shown while a Product Real start/stop for this row is in flight.
+    /// Non-interactive indicator shown while a Product Real start/stop for this row is in flight.
     private var pendingBadge: some View {
         ProgressView()
             .controlSize(.mini)
-            .scaleEffect(0.55)
-            .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowBadgeHeight)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.orange.opacity(0.1))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-                    )
-            )
+            .scaleEffect(0.6)
+            .frame(width: AppConstants.Layout.rowIndicatorSize, height: AppConstants.Layout.rowIndicatorSize)
             .help("Real app control is changing for \(app.name)…")
             .accessibilityLabel(Text("Real app control is changing for \(app.name)"))
     }
 
+    /// Small orange indicator while this app is under Real control; clicking it stops that control.
     private var realControlBadge: some View {
         Button(action: toggleExperimentalControl) {
-            Text("Real")
-                .font(.system(size: 9, weight: .bold))
+            Image(systemName: "waveform")
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.orange)
-                .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowBadgeHeight)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.orange.opacity(0.14))
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(Color.orange.opacity(0.28), lineWidth: 1)
-                        )
-                )
+                .frame(width: AppConstants.Layout.rowIndicatorSize, height: AppConstants.Layout.rowIndicatorSize)
+                .glassControl(in: Circle(), tint: Color.orange.opacity(0.22))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help("Stop experimental real app control for \(app.name)")
-        .accessibilityLabel(Text("Stop Real App Control"))
+        .help("Real control is on for \(app.name). Click to stop.")
+        .accessibilityLabel(Text("Stop Real App Control for \(app.name)"))
     }
 
     private var resolvingBadge: some View {
-        HStack(spacing: 4) {
-            ProgressView()
-                .controlSize(.mini)
-                .scaleEffect(0.55)
-                .frame(width: 10, height: 10)
-
-            Text("Resolving")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.orange.opacity(0.88))
-        }
-        .frame(width: AppConstants.Layout.rowLiveButtonSize + 36, height: AppConstants.Layout.rowBadgeHeight)
-        .background(
-            Capsule(style: .continuous)
-                .fill(Color.orange.opacity(0.1))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-                )
-        )
-        // Single element so the label below is not repeated on both the spinner and the text.
-        .accessibilityElement(children: .ignore)
-        .help("Finding the audio helper for \(app.name)")
-        .accessibilityLabel(Text("Resolving real app control for \(app.name)"))
+        ProgressView()
+            .controlSize(.mini)
+            .scaleEffect(0.6)
+            .tint(.orange)
+            .frame(width: AppConstants.Layout.rowIndicatorSize, height: AppConstants.Layout.rowIndicatorSize)
+            .help("Finding the audio helper for \(app.name)")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Resolving real app control for \(app.name)"))
     }
 }

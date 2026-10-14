@@ -49,75 +49,77 @@ struct VolumeSliderScale: Equatable {
     }
 }
 
-/// Volume slider for the mixer panel: a capsule track with an accent fill, an orange boost segment
-/// past `unity` and a notch marking it, and a white knob. Drag anywhere on the track to set the
-/// value; arrow keys step by 5 when focused. VoiceOver sees a native `Slider`.
+/// Thick, knobless capsule slider in the style of macOS Control Center. The fill grows from the
+/// leading edge with a rounded end; near 0 that rounded end slides out of the track, so 0% shows
+/// no fill at all. Past `unity` the fill turns orange and a notch marks 100%. An optional icon and title sit inside
+/// the track at the leading edge and the percentage at the trailing edge; where the white fill
+/// passes under them they switch to a dark color so they stay legible.
+///
+/// Drag or click anywhere on the track to set the value; arrow keys step by 5 when focused. With
+/// `onIconTap`, a click (not a drag) on the leading icon calls it instead, e.g. to toggle mute.
+/// VoiceOver sees a native `Slider`.
 struct VolumeSlider: View {
     @Binding var value: Double
     let scale: VolumeSliderScale
     let accessibilityLabel: String
     var accessibilityHint: String = ""
-    var trackHeight: CGFloat = 4
-    var knobSize: CGFloat = 14
+    var height: CGFloat = 30
+    var systemImage: String?
+    var title: String?
+    var showsValue = true
+    var isMuted = false
+    var onIconTap: (() -> Void)?
     var onEditingChanged: (Bool) -> Void = { _ in }
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isDragging = false
     @State private var isHovering = false
+    /// A press began on the leading icon and has not moved far enough to count as a drag yet.
+    @State private var isPressingIcon = false
 
     private static let keyboardStep: Double = 5
+    private static let iconTapSlop: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
-            let travel = max(1, proxy.size.width - knobSize)
-            let knobX = CGFloat(scale.fraction(for: value)) * travel
-            let unityX = scale.unity.map { CGFloat(scale.fraction(for: $0)) * travel + knobSize / 2 }
-            let isBoosted = scale.unity.map { value > $0 } ?? false
-            // The accent fill stops at unity; the boost segment draws the rest.
-            let fillEnd = isBoosted ? (unityX ?? 0) : knobX + knobSize / 2
+            let width = max(1, proxy.size.width)
+            let fillWidth = CGFloat(scale.fraction(for: value)) * width
+            let unityX = scale.unity.map { CGFloat(scale.fraction(for: $0)) * width }
 
             ZStack(alignment: .leading) {
                 Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.12))
-                    .frame(height: trackHeight)
+                    .fill(Color.primary.opacity(isHovering || isDragging ? 0.14 : 0.10))
 
-                Capsule(style: .continuous)
-                    .fill(fillColor)
-                    .frame(width: fillEnd, height: trackHeight)
+                fill(width: fillWidth, unityX: unityX)
 
                 if let unityX {
-                    if isBoosted {
-                        Rectangle()
-                            .fill(boostColor)
-                            .frame(width: max(0, knobX + knobSize / 2 - unityX), height: trackHeight)
-                            .offset(x: unityX)
-                    }
-
                     Capsule(style: .continuous)
-                        .fill(Color.primary.opacity(0.4))
-                        .frame(width: 2, height: trackHeight + 6)
-                        .offset(x: unityX - 1)
+                        .fill(Color.primary.opacity(0.28))
+                        .frame(width: 1.5, height: height * 0.42)
+                        .offset(x: unityX - 0.75)
                 }
 
-                Circle()
-                    .fill(.white)
-                    .shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)
-                    .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 0.5))
-                    .frame(width: knobSize, height: knobSize)
-                    .scaleEffect(knobScale)
-                    .offset(x: knobX)
+                trackContent(color: .primary, valueColor: valueColor)
+
+                trackContent(color: Color.black.opacity(0.78), valueColor: Color.black.opacity(0.78))
+                    .mask(alignment: .leading) {
+                        Rectangle().frame(width: fillWidth)
+                    }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .contentShape(Rectangle())
-            .gesture(dragGesture(travel: travel))
+            .frame(width: width, height: height)
+            .clipShape(Capsule(style: .continuous))
+            .contentShape(Capsule(style: .continuous))
+            .gesture(dragGesture(width: width))
         }
-        .frame(height: knobSize + 4)
-        .opacity(isEnabled ? 1 : 0.7)
+        .frame(height: height)
+        .scaleEffect(isDragging && !reduceMotion ? 1.015 : 1)
+        .opacity(isEnabled ? 1 : 0.55)
         .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.12), value: isHovering)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.12), value: isDragging)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.14), value: isHovering)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.14), value: isDragging)
         .focusable(isEnabled)
+        .modifier(FocusRingHidden())
         .onMoveCommand(perform: handleMoveCommand)
         .accessibilityRepresentation {
             Slider(value: $value, in: scale.range, step: 1) {
@@ -128,24 +130,77 @@ struct VolumeSlider: View {
         }
     }
 
+    /// White fill up to unity, orange boost segment after it. Its trailing end is a capsule at
+    /// least as wide as the track is tall, shifted left as the fill shrinks so it leaves the track
+    /// (which clips it) instead of turning into a small circle.
+    private func fill(width: CGFloat, unityX: CGFloat?) -> some View {
+        let normalWidth = min(width, unityX ?? width)
+        let capsuleWidth = max(width, height)
+        // Extra fill on the left that the offset below pushes out of the track.
+        let hiddenWidth = capsuleWidth - width
+
+        return HStack(spacing: 0) {
+            Rectangle()
+                .fill(fillColor)
+                .frame(width: hiddenWidth + normalWidth)
+
+            Rectangle()
+                .fill(boostColor)
+                .frame(width: max(0, width - normalWidth))
+        }
+        .frame(width: capsuleWidth, height: height, alignment: .leading)
+        .clipShape(Capsule(style: .continuous))
+        .offset(x: width - capsuleWidth)
+    }
+
+    private func trackContent(color: Color, valueColor: Color) -> some View {
+        HStack(spacing: 6) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: height * 0.4, weight: .semibold))
+                    .frame(width: height * 0.5)
+            }
+
+            if let title {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 4)
+
+            if showsValue {
+                Text(isMuted ? "Muted" : "\(Int(value.rounded()))%")
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(valueColor)
+            }
+        }
+        .foregroundStyle(color)
+        .padding(.leading, systemImage == nil ? height * 0.42 : height * 0.25)
+        .padding(.trailing, height * 0.38)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private var fillColor: Color {
-        isEnabled ? .accentColor : Color.secondary.opacity(0.6)
+        isMuted ? Color.primary.opacity(0.22) : Color.white
     }
 
     private var boostColor: Color {
-        isEnabled ? .orange : Color.secondary.opacity(0.6)
+        isMuted ? Color.primary.opacity(0.22) : Color.orange
     }
 
-    private var knobScale: CGFloat {
-        guard isEnabled else {
-            return 1
-        }
-
-        return isDragging ? 1.12 : (isHovering ? 1.06 : 1)
+    private var valueColor: Color {
+        .secondary
     }
 
     private var accessibilityValueText: String {
         let percent = Int(value.rounded())
+        if isMuted {
+            return "Muted, \(percent) percent"
+        }
+
         if let unity = scale.unity, value > unity {
             return "\(percent) percent, boosted"
         }
@@ -153,11 +208,26 @@ struct VolumeSlider: View {
         return "\(percent) percent"
     }
 
-    private func dragGesture(travel: CGFloat) -> some Gesture {
+    private func dragGesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { gesture in
                 guard isEnabled else {
                     return
+                }
+
+                if !isDragging && !isPressingIcon,
+                   onIconTap != nil, systemImage != nil, gesture.startLocation.x < height {
+                    isPressingIcon = true
+                }
+
+                if isPressingIcon {
+                    let moved = abs(gesture.translation.width) > Self.iconTapSlop
+                        || abs(gesture.translation.height) > Self.iconTapSlop
+                    guard moved else {
+                        return
+                    }
+
+                    isPressingIcon = false
                 }
 
                 if !isDragging {
@@ -165,7 +235,7 @@ struct VolumeSlider: View {
                     onEditingChanged(true)
                 }
 
-                let fraction = Double((gesture.location.x - knobSize / 2) / travel)
+                let fraction = Double(gesture.location.x / width)
                 let newValue = scale.settledValue(for: scale.value(for: fraction))
                 if let unity = scale.unity, newValue == unity, value != unity {
                     NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -176,6 +246,12 @@ struct VolumeSlider: View {
                 }
             }
             .onEnded { _ in
+                if isPressingIcon {
+                    isPressingIcon = false
+                    onIconTap?()
+                    return
+                }
+
                 guard isDragging else {
                     return
                 }
@@ -203,5 +279,16 @@ struct VolumeSlider: View {
         onEditingChanged(true)
         value = (value + delta).clamped(to: scale.range)
         onEditingChanged(false)
+    }
+}
+
+/// The slider draws its own state, so the system focus ring would only add a stray outline.
+private struct FocusRingHidden: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 14, *) {
+            content.focusEffectDisabled()
+        } else {
+            content
+        }
     }
 }
