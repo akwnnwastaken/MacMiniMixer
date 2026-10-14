@@ -389,7 +389,7 @@ struct ProductRealControlState: Equatable, Sendable {
     static func gainOption(for app: MixerAppItem) -> ProcessTapReplayGainOption {
         let scalar: Float = app.isMuted
             ? 0
-            : Float(app.volume.clamped(to: AppConstants.volumeRange) / AppConstants.volumeRange.upperBound)
+            : Float(app.volume.clamped(to: AppConstants.appVolumeRange) / AppConstants.unityAppVolume)
         let percent = Int((Double(scalar) * 100).rounded())
 
         return ProcessTapReplayGainOption(

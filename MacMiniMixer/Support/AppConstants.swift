@@ -2,7 +2,15 @@ import Foundation
 
 enum AppConstants {
     static let appTitle = "MacMiniMixer"
+    /// System output volume, 0–100. The device's volume scalar is capped at 1.0, so this range
+    /// cannot be boosted.
     static let volumeRange: ClosedRange<Double> = 0...100
+    /// Per-app volume, 0–200. Values above `unityAppVolume` boost the app above its own level: a
+    /// Real row's replayed audio is multiplied by `volume / unityAppVolume` (up to 2.0), and the
+    /// output copier soft-limits the result so it never exceeds full scale.
+    static let appVolumeRange: ClosedRange<Double> = 0...200
+    /// The per-app volume that leaves an app at its own level (gain 1.0).
+    static let unityAppVolume: Double = 100
     static let outputDeviceRefreshInterval: TimeInterval = 2
     static let systemVolumeRefreshInterval: TimeInterval = 1
     static let statusMessageAutoClearDelay: TimeInterval = 2.5
@@ -36,6 +44,9 @@ enum AppConstants {
     static let developerModeDefaultsKey = "MacMiniMixerDeveloperMode"
     static let processTapLiveFadeInDuration: TimeInterval = 0.06
     static let processTapLiveFadeOutDuration: TimeInterval = 0.04
+    /// After the fade-in, a gain change (slider drag) moves toward the new target at no more than
+    /// 1.0 of gain per this duration, so jumps (e.g. 0.5 → 1.5) don't click.
+    static let processTapLiveGainSmoothingDuration: TimeInterval = 0.02
     /// Live output path for Process Tap live control (Product Real and Advanced live). The direct
     /// aggregate path renders the tap straight into the output device on one clock (no AudioQueue),
     /// which removes the two-clock hand-off behind random crackle. A/B fallback without a rebuild:

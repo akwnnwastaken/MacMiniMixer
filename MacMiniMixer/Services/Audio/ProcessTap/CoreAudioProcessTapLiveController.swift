@@ -1050,6 +1050,9 @@ struct ProcessTapLiveGainRamp {
     private var fadeOutStartGain: Float = 0
     private var currentGain: Float = 0
     private var isFadingOut = false
+    /// Largest gain change per frame once the fade-in is done. Infinite (an immediate jump) for a
+    /// ramp built without a format.
+    private var maxGainStepPerFrame: Float = .infinity
 
     init() {}
 
@@ -1067,6 +1070,10 @@ struct ProcessTapLiveGainRamp {
             duration: AppConstants.processTapLiveFadeOutDuration,
             sampleRate: sampleRate
         )
+        maxGainStepPerFrame = 1 / Float(Self.frameCount(
+            duration: AppConstants.processTapLiveGainSmoothingDuration,
+            sampleRate: sampleRate
+        ))
     }
 
     mutating func beginFadeOut() {
@@ -1097,8 +1104,11 @@ struct ProcessTapLiveGainRamp {
         }
 
         guard fadeInRemainingFrames > 0 else {
-            currentGain = sanitizedTargetGain
-            return sanitizedTargetGain
+            let delta = sanitizedTargetGain - currentGain
+            currentGain = abs(delta) <= maxGainStepPerFrame
+                ? sanitizedTargetGain
+                : currentGain + (delta > 0 ? maxGainStepPerFrame : -maxGainStepPerFrame)
+            return currentGain
         }
 
         let completedFrames = fadeInTotalFrames - fadeInRemainingFrames + 1

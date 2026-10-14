@@ -75,6 +75,22 @@ final class ProcessTapOutputBufferCopierTests: XCTestCase {
         XCTAssertFloatArrayEqual(Array(output.prefix(2)), [0.25, -0.125])
     }
 
+    func testBoostedGainIsSoftLimitedBelowFullScale() {
+        let (result, output) = copy(
+            buffers: [InputBuffer(channels: 1, samples: [0.8, -0.8, 0.3])],
+            outputChannelCount: 1,
+            outputFrameCapacity: 3,
+            gain: 2.0
+        )
+
+        XCTAssertEqual(result?.frameCount, 3)
+        XCTAssertLessThanOrEqual(abs(output[0]), 1.0)
+        XCTAssertGreaterThan(output[0], 0.9)
+        XCTAssertEqual(output[1], -output[0])
+        // 0.3 × 2 = 0.6 is below the limiter threshold, so it passes unchanged.
+        XCTAssertEqual(output[2], 0.6, accuracy: 0.000_001)
+    }
+
     func testPlanarMissingInputBufferWritesZeroForThatChannel() {
         let (result, output) = copy(
             buffers: [
@@ -260,6 +276,19 @@ private struct SequenceFrameGainProvider: ProcessTapOutputFrameGainProviding {
 }
 
 final class ProcessTapDirectOutputCopierTests: XCTestCase {
+    func testBoostedGainIsSoftLimitedBelowFullScale() {
+        let (_, output) = render(
+            input: [InputBuffer(channels: 2, samples: [0.9, -0.9, 0.2, 0.25])],
+            output: [outputBuffer(channels: 2, frameCount: 2)],
+            gain: 2.0
+        )
+
+        XCTAssertTrue(output[0].allSatisfy { abs($0) <= 1.0 })
+        XCTAssertGreaterThan(output[0][0], 0.9)
+        XCTAssertEqual(output[0][1], -output[0][0])
+        assertSamples(Array(output[0].suffix(2)), [0.4, 0.5])
+    }
+
     func testInterleavedStereoInputToInterleavedStereoOutputAppliesGain() {
         let (result, output) = render(
             input: [InputBuffer(channels: 2, samples: [0.1, 0.2, 0.3, 0.4])],
@@ -398,12 +427,13 @@ final class ProcessTapDirectOutputCopierTests: XCTestCase {
     func testPerFrameGainAppliesToEveryChannelOfTheFrame() {
         var gainProvider = SequenceFrameGainProvider(gains: [0, 0.5, 1])
         let (_, output) = render(
-            input: [InputBuffer(channels: 1, samples: [1, 1, 1])],
+            // Below the soft limiter's threshold, so the per-frame gain is the only change.
+            input: [InputBuffer(channels: 1, samples: [0.8, 0.8, 0.8])],
             output: [outputBuffer(channels: 2, frameCount: 3)],
             gainProvider: &gainProvider
         )
 
-        assertSamples(output[0], [0, 0, 0.5, 0.5, 1, 1])
+        assertSamples(output[0], [0, 0, 0.4, 0.4, 0.8, 0.8])
     }
 
     func testOutputWithoutBuffersRendersNothing() {
@@ -1242,5 +1272,70 @@ final class ProcessTapDirectOutputResamplerTests: XCTestCase {
         }
 
         return Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float32.self), count: sampleCount))
+    }
+}
+
+final class ProcessTapSoftLimiterTests: XCTestCase {
+    func testIsIdentityUpToThreshold() {
+        for sample: Float in [0, 0.25, -0.5, 0.9, -0.9] {
+            XCTAssertEqual(ProcessTapSoftLimiter.limit(sample), sample)
+        }
+    }
+
+    func testStaysWithinFullScaleAndKeepsSignAndOrder() {
+        let inputs: [Float] = [0.95, 1.0, 1.5, 2.0, 10]
+        let outputs = inputs.map(ProcessTapSoftLimiter.limit)
+
+        XCTAssertTrue(outputs.allSatisfy { $0 > ProcessTapSoftLimiter.threshold && $0 <= 1.0 })
+        XCTAssertEqual(outputs, outputs.sorted())
+        XCTAssertEqual(ProcessTapSoftLimiter.limit(-1.5), -ProcessTapSoftLimiter.limit(1.5))
+    }
+}
+
+final class ProcessTapLiveGainRampTests: XCTestCase {
+    // 1 kHz keeps the frame math readable: fade-in 60 frames, fade-out 40, smoothing 20.
+    private let format = ProcessTapLiveOutputFormat(sampleRate: 1_000, channelCount: 2)
+
+    func testFadeInReachesTargetAfterFadeInDuration() {
+        var ramp = ProcessTapLiveGainRamp(format: format)
+        let gains = (0..<60).map { _ in ramp.nextGain(targetGain: 0.5) }
+
+        XCTAssertLessThan(gains[0], 0.05)
+        XCTAssertEqual(gains[59], 0.5, accuracy: 0.000_001)
+    }
+
+    func testTargetChangeAfterFadeInMovesGraduallyToBoostedGain() {
+        var ramp = ProcessTapLiveGainRamp(format: format)
+        for _ in 0..<60 {
+            _ = ramp.nextGain(targetGain: 0.5)
+        }
+
+        let gains = (0..<20).map { _ in ramp.nextGain(targetGain: 1.5) }
+
+        XCTAssertEqual(gains[0], 0.55, accuracy: 0.000_01)
+        XCTAssertEqual(gains, gains.sorted())
+        XCTAssertEqual(gains[19], 1.5, accuracy: 0.000_01)
+        XCTAssertEqual(ramp.nextGain(targetGain: 1.5), 1.5, accuracy: 0.000_01)
+    }
+
+    func testFadeOutFromBoostedGainReachesSilence() {
+        var ramp = ProcessTapLiveGainRamp(format: format)
+        for _ in 0..<100 {
+            _ = ramp.nextGain(targetGain: 2.0)
+        }
+
+        ramp.beginFadeOut()
+        let gains = (0..<40).map { _ in ramp.nextGain(targetGain: 2.0) }
+
+        XCTAssertLessThan(gains[0], 2.0)
+        XCTAssertEqual(gains[39], 0)
+        XCTAssertEqual(ramp.nextGain(targetGain: 2.0), 0)
+    }
+
+    func testRampWithoutFormatJumpsToTarget() {
+        var ramp = ProcessTapLiveGainRamp()
+
+        XCTAssertEqual(ramp.nextGain(targetGain: 0.25), 0.25)
+        XCTAssertEqual(ramp.nextGain(targetGain: 1.75), 1.75)
     }
 }

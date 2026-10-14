@@ -382,7 +382,7 @@ struct MixerPanelView: View {
                                 },
                                 volume: Binding(
                                     get: { viewModel.volume(for: app.id) },
-                                    set: { viewModel.setAppVolume($0, for: app.id) }
+                                    set: { viewModel.setAppVolume($0.rounded(), for: app.id) }
                                 ),
                                 isMuted: Binding(
                                     get: { viewModel.isMuted(for: app.id) },

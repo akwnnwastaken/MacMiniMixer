@@ -31,10 +31,14 @@ struct MixerAppRowView: View {
                 .help(isOutputActive ? "Active audio output" : "No active audio output detected")
                 .accessibilityValue(Text(isOutputActive ? "Active audio output" : "No active audio output detected"))
 
-            Slider(value: $volume, in: AppConstants.volumeRange, step: 1)
+            // No `step:` — on macOS a stepped Slider draws one tick mark per step. The panel's
+            // binding rounds the value instead.
+            Slider(value: $volume, in: AppConstants.appVolumeRange)
                 .disabled(isMuted || isExperimentalControlResolving)
                 .accessibilityLabel(Text("\(app.name) volume"))
-                .accessibilityValue(Text("\(Int(volume.rounded())) percent"))
+                .accessibilityValue(Text(volume > AppConstants.unityAppVolume
+                    ? "\(Int(volume.rounded())) percent, boosted"
+                    : "\(Int(volume.rounded())) percent"))
                 .accessibilityHint(Text(isExperimentalControlResolving
                     ? "Finding the audio helper for this app"
                     : isExperimentalControlActive

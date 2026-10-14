@@ -942,7 +942,7 @@ final class MixerViewModel: ObservableObject {
             return
         }
 
-        let clampedVolume = volume.clamped(to: AppConstants.volumeRange)
+        let clampedVolume = volume.clamped(to: AppConstants.appVolumeRange)
         apps[index].volume = clampedVolume
         audioController.setVolume(clampedVolume, for: appID)
 
