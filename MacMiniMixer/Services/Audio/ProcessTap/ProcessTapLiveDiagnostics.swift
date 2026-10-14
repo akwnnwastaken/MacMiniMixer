@@ -90,6 +90,13 @@ struct ProcessTapLiveDiagnostics: Equatable, Sendable {
         return nil
     }
 
+    /// The "No app audio detected" state: callbacks arrive but stay silent. A denied System Audio
+    /// Recording permission can surface this way (silent buffers instead of a create error), so the
+    /// live card offers a hint to check it. Also true when the app is simply not playing.
+    var suggestsSystemAudioRecordingCheck: Bool {
+        !audioDetected && callbackCount > 0
+    }
+
     /// Compact, one-line summary of the diagnostic-only timing/starvation signals, for the live
     /// Advanced diagnostics card (kept off the normal user banner). Pure/testable so the live card
     /// does not depend on the truncation-prone stop-result detail string.

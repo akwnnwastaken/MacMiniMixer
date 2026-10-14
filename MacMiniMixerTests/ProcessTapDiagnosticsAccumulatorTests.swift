@@ -323,6 +323,13 @@ final class ProcessTapRealAudioStatusTests: XCTestCase {
         XCTAssertEqual(diagnostics.realAudioStatusText, "No app audio detected")
     }
 
+    func testSilentSessionSuggestsCheckingSystemAudioRecordingPermission() {
+        // A denied permission can surface as silent buffers instead of a create error.
+        XCTAssertTrue(makeDiagnostics(callbackCount: 12, peakLevel: 0.0004).suggestsSystemAudioRecordingCheck)
+        XCTAssertFalse(makeDiagnostics(callbackCount: 0, peakLevel: 0).suggestsSystemAudioRecordingCheck)
+        XCTAssertFalse(makeDiagnostics(callbackCount: 12, peakLevel: 0.3).suggestsSystemAudioRecordingCheck)
+    }
+
     func testStartingAudioShownWhileRealAudioFlowsButQueueStillWarmingUp() {
         let diagnostics = makeDiagnostics(callbackCount: 12, peakLevel: 0.3, isWarmingUpOutput: true)
         XCTAssertEqual(diagnostics.realAudioStatusText, "Starting audio…")

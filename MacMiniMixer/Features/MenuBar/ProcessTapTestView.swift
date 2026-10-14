@@ -641,6 +641,13 @@ struct ProcessTapTestView: View {
                     .accessibilityLabel(Text(realAudioStatusText))
             }
 
+            // Silent buffers can also mean System Audio Recording is denied (no create error).
+            if diagnostics.suggestsSystemAudioRecordingCheck {
+                Text("Playing audio? Check System Audio Recording permission.")
+                    .lineLimit(2)
+                openSystemSettingsButton
+            }
+
             // Second line: diagnostic-only jitter/starvation signals (drops/fail do not catch
             // these). Reliable live visibility instead of the truncation-prone stop-result detail.
             Text(diagnostics.timingSummaryText)
