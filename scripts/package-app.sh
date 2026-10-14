@@ -150,10 +150,9 @@ fi
 # signature ("--sign -") satisfies that requirement without any certificate.
 #
 # Ad-hoc signing is NOT Developer ID signing and NOT notarization: Gatekeeper
-# still blocks the first launch of a downloaded copy. Users must right-click ->
-# Open (macOS 13-14), use System Settings -> Privacy & Security -> "Open Anyway"
-# (macOS 15+), or run:
-#   xattr -dr com.apple.quarantine /Applications/MacMiniMixer.app
+# still blocks the first launch of a downloaded copy. Users must Control-click ->
+# Open (macOS 13-14), or use System Settings -> Privacy & Security -> "Open Anyway"
+# (macOS 15+).
 # See docs/RELEASING.md for the future Developer ID + notarization path.
 echo "==> Ad-hoc signing"
 # Extended attributes (Finder info, resource forks) make codesign fail with

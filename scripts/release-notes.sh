@@ -67,7 +67,6 @@ look for its icon in the menu bar.
   - macOS 13–14: Control-click (right-click) `MacMiniMixer.app` → **Open** → **Open**.
   - macOS 15 or later: try to open the app once, then go to **System Settings → Privacy &
     Security** and click **Open Anyway**.
-  - Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/MacMiniMixer.app`
 - **Requirements:** the app runs on **macOS 13.0 or later**. Per-app audio features (Product
   Real Control and other Process Tap features) require **macOS 14.2 or later**.
 - **Product Real Control is experimental, always on, and has no app-count limit.** There is no
