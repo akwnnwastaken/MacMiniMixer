@@ -26,6 +26,7 @@
 		9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */; };
 		9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */; };
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
+		9B7D1A362C8F4A9A8B2D0201 /* VolumeSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
 		9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */; };
@@ -75,6 +76,7 @@
 		9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */; };
 		9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */; };
 		9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */; };
+		9B7D1AB02C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB32C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift */; };
 		9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */; };
 		9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */; };
 		9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */; };
@@ -132,6 +134,7 @@
 		9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
+		9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSlider.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
 		9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewAudioStateController.swift; sourceTree = "<group>"; };
@@ -182,6 +185,7 @@
 		9B7D1AA52C8F4A9A8B2D0101 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		9B7D1AC22C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopier.swift; sourceTree = "<group>"; };
 		9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComparableClampedTests.swift; sourceTree = "<group>"; };
+		9B7D1AB32C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSliderScaleTests.swift; sourceTree = "<group>"; };
 		9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapReplayGainOptionTests.swift; sourceTree = "<group>"; };
 		9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapOutputBufferCopierTests.swift; sourceTree = "<group>"; };
@@ -329,6 +333,7 @@
 				9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */,
 				9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */,
 				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
+				9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */,
 				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
 				9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */,
 				9B7D1A692C8F4A9A8B2D0101 /* MixerStatusMessage.swift */,
@@ -414,6 +419,7 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1AB32C8F4A9A8B2D0101 /* ComparableClampedTests.swift */,
+				9B7D1AB32C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift */,
 				9B7D1AB42C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift */,
 				9B7D1AB52C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift */,
 				9B7D1AC42C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift */,
@@ -559,6 +565,7 @@
 				9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */,
 				9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
+				9B7D1A362C8F4A9A8B2D0201 /* VolumeSlider.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
 				9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */,
@@ -615,6 +622,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9B7D1AB02C8F4A9A8B2D0101 /* ComparableClampedTests.swift in Sources */,
+				9B7D1AB02C8F4A9A8B2D0201 /* VolumeSliderScaleTests.swift in Sources */,
 				9B7D1AB12C8F4A9A8B2D0101 /* ProcessTapReplayGainOptionTests.swift in Sources */,
 				9B7D1AB22C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulatorTests.swift in Sources */,
 				9B7D1AC32C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopierTests.swift in Sources */,

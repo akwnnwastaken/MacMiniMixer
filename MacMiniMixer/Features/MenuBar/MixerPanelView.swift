@@ -91,49 +91,53 @@ struct MixerPanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+        HStack(spacing: 8) {
+            Text(AppConstants.appTitle)
+                .font(.system(size: 14, weight: .semibold))
+                .fixedSize()
+                .accessibilityAddTraits(.isHeader)
 
-                Text(AppConstants.appTitle)
-                    .font(.headline.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-            }
+            Spacer(minLength: 8)
 
-            Spacer()
-
-            Button {
-                isShowingOutputDevices.toggle()
-            } label: {
-                Image(systemName: isShowingOutputDevices ? "airplayaudio.circle.fill" : "airplayaudio")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Output devices"))
-            .accessibilityValue(Text(isShowingOutputDevices ? "Expanded" : "Collapsed"))
-            .accessibilityHint(Text(isShowingOutputDevices ? "Hides the output device list" : "Shows the output device list"))
-            .foregroundStyle(isShowingOutputDevices ? .blue : .secondary)
-            .background(headerButtonBackground(isHighlighted: isShowingOutputDevices))
-            .help("Output devices")
+            outputDeviceButton
 
             moreMenu
         }
-        .padding(.horizontal, 3)
-        .padding(.top, 1)
+        .frame(height: AppConstants.Layout.headerButtonSize)
     }
 
-    private func headerButtonBackground(isHighlighted: Bool) -> some View {
-        Circle()
-            .fill(.thinMaterial.opacity(isHighlighted ? 0.95 : 0.55))
-            .overlay(
-                Circle()
-                    .stroke(.white.opacity(isHighlighted ? 0.22 : 0.12), lineWidth: 1)
-            )
+    /// Shows the current output device and opens the device list below the header.
+    private var outputDeviceButton: some View {
+        Button {
+            isShowingOutputDevices.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Text(viewModel.selectedOutputDeviceName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(isShowingOutputDevices ? Color.accentColor : .secondary)
+                    .rotationEffect(.degrees(isShowingOutputDevices ? 180 : 0))
+            }
+            .padding(.horizontal, 11)
+            .frame(height: AppConstants.Layout.headerButtonSize)
+            .frame(maxWidth: AppConstants.Layout.deviceButtonMaxWidth)
+            .background(chipBackground(isHighlighted: isShowingOutputDevices))
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Output device")
+        .accessibilityLabel(Text("Output device: \(viewModel.selectedOutputDeviceName)"))
+        .accessibilityValue(Text(isShowingOutputDevices ? "Expanded" : "Collapsed"))
+        .accessibilityHint(Text(isShowingOutputDevices ? "Hides the output device list" : "Shows the output device list"))
+    }
+
+    private func chipBackground(isHighlighted: Bool) -> some View {
+        Capsule(style: .continuous)
+            .fill(isHighlighted ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.08))
     }
 
     /// Secondary actions kept out of the main panel body.
@@ -175,10 +179,10 @@ struct MixerPanelView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
-                .background(headerButtonBackground(isHighlighted: false))
+                .background(chipBackground(isHighlighted: false))
                 .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
@@ -248,10 +252,10 @@ struct MixerPanelView: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
                 .fill(.thinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
                         .stroke(Color.orange.opacity(0.24), lineWidth: 1)
                 )
         )
@@ -268,11 +272,10 @@ struct MixerPanelView: View {
     }
 
     private var systemOutputSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("System Output")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Output")
+                    .font(.system(size: 13, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)
 
                 if !viewModel.isSystemOutputVolumeWritable {
@@ -281,38 +284,44 @@ struct MixerPanelView: View {
 
                 Spacer()
 
-                Text(viewModel.selectedOutputDeviceName)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .accessibilityLabel(Text("Output device: \(viewModel.selectedOutputDeviceName)"))
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text("\(Int(viewModel.systemVolume.rounded()))")
+                        .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                    Text("%")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(viewModel.isSystemOutputMuted ? .secondary : .primary)
+                .accessibilityHidden(true)
             }
 
-            HStack(spacing: AppConstants.Layout.rowSpacing) {
+            HStack(spacing: 10) {
                 Button {
                     viewModel.toggleSystemOutputMuted()
                 } label: {
-                    rowIcon(
-                        systemName: viewModel.isSystemOutputMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                        isMuted: viewModel.isSystemOutputMuted
-                    )
+                    Image(systemName: viewModel.isSystemOutputMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(viewModel.isSystemOutputMuted ? .secondary : .primary)
+                        .frame(width: AppConstants.Layout.headerButtonSize, height: AppConstants.Layout.headerButtonSize)
+                        .background(Circle().fill(Color.primary.opacity(0.08)))
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .help(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output")
                 .accessibilityLabel(Text(viewModel.isSystemOutputMuted ? "Unmute system output" : "Mute system output"))
 
-                Text("Output")
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .frame(width: AppConstants.Layout.appNameWidth, alignment: .leading)
-
-                Slider(
+                VolumeSlider(
                     value: Binding(
                         get: { viewModel.systemVolume },
                         set: { viewModel.setSystemVolume($0) }
                     ),
-                    in: AppConstants.volumeRange,
-                    step: 1,
+                    scale: VolumeSliderScale(range: AppConstants.volumeRange, unity: nil),
+                    accessibilityLabel: "System output volume",
+                    accessibilityHint: viewModel.isSystemOutputVolumeWritable
+                        ? "Adjusts the system output volume"
+                        : "This output device does not expose writable volume",
+                    trackHeight: 6,
+                    knobSize: 20,
                     onEditingChanged: { isEditing in
                         isEditingSystemOutputSlider = isEditing
 
@@ -321,16 +330,9 @@ struct MixerPanelView: View {
                         }
                     }
                 )
-                .accessibilityLabel(Text("System output volume"))
-                .accessibilityValue(Text("\(Int(viewModel.systemVolume.rounded())) percent"))
-                .accessibilityHint(Text(viewModel.isSystemOutputVolumeWritable
-                    ? "Adjusts the system output volume"
-                    : "This output device does not expose writable volume"))
-
-                volumeText(viewModel.systemVolume)
             }
         }
-        .sectionStyle(tintOpacity: 0.32)
+        .sectionStyle()
     }
 
     private var nonWritableVolumeBadge: some View {
@@ -355,18 +357,46 @@ struct MixerPanelView: View {
     }
 
     private var appMixerSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Applications")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 2)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Apps")
+                    .font(.system(size: 11, weight: .semibold))
+                    .textCase(.uppercase)
+                    .kerning(0.4)
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+
+                Spacer()
+
+                if !viewModel.visibleMixerApps.isEmpty {
+                    Text("\(viewModel.visibleMixerApps.count)")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .accessibilityLabel(Text("\(viewModel.visibleMixerApps.count) apps"))
+                }
+            }
+            .padding(.horizontal, 8)
 
             if viewModel.visibleMixerApps.isEmpty {
-                Text(viewModel.apps.isEmpty ? "No running apps found" : "No audio-relevant apps found")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.appListMinHeight)
+                VStack(spacing: 4) {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+
+                    Text(viewModel.apps.isEmpty ? "No running apps found" : "No apps are playing audio")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    if !viewModel.apps.isEmpty && !viewModel.showAllApps {
+                        Button("Show all apps") {
+                            viewModel.setShowAllApps(true)
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.appListMinHeight)
             } else {
                 ScrollView(.vertical) {
                     VStack(spacing: AppConstants.Layout.rowInnerSpacing) {
@@ -382,7 +412,7 @@ struct MixerPanelView: View {
                                 },
                                 volume: Binding(
                                     get: { viewModel.volume(for: app.id) },
-                                    set: { viewModel.setAppVolume($0.rounded(), for: app.id) }
+                                    set: { viewModel.setAppVolume($0, for: app.id) }
                                 ),
                                 isMuted: Binding(
                                     get: { viewModel.isMuted(for: app.id) },
@@ -391,13 +421,11 @@ struct MixerPanelView: View {
                             )
                         }
                     }
-                    .padding(.trailing, 2)
                 }
                 .scrollIndicators(.automatic)
                 .frame(height: appListHeight)
             }
         }
-        .sectionStyle(tintOpacity: 0.22)
     }
 
     private var advancedSection: some View {
@@ -497,15 +525,7 @@ struct MixerPanelView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(AppConstants.Layout.sectionPadding)
-        .background(
-            RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                .fill(.thinMaterial.opacity(0.14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                        .stroke(.white.opacity(0.1), lineWidth: 1)
-                )
-        )
+        .sectionStyle()
     }
 
     private var appListHeight: CGFloat {
@@ -559,13 +579,6 @@ struct MixerPanelView: View {
                 viewModel.refreshOutputDevices()
             }
         }
-    }
-
-    private func volumeText(_ volume: Double) -> some View {
-        Text("\(Int(volume.rounded()))")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .frame(width: AppConstants.Layout.volumeValueWidth, alignment: .trailing)
     }
 
     private func statusMessageView(_ message: MixerStatusMessage) -> some View {
@@ -635,36 +648,11 @@ struct MixerPanelView: View {
 
     private var panelBackground: some View {
         RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
+            .fill(.regularMaterial)
             .overlay(
                 RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
-                    .stroke(.white.opacity(0.24), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: AppConstants.Layout.panelCornerRadius, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .white.opacity(0.04)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
-            }
-    }
-
-    private func rowIcon(systemName: String, isMuted: Bool) -> some View {
-        ZStack {
-            Circle()
-                .fill(.quaternary.opacity(0.5))
-
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isMuted ? .tertiary : .secondary)
-        }
-        .frame(width: AppConstants.Layout.rowIconSize, height: AppConstants.Layout.rowIconSize)
-        .contentShape(Circle())
-        .animation(.snappy(duration: 0.16), value: isMuted)
     }
 }
 
@@ -705,15 +693,12 @@ private extension MixerStatusMessage.Style {
 }
 
 private extension View {
-    func sectionStyle(tintOpacity: Double) -> some View {
+    /// Card used for the Output section and the Advanced tools.
+    func sectionStyle() -> some View {
         padding(AppConstants.Layout.sectionPadding)
             .background(
                 RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                    .fill(.thinMaterial.opacity(tintOpacity))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppConstants.Layout.cornerRadius, style: .continuous)
-                            .stroke(.white.opacity(0.14), lineWidth: 1)
-                    )
+                    .fill(Color.primary.opacity(0.05))
             )
     }
 }

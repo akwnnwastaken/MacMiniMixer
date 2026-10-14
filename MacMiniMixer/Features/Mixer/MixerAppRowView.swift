@@ -13,8 +13,10 @@ struct MixerAppRowView: View {
     @Binding var volume: Double
     @Binding var isMuted: Bool
 
+    @State private var isHovering = false
+
     var body: some View {
-        HStack(spacing: AppConstants.Layout.rowSpacing) {
+        HStack(spacing: 10) {
             Button {
                 isMuted.toggle()
             } label: {
@@ -24,42 +26,66 @@ struct MixerAppRowView: View {
             .help(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)")
             .accessibilityLabel(Text(isMuted ? "Unmute \(app.name)" : "Mute \(app.name)"))
 
-            Text(app.name)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-                .frame(width: AppConstants.Layout.appNameWidth, alignment: .leading)
-                .help(isOutputActive ? "Active audio output" : "No active audio output detected")
-                .accessibilityValue(Text(isOutputActive ? "Active audio output" : "No active audio output detected"))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(app.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .accessibilityValue(Text(isOutputActive ? "Playing audio" : "Not playing"))
 
-            // No `step:` — on macOS a stepped Slider draws one tick mark per step. The panel's
-            // binding rounds the value instead.
-            Slider(value: $volume, in: AppConstants.appVolumeRange)
+                    if isOutputActive {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                            .transition(.scale.combined(with: .opacity))
+                            .help("Playing audio")
+                            .accessibilityHidden(true)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    experimentalControlAccessory
+
+                    Text("\(Int(volume.rounded()))%")
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(valueStyle)
+                        .frame(minWidth: AppConstants.Layout.volumeValueWidth, alignment: .trailing)
+                        .accessibilityHidden(true)
+                }
+
+                VolumeSlider(
+                    value: $volume,
+                    scale: VolumeSliderScale(range: AppConstants.appVolumeRange, unity: AppConstants.unityAppVolume),
+                    accessibilityLabel: "\(app.name) volume",
+                    accessibilityHint: isExperimentalControlResolving
+                        ? "Finding the audio helper for this app"
+                        : isExperimentalControlActive
+                            ? "Adjusts real audio level for this app. Above 100 percent boosts it."
+                            : "Adjusts the volume for this app. Above 100 percent boosts it."
+                )
                 .disabled(isMuted || isExperimentalControlResolving)
-                .accessibilityLabel(Text("\(app.name) volume"))
-                .accessibilityValue(Text(volume > AppConstants.unityAppVolume
-                    ? "\(Int(volume.rounded())) percent, boosted"
-                    : "\(Int(volume.rounded())) percent"))
-                .accessibilityHint(Text(isExperimentalControlResolving
-                    ? "Finding the audio helper for this app"
-                    : isExperimentalControlActive
-                        ? "Adjusts real audio level for this app"
-                        : "Adjusts the volume for this app"))
-
-            Text("\(Int(volume.rounded()))")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(isMuted ? .tertiary : .secondary)
-                .frame(width: AppConstants.Layout.volumeValueWidth, alignment: .trailing)
-
-            experimentalControlAccessory
+            }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .frame(height: AppConstants.Layout.appRowApproxHeight)
         .background(rowBackground)
-        .opacity(isMuted ? 0.68 : 1)
+        .opacity(isMuted ? 0.72 : 1)
+        .onHover { isHovering = $0 }
         .animation(.snappy(duration: 0.16), value: isMuted)
+        .animation(.snappy(duration: 0.16), value: isHovering)
+        .animation(.snappy(duration: 0.16), value: isOutputActive)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlActive)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlResolving)
         .animation(.snappy(duration: 0.16), value: isExperimentalControlPending)
+    }
+
+    private var valueStyle: Color {
+        if isMuted {
+            return Color.secondary.opacity(0.6)
+        }
+
+        return volume > AppConstants.unityAppVolume ? .orange : .secondary
     }
 
     private var appIcon: some View {
@@ -85,11 +111,11 @@ struct MixerAppRowView: View {
     private var mutedBadge: some View {
         ZStack {
             Circle()
-                .fill(Color.red)
+                .fill(.background)
 
-            Image(systemName: "xmark")
+            Image(systemName: "speaker.slash.fill")
                 .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.secondary)
         }
         .frame(width: AppConstants.Layout.rowIconMuteBadgeSize, height: AppConstants.Layout.rowIconMuteBadgeSize)
         .offset(x: 1, y: 1)
@@ -125,30 +151,14 @@ struct MixerAppRowView: View {
     private var rowBackground: some View {
         RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
             .fill(rowBackgroundFill)
-            .overlay(
-                RoundedRectangle(cornerRadius: AppConstants.Layout.rowCornerRadius, style: .continuous)
-                    .stroke(rowStrokeColor, lineWidth: 1)
-            )
     }
 
     private var rowBackgroundFill: Color {
         if isExperimentalControlActive {
-            return Color.orange.opacity(0.1)
+            return Color.orange.opacity(isHovering ? 0.12 : 0.08)
         }
 
-        return isMuted ? Color.red.opacity(0.065) : Color.white.opacity(0.045)
-    }
-
-    private var rowStrokeColor: Color {
-        if isOutputActive {
-            return Color.green.opacity(0.6)
-        }
-
-        if isExperimentalControlActive {
-            return Color.orange.opacity(0.26)
-        }
-
-        return isMuted ? Color.red.opacity(0.16) : Color.white.opacity(0.075)
+        return isHovering ? Color.primary.opacity(0.06) : Color.clear
     }
 
     @ViewBuilder
@@ -159,9 +169,6 @@ struct MixerAppRowView: View {
             realControlBadge
         } else if isExperimentalControlResolving {
             resolvingBadge
-        } else {
-            Color.clear
-                .frame(width: AppConstants.Layout.rowLiveButtonSize, height: AppConstants.Layout.rowLiveButtonSize)
         }
     }
 
@@ -170,7 +177,7 @@ struct MixerAppRowView: View {
         ProgressView()
             .controlSize(.mini)
             .scaleEffect(0.55)
-            .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowLiveButtonSize)
+            .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowBadgeHeight)
             .background(
                 Capsule(style: .continuous)
                     .fill(Color.orange.opacity(0.1))
@@ -188,7 +195,7 @@ struct MixerAppRowView: View {
             Text("Real")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.orange)
-                .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowLiveButtonSize)
+                .frame(width: AppConstants.Layout.rowLiveButtonSize + 6, height: AppConstants.Layout.rowBadgeHeight)
                 .background(
                     Capsule(style: .continuous)
                         .fill(Color.orange.opacity(0.14))
@@ -214,7 +221,7 @@ struct MixerAppRowView: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.orange.opacity(0.88))
         }
-        .frame(width: AppConstants.Layout.rowLiveButtonSize + 36, height: AppConstants.Layout.rowLiveButtonSize)
+        .frame(width: AppConstants.Layout.rowLiveButtonSize + 36, height: AppConstants.Layout.rowBadgeHeight)
         .background(
             Capsule(style: .continuous)
                 .fill(Color.orange.opacity(0.1))
