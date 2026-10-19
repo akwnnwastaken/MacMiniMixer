@@ -100,6 +100,10 @@ final class MixerStatusMessageControllerTests: XCTestCase {
 
         let first = makeMessage("first")
         let firstTask = controller.show(first, setMessage: setMessage, currentMessageID: currentID)
+        // Let the first clear reach the sleeper before the second exists: `releaseNext` resumes in
+        // arrival order, and two clears racing there could resume the second first and hang
+        // `await firstTask.value` (the CI hang on 2026-10-19).
+        await waitUntilPending(sleeper, 1)
 
         let second = makeMessage("second")
         let secondTask = controller.show(second, setMessage: setMessage, currentMessageID: currentID)
