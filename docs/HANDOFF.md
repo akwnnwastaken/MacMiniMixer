@@ -2,7 +2,7 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v2.5.3 / build 12 is the release for 2026-10-19
+changes. It is **not** a public release document — v2.5.4 / build 13 is the release for 2026-10-19
 (see `CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
@@ -41,6 +41,9 @@ changes. It is **not** a public release document — v2.5.3 / build 12 is the re
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
+- **v2.5.4 release (2026-10-19):** the live controller stops a direct-engine session as an output
+  change when the device's nominal sample rate moves (`ProcessTapLiveSession.startOutputSampleRate`);
+  the diagnostics/timing accumulators and the legacy gain read use try-locks on the audio thread.
 - **v2.5.3 release (2026-10-19):** `ProductRealStopCoordinator.scheduleReconnect` waits until the
   row's app runs and has a Core Audio process, then restarts it; used after an output-device change,
   after wake (`reconnectAfterWake`, rows captured at hard stop) and after an app relaunch (a
@@ -68,7 +71,7 @@ changes. It is **not** a public release document — v2.5.3 / build 12 is the re
   (pending-start tokens, rollback through the lifecycle gate), and a System Audio Recording hint on
   the Advanced card's silent "No app audio detected" state. v2.3.6 (2026-10-12) added the
   app-icon backplate removal and the green active-output row outline (macOS 14.2+).
-  `MARKETING_VERSION` is **`2.5.3`** and `CURRENT_PROJECT_VERSION` is `12` (all 4 build configurations).
+  `MARKETING_VERSION` is **`2.5.4`** and `CURRENT_PROJECT_VERSION` is `13` (all 4 build configurations).
   The owner selected this version/build and the existing ad-hoc-signed, not-notarized release
   workflow. Per-app audio remains experimental.
   Do not bump the version again until the owner asks. Final packaged-app System Audio Recording /

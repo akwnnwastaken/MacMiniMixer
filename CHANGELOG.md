@@ -16,6 +16,13 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.5.4] - 2026-10-19
+
+### Highlights
+- **Sample rate changes are followed.** Control restarts cleanly when another app changes the
+  output device's sample rate.
+- **Steadier audio.** The real-time audio callback no longer waits on locks.
+
 ### Fixed
 - **Sample rate changes are followed.** If a DAW, a game or Audio MIDI Setup changes the output
   device's sample rate while an app is controlled, the session now restarts with the new rate
