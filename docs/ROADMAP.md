@@ -384,8 +384,15 @@ characterization above and get its own small, test-first change plus a hardware 
 **Priority**: High | **Risk**: Medium
 
 Helper PIDs can change after browser navigation, tab close/reopen, helper restart, or app
-updates. Current cache validation and failure cleanup are conservative, but active-session
-recovery is still manual/user-triggered.
+updates.
+
+**Done (unreleased)**: a live session now stops when *any* tapped process exits (before, only the
+primary one was watched, so a replaced WebKit GPU process played on uncontrolled). If the app itself
+is still running, `ProductRealStopCoordinator` reconnects it at the row's level through
+`requestAutomaticStart`, at most once per 10 s per app, without the "app exited" warning.
+
+**Still open**: a helper that is *added* without one exiting is not picked up until the next
+restart.
 
 **Research questions**:
 - Should a stopped helper session offer a fresh resolution retry?
@@ -649,7 +656,8 @@ through one aggregate IOProc"):
 ### Release packaging and distribution — scaffolding done; notarization future
 
 **Priority**: Medium | **Risk**: Low-Medium | **Status**: Ad-hoc packaging implemented
-(`e0a60b4`); no release cut
+(`e0a60b4`); releases ship ad-hoc signed. **Notarization is on the owner's to-do list** (needs the
+paid Apple Developer membership).
 
 - `scripts/package-app.sh`: Release build, ad-hoc signed staged copy (required to launch arm64
   code; not notarized), `dist/MacMiniMixer-<version>[-<label>].zip` + `.sha256`.
@@ -663,6 +671,22 @@ through one aggregate IOProc"):
 that Process Tap capture works under the hardened runtime). The approved app bundle identifier is
 `com.akwnnwastaken.macminimixer`; System Audio Recording and Launch at Login still need final
 signed-build acceptance under this identity. A `.dmg` is optional. Keep this separate from runtime audio behavior.
+
+---
+
+### Remember per-app volume — planned (needs owner decision)
+
+**Priority**: High | **Risk**: Medium | **Status**: Planned, not started
+
+Today an app's level and mute live only in memory: when the app or MacMiniMixer restarts, the app
+plays at 100% again. Save the level per bundle id and apply it when the app runs again, like the
+Windows Volume Mixer.
+
+This changes the "nothing is captured until you touch a row" owner decision: an app the user has
+set once would start capturing on its own when it launches or first plays audio. Decide that first,
+then: where to store it (`UserDefaults` keyed by bundle id), when to start (on launch vs. on the
+first Core Audio output activity), a way to forget an app, and what happens for apps that are not
+tap-eligible.
 
 ---
 

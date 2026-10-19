@@ -16,6 +16,15 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Fixed
+- **Browser control no longer drops silently.** When Safari or Chrome replaces the process that
+  plays its audio (for example the WebKit GPU process), the new one was not controlled and played
+  at full volume. Control now reconnects on its own at the same level.
+
+### Changed
+- **The System Output mute button uses the Mac's own mute**, like the keyboard mute key, so the
+  slider keeps its level. Outputs without a mute control still mute by going to zero.
+
 ## [v2.5.0] - 2026-10-19
 
 ### Highlights

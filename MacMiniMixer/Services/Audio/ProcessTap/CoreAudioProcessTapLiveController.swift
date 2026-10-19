@@ -331,6 +331,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
 
         let session = ProcessTapLiveSession(
             pid: pid,
+            additionalPIDs: target.additionalProcessIdentifiers.filter { $0 != processIdentifier }.map { pid_t($0) },
             targetName: target.appName,
             gainState: gainState,
             startDefaultOutputDeviceID: startDefaultOutputDeviceID,
@@ -489,7 +490,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
                 return
             }
 
-            if !self.isProcessRunning(session.pid) {
+            if !self.isProcessRunning(session.pid) || !session.additionalPIDs.allSatisfy(self.isProcessRunning) {
                 self.stop(session: session, reason: .targetAppExited)
                 return
             }
@@ -676,6 +677,9 @@ enum ProcessTapLiveOutputBackend {
 
 final class ProcessTapLiveSession: @unchecked Sendable {
     let pid: pid_t
+    /// The other processes in the tap (e.g. the WebKit GPU process). One exiting means the app
+    /// replaced it, and its replacement is not in this tap.
+    let additionalPIDs: [pid_t]
     let targetName: String
     let gainState: ProcessTapLiveGainState
     let startDefaultOutputDeviceID: AudioDeviceID
@@ -695,6 +699,7 @@ final class ProcessTapLiveSession: @unchecked Sendable {
 
     init(
         pid: pid_t,
+        additionalPIDs: [pid_t] = [],
         targetName: String,
         gainState: ProcessTapLiveGainState,
         startDefaultOutputDeviceID: AudioDeviceID,
@@ -707,6 +712,7 @@ final class ProcessTapLiveSession: @unchecked Sendable {
         onStopped: @escaping @Sendable (ProcessTapTestResult, ProcessTapLiveDiagnostics?) -> Void
     ) {
         self.pid = pid
+        self.additionalPIDs = additionalPIDs
         self.targetName = targetName
         self.gainState = gainState
         self.startDefaultOutputDeviceID = startDefaultOutputDeviceID

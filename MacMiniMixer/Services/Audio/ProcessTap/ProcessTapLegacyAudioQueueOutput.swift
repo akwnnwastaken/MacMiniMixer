@@ -159,6 +159,7 @@ extension CoreAudioProcessTapLiveController {
 
         let session = ProcessTapLiveSession(
             pid: pid,
+            additionalPIDs: target.additionalProcessIdentifiers.filter { $0 != processIdentifier }.map { pid_t($0) },
             targetName: target.appName,
             gainState: gainState,
             startDefaultOutputDeviceID: startDefaultOutputDeviceID,

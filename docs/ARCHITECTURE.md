@@ -208,17 +208,17 @@ badge) is known before the first slider drag. `nil` assumes writable (no false b
 rejected or successful write still updates the flag; refreshes without a device change do not
 re-probe, so evidence from a rejected write is kept.
 
-**Mute**: The panel's mute button mutes by setting the volume to zero and restoring it.
-`lastNonZeroSystemVolume` remembers the pre-mute value. On unmute,
-`restoredSystemOutputVolume` returns that value or `defaultSystemOutputRestoreVolume`
-(50) as fallback.
+**Mute**: The device has its own mute flag (`kAudioDevicePropertyMute`, also set by the keyboard
+mute key) that is separate from its volume. `CoreAudioSystemVolumeReader.readCurrentOutputMuted()`
+reads it (output scope, then global, main element only) at init and on every volume refresh, and
+`isSystemOutputMuted` is true when it is set or the volume is zero.
 
-The device also has its own mute flag (`kAudioDevicePropertyMute`, set by the keyboard mute key)
-that is separate from its volume. `CoreAudioSystemVolumeReader.readCurrentOutputMuted()` reads it
-(output scope, then global, main element only) at init and on every volume refresh, and
-`isSystemOutputMuted` is true when it is set or the volume is zero. The mute button clears it
-first (`CoreAudioSystemVolumeController.setCurrentOutputMuted(false)`) and only restores the
-volume if that is also zero; raising the system slider clears it too, like the volume keys.
+The mute button sets that flag (`CoreAudioSystemVolumeController.setCurrentOutputMuted(true)`), so
+the slider keeps its level. Only a device without a settable mute flag falls back to volume zero;
+`lastNonZeroSystemVolume` then remembers the pre-mute value and `restoredSystemOutputVolume`
+returns it (or `defaultSystemOutputRestoreVolume`, 50). Unmuting clears the flag first and only
+restores the volume if it is also zero; raising the system slider clears the flag too, like the
+volume keys.
 
 **Live sync**: `MixerPanelView` runs a background loop that refreshes volume every 1 second
 while the panel is open, so external changes (e.g., physical keyboard keys) stay in sync.

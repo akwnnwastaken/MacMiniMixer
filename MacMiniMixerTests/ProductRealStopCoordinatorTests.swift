@@ -182,6 +182,48 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
         XCTAssertNil(harness.stateStore.productRealControlState.activeSessionsByAppID[appA.id])
     }
 
+    func testAudioProcessExitWhileAppRunsReconnectsOncePerWindow() {
+        let harness = makeStopHarness(isProcessRunning: { _ in true })
+        var restartedAppIDs: [MixerAppItem.ID] = []
+        harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
+        let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA, result: makeResult(.liveControlAppExited), diagnostics: nil
+        )
+
+        // The app is still running: reconnect quietly instead of warning "app exited".
+        XCTAssertEqual(restartedAppIDs, [appA.id])
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlStopped)
+
+        // A second exit right away does not loop.
+        let sidA2 = ProcessTapLiveSessionID()
+        harness.stateStore.productRealControlState.beginSession(
+            visibleAppID: appA.id, displayName: appA.name,
+            controlledProcessIdentifier: appA.processIdentifier,
+            source: .directVisiblePID, liveSessionID: sidA2
+        )
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA2, result: makeResult(.liveControlAppExited), diagnostics: nil
+        )
+        XCTAssertEqual(restartedAppIDs, [appA.id])
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlAppExited)
+    }
+
+    func testAppExitDoesNotReconnectWhenAppProcessIsGone() {
+        let harness = makeStopHarness()
+        var restartedAppIDs: [MixerAppItem.ID] = []
+        harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
+        let (_, _, sidA, _) = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA, result: makeResult(.liveControlAppExited), diagnostics: nil
+        )
+
+        XCTAssertTrue(restartedAppIDs.isEmpty)
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlAppExited)
+    }
+
     // MARK: - App-exit stop slice
 
     func testStopRealControlForExitedTargetAppsStopsOnlyMissingApps() async {
@@ -385,7 +427,7 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
         let cancelResolutionSpy: CancelResolutionSpy
     }
 
-    private func makeStopHarness() -> StopHarness {
+    private func makeStopHarness(isProcessRunning: @escaping (Int32) -> Bool = { _ in false }) -> StopHarness {
         let stateStore = ProductRealControlStateStore()
         let liveSessionManager = FakeProductRealLiveSessionManager()
         let settleGate = RecordingStartSettleGate()
@@ -400,7 +442,8 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
             appAudioTargetResolver: resolver,
             sideEffects: sideEffects,
             context: context,
-            cancelResolution: { reason in cancelResolutionSpy.record(reason) }
+            cancelResolution: { reason in cancelResolutionSpy.record(reason) },
+            isProcessRunning: isProcessRunning
         )
         return StopHarness(
             coordinator: coordinator,

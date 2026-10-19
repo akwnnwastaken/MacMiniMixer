@@ -85,7 +85,8 @@ final class MixerViewModel: ObservableObject {
         productRealStartSettleGate: ProductRealStartSettling = ProductRealStartSettleGate(),
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility = {
             ProcessTapCoreAudio.processTapEligibility(for: $0)
-        }
+        },
+        isProcessRunning: @escaping (Int32) -> Bool = { Darwin.kill($0, 0) == 0 || errno == EPERM }
     ) {
         self.applicationLister = applicationLister
         self.audioProcessObjectLister = audioProcessObjectLister
@@ -212,7 +213,8 @@ final class MixerViewModel: ObservableObject {
             startSettleGate: productRealStartSettleGate,
             processTapEligibility: processTapEligibility,
             sideEffects: self,
-            context: self
+            context: self,
+            isProcessRunning: isProcessRunning
         )
         // Forward the coordinator's state-change notifications to `objectWillChange`, replacing the
         // previous `@Published` behavior of the state. Wired eagerly here (see the IUO note on the

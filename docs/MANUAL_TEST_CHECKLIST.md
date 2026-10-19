@@ -42,11 +42,12 @@ Do not treat unsigned XCTest or static source review as permission/Login Item ac
 - **Expected**: macOS system volume changes in real time. Menu bar volume indicator
   reflects the same value.
 
-### 1.2 Mute button sets volume to zero
+### 1.2 Mute button mutes the Mac
 - Set volume to ~60.
 - Click mute icon.
-- **Expected**: Volume drops to 0. Mute icon changes to speaker-slash. Real system audio
-  is silent.
+- **Expected**: Mute icon changes to speaker-slash and real system audio is silent. The slider
+  stays at ~60 (the Mac's own mute is used, as with the keyboard key). On an output without a
+  mute control the volume drops to 0 instead.
 
 ### 1.3 Unmute restores previous volume
 - After muting (1.2), click mute icon again.
@@ -232,6 +233,15 @@ Setup: Safari open with YouTube playing. No toggle; interact with the row.
 ### 5.4 Stop stops helper live control
 - Click "Stop" in active banner.
 - **Expected**: Safari audio resumes at system level. No suppression.
+
+### 5.5 Safari replaces its audio process
+- Play YouTube in Safari and turn the Safari row down to ~30% (row becomes Real).
+- In Activity Monitor, quit **Safari Graphics and Media** (Safari's WebKit GPU process; other apps
+  have their own, leave those). Safari starts a new one; reload the tab if the video stops.
+- **Expected**: Within a second or two the row reconnects on its own and YouTube plays at ~30%
+  again, with no "app exited" warning. Log: `Product Real reconnecting after audio process exit`.
+- **Red flags**: YouTube plays at full volume while the row still shows ~30%; the row keeps
+  restarting.
 
 ---
 

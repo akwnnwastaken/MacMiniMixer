@@ -614,6 +614,7 @@ final class SystemOutputCoordinatorTests: XCTestCase {
     func testDeviceMuteShowsAsMutedAndToggleClearsItWithoutChangingVolume() {
         let reader = FakeSystemVolumeReader(volumeScalar: 0.5, isMuted: true)
         let volumeController = FakeSystemVolumeController()
+        volumeController.supportsMute = true
         let coordinator = makeCoordinator(systemVolumeReader: reader, systemVolumeController: volumeController)
 
         XCTAssertTrue(coordinator.isSystemOutputMuted)
@@ -629,6 +630,7 @@ final class SystemOutputCoordinatorTests: XCTestCase {
     func testRefreshPicksUpDeviceMuteAndSliderClearsIt() {
         let reader = FakeSystemVolumeReader(volumeScalar: 0.5)
         let volumeController = FakeSystemVolumeController()
+        volumeController.supportsMute = true
         let coordinator = makeCoordinator(systemVolumeReader: reader, systemVolumeController: volumeController)
         XCTAssertFalse(coordinator.isSystemOutputMuted)
 
@@ -639,6 +641,22 @@ final class SystemOutputCoordinatorTests: XCTestCase {
         coordinator.setSystemVolume(60)
         XCTAssertFalse(coordinator.isSystemOutputMuted)
         XCTAssertEqual(volumeController.requestedMutes, [false])
+    }
+
+    func testMuteButtonUsesDeviceMuteAndKeepsVolume() {
+        let volumeController = FakeSystemVolumeController()
+        volumeController.supportsMute = true
+        let coordinator = makeCoordinator(systemVolumeController: volumeController)
+
+        XCTAssertNil(coordinator.toggleSystemOutputMuted())
+        XCTAssertTrue(coordinator.isSystemOutputMuted)
+        XCTAssertEqual(coordinator.systemVolume, 50)
+
+        XCTAssertNil(coordinator.toggleSystemOutputMuted())
+        XCTAssertFalse(coordinator.isSystemOutputMuted)
+        XCTAssertEqual(coordinator.systemVolume, 50)
+        XCTAssertEqual(volumeController.requestedMutes, [true, false])
+        XCTAssertTrue(volumeController.requestedScalars.isEmpty)
     }
 
     private func makeCoordinator(
@@ -735,11 +753,14 @@ private final class FakeSystemVolumeController: SystemVolumeControlling {
         return settableProbeResult
     }
 
+    /// Whether the device exposes a settable mute flag. Off by default so the volume-zero mute
+    /// path stays covered.
+    var supportsMute = false
     private(set) var requestedMutes: [Bool] = []
 
     func setCurrentOutputMuted(_ isMuted: Bool) -> Bool {
         requestedMutes.append(isMuted)
-        return shouldSucceed
+        return supportsMute && shouldSucceed
     }
 }
 

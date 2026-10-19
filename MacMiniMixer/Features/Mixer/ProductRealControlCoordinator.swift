@@ -41,7 +41,8 @@ final class ProductRealControlCoordinator {
         processTapEligibility: @escaping @Sendable (Int32?) -> ProcessTapProcessEligibility,
         sideEffects: ProductRealControlSideEffects,
         context: ProductRealControlContext,
-        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions
+        maxConcurrentSessions: Int? = AppConstants.maxConcurrentLiveSessions,
+        isProcessRunning: @escaping (Int32) -> Bool = { Darwin.kill($0, 0) == 0 || errno == EPERM }
     ) {
         // The facade stores none of these dependencies directly — they are threaded straight into the
         // two sub-coordinators, which share the single state store and the same weak seam. Neither
@@ -65,7 +66,8 @@ final class ProductRealControlCoordinator {
             startSettleGate: startSettleGate,
             appAudioTargetResolver: appAudioTargetResolver,
             sideEffects: sideEffects,
-            context: context
+            context: context,
+            isProcessRunning: isProcessRunning
         )
         // All stored properties are now initialized, so `self` is usable: wire the three Start↔Stop
         // cross-edges as narrow closures routed through the facade. `[weak self]` keeps the
@@ -79,6 +81,9 @@ final class ProductRealControlCoordinator {
                 result: result,
                 diagnostics: diagnostics
             )
+        }
+        stopCoordinator.setRestartAfterAudioProcessChange { [weak self] appID in
+            self?.startCoordinator.requestAutomaticStart(for: appID)
         }
         startCoordinator.setRefreshActiveName { [weak self] in
             self?.stopCoordinator.updateActiveLiveControlAppNameAfterProductChange()

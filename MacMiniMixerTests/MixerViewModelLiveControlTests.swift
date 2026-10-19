@@ -1761,7 +1761,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
                 }
 
                 return eligibilityByPID[processIdentifier] ?? .eligible
-            }
+            },
+            isProcessRunning: { _ in false }
         )
 
         return LiveControlHarness(
@@ -3278,7 +3279,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
                 }
 
                 return .eligible
-            }
+            },
+            isProcessRunning: { _ in false }
         )
     }
 
@@ -3359,7 +3361,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
                 }
 
                 return eligibilityByPID[processIdentifier] ?? .eligible
-            }
+            },
+            isProcessRunning: { _ in false }
         )
 
         return ControlledHarness(
@@ -4180,7 +4183,8 @@ final class MixerOutputActivityTests: XCTestCase {
             audioProcessObjectLister: objects,
             isOutputActivityAvailable: { supported },
             productRealStartSettleGate: ProductRealStartSettleGate(sleeper: { _ in }),
-            processTapEligibility: { _ in .unavailable("Fake: no eligibility reads needed") }
+            processTapEligibility: { _ in .unavailable("Fake: no eligibility reads needed") },
+            isProcessRunning: { _ in false }
         )
     }
 

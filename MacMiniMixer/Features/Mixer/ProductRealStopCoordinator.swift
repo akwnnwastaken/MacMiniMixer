@@ -22,6 +22,9 @@ final class ProductRealStopCoordinator {
     private weak var sideEffects: ProductRealControlSideEffects?
     private weak var context: ProductRealControlContext?
     private var cancelResolution: @MainActor (ProcessTapCandidateProbeStopReason) -> Void
+    private var restartAfterAudioProcessChange: @MainActor (MixerAppItem.ID) -> Void = { _ in }
+    private let isProcessRunning: (Int32) -> Bool
+    private var lastAutomaticRestartAt: [MixerAppItem.ID: Date] = [:]
 
     init(
         stateStore: ProductRealControlStateStore,
@@ -30,8 +33,10 @@ final class ProductRealStopCoordinator {
         appAudioTargetResolver: AppAudioTargetResolving,
         sideEffects: ProductRealControlSideEffects,
         context: ProductRealControlContext,
-        cancelResolution: @escaping @MainActor (ProcessTapCandidateProbeStopReason) -> Void = { _ in }
+        cancelResolution: @escaping @MainActor (ProcessTapCandidateProbeStopReason) -> Void = { _ in },
+        isProcessRunning: @escaping (Int32) -> Bool = { Darwin.kill($0, 0) == 0 || errno == EPERM }
     ) {
+        self.isProcessRunning = isProcessRunning
         self.stateStore = stateStore
         self.liveSessionManager = liveSessionManager
         self.startSettleGate = startSettleGate
@@ -46,6 +51,12 @@ final class ProductRealStopCoordinator {
     /// during the facade's initializer.
     func setCancelResolution(_ cancelResolution: @escaping @MainActor (ProcessTapCandidateProbeStopReason) -> Void) {
         self.cancelResolution = cancelResolution
+    }
+
+    /// Wires the stop→start edge used when a session stops because one of its audio processes
+    /// exited while the app itself is still running (see `handleProductLiveControlStopped`).
+    func setRestartAfterAudioProcessChange(_ restart: @escaping @MainActor (MixerAppItem.ID) -> Void) {
+        self.restartAfterAudioProcessChange = restart
     }
 
     /// The Product Real session/pending/resolution state, read/written through the shared
@@ -167,6 +178,28 @@ final class ProductRealStopCoordinator {
             if result.outcome == .liveControlAppExited,
                let stoppedApp = context?.apps.first(where: { $0.id == stoppedAppID }) {
                 appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
+
+                // The app is still running, so only an audio process (e.g. Safari's WebKit GPU
+                // process) was replaced: reconnect to the new one at the row's level instead of
+                // leaving its audio uncontrolled. At most once per 10 s per app, so a helper that
+                // keeps dying cannot loop.
+                if let processIdentifier = stoppedApp.processIdentifier,
+                   isProcessRunning(processIdentifier),
+                   lastAutomaticRestartAt[stoppedAppID].map({ Date().timeIntervalSince($0) > 10 }) ?? true {
+                    lastAutomaticRestartAt[stoppedAppID] = Date()
+                    AppLogger.processTap.info("Product Real reconnecting after audio process exit app=\(stoppedApp.name, privacy: .public)")
+                    updateActiveLiveControlAppNameAfterProductChange()
+                    sideEffects?.applyLiveControlStoppedDisplay(
+                        result: ProcessTapTestResult(
+                            outcome: .liveControlStopped,
+                            message: "Reconnecting \(stoppedApp.name)",
+                            severity: .info
+                        ),
+                        diagnostics: diagnostics
+                    )
+                    restartAfterAudioProcessChange(stoppedAppID)
+                    return
+                }
             }
         } else {
             // No session id: an optimistic-window stop. Clear all product sessions and pending flags.

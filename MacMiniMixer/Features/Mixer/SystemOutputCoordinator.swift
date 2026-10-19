@@ -116,6 +116,15 @@ final class SystemOutputCoordinator {
         }
 
         let willRestoreOutput = isSystemOutputMuted || systemVolume <= AppConstants.volumeRange.lowerBound
+
+        // Mute like the keyboard key when the device has a mute flag, so the level stays put;
+        // devices without one fall back to volume zero below.
+        if !willRestoreOutput, systemVolumeController.setCurrentOutputMuted(true) {
+            isDeviceMuted = true
+            applySystemVolume(systemVolume)
+            return nil
+        }
+
         let targetVolume: Double
 
         if willRestoreOutput {
