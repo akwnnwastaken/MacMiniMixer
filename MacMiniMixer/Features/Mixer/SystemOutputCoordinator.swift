@@ -40,6 +40,8 @@ final class SystemOutputCoordinator {
     private let systemVolumeReader: SystemVolumeReading
     private let systemVolumeController: SystemVolumeControlling
     private var lastNonZeroSystemVolume: Double
+    /// The device's own mute flag (e.g. the keyboard mute key), separate from its volume.
+    private var isDeviceMuted: Bool
     private var lastSliderVolumeSetSucceeded: Bool?
     private var onWillChange: (() -> Void)?
 
@@ -57,8 +59,10 @@ final class SystemOutputCoordinator {
         self.systemVolumeController = systemVolumeController
 
         let initialSystemVolume = audioController.systemVolume.clamped(to: AppConstants.volumeRange)
+        let initialDeviceMuted = systemVolumeReader.readCurrentOutputMuted() ?? false
         self.systemVolume = initialSystemVolume
-        self.isSystemOutputMuted = initialSystemVolume <= AppConstants.volumeRange.lowerBound
+        self.isDeviceMuted = initialDeviceMuted
+        self.isSystemOutputMuted = initialDeviceMuted || initialSystemVolume <= AppConstants.volumeRange.lowerBound
         self.lastNonZeroSystemVolume = initialSystemVolume > AppConstants.volumeRange.lowerBound
             ? initialSystemVolume
             : AppConstants.defaultSystemOutputRestoreVolume
@@ -79,6 +83,10 @@ final class SystemOutputCoordinator {
     }
 
     func setSystemVolume(_ volume: Double) {
+        // Like the volume keys, raising the volume clears the device mute.
+        if volume > AppConstants.volumeRange.lowerBound {
+            _ = clearDeviceMute()
+        }
         lastSliderVolumeSetSucceeded = applyRequestedSystemVolume(volume)
     }
 
@@ -96,6 +104,17 @@ final class SystemOutputCoordinator {
     }
 
     func toggleSystemOutputMuted() -> String? {
+        if isDeviceMuted {
+            guard clearDeviceMute() else {
+                refreshSystemOutputVolume()
+                return "Could not restore system output"
+            }
+            // Volume above zero: clearing the mute was the whole restore.
+            guard systemVolume <= AppConstants.volumeRange.lowerBound else {
+                return nil
+            }
+        }
+
         let willRestoreOutput = isSystemOutputMuted || systemVolume <= AppConstants.volumeRange.lowerBound
         let targetVolume: Double
 
@@ -160,6 +179,10 @@ final class SystemOutputCoordinator {
     }
 
     func refreshSystemOutputVolume() {
+        if let deviceMuted = systemVolumeReader.readCurrentOutputMuted() {
+            isDeviceMuted = deviceMuted
+        }
+
         guard let volumeScalar = systemVolumeReader.readCurrentOutputVolumeScalar() else {
             return
         }
@@ -217,11 +240,25 @@ final class SystemOutputCoordinator {
 
         notifyWillChange()
         systemVolume = clampedVolume
-        isSystemOutputMuted = clampedVolume <= AppConstants.volumeRange.lowerBound
+        isSystemOutputMuted = isDeviceMuted || clampedVolume <= AppConstants.volumeRange.lowerBound
 
         if clampedVolume > AppConstants.volumeRange.lowerBound {
             rememberNonZeroSystemVolume(clampedVolume)
         }
+    }
+
+    /// Returns false only when the device is muted and the mute could not be cleared.
+    private func clearDeviceMute() -> Bool {
+        guard isDeviceMuted else {
+            return true
+        }
+        guard systemVolumeController.setCurrentOutputMuted(false) else {
+            return false
+        }
+
+        isDeviceMuted = false
+        applySystemVolume(systemVolume)
+        return true
     }
 
     private func rememberNonZeroSystemVolume(_ volume: Double) {

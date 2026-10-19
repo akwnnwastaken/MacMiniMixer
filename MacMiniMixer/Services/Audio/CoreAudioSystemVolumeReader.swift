@@ -10,6 +10,32 @@ struct CoreAudioSystemVolumeReader: SystemVolumeReading {
         return outputVolumeScalar(for: deviceID)
     }
 
+    func readCurrentOutputMuted() -> Bool? {
+        guard let deviceID = CoreAudioHelpers.defaultOutputDeviceID() else {
+            return nil
+        }
+
+        // shortcut: main element only; add per-channel mute if a device turns up without one.
+        for scope in [kAudioObjectPropertyScopeOutput, kAudioObjectPropertyScopeGlobal] {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyMute,
+                mScope: scope,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            guard AudioObjectHasProperty(deviceID, &address) else {
+                continue
+            }
+
+            var muted = UInt32(0)
+            var dataSize = UInt32(MemoryLayout<UInt32>.size)
+            if AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &muted) == noErr {
+                return muted != 0
+            }
+        }
+
+        return nil
+    }
+
     private func outputVolumeScalar(for deviceID: AudioDeviceID) -> Double? {
         let scopes = [
             kAudioObjectPropertyScopeOutput,

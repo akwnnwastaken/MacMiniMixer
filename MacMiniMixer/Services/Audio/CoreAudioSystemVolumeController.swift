@@ -30,6 +30,33 @@ struct CoreAudioSystemVolumeController: SystemVolumeControlling {
         return isOutputVolumeSettable(for: deviceID)
     }
 
+    func setCurrentOutputMuted(_ isMuted: Bool) -> Bool {
+        guard let deviceID = CoreAudioHelpers.defaultOutputDeviceID() else {
+            return false
+        }
+
+        for scope in Self.volumeScopes {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyMute,
+                mScope: scope,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var isSettable = DarwinBoolean(false)
+            guard AudioObjectHasProperty(deviceID, &address),
+                  AudioObjectIsPropertySettable(deviceID, &address, &isSettable) == noErr,
+                  isSettable.boolValue else {
+                continue
+            }
+
+            var value = UInt32(isMuted ? 1 : 0)
+            if AudioObjectSetPropertyData(deviceID, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value) == noErr {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private func setOutputVolumeScalar(_ volumeScalar: Double, for deviceID: AudioDeviceID) -> Bool {
         let clampedScalar = Float32(volumeScalar.clamped(to: 0...1))
 
