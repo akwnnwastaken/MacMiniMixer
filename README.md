@@ -39,6 +39,7 @@ MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn
 - **Per-app volume and mute:** Move an app's slider or click its icon to mute it, and only that app changes — turn the music down under a video call, or silence one noisy app and leave everything else alone.
 - **Boost up to 200%:** Drag an app past the 100% notch to make a quiet app louder than its own level. The boosted part of the slider turns orange, and a soft limiter keeps boosted audio from clipping.
 - **No app-count limit:** Control as many apps at once as you like.
+- **Levels that stick:** A row you lowered or muted stays in control when AirPods connect, the output's sample rate changes, the Mac wakes, the app is relaunched, or a browser swaps its audio process — it reconnects on its own once the app plays again.
 - **Browsers and web apps:** Safari and a Safari web app, or Chrome and a Chrome PWA / Canary, are separate rows that can each be controlled.
 - **Crackle-free output:** A direct output engine plays at your device's own sample rate and never changes it.
 - **Always on, nothing automatic:** There is no toggle, and nothing is captured until you touch a row. Rows you have not touched yet are a UI preview and change no audio.
@@ -88,6 +89,7 @@ The direct engine plays at the device's own sample rate and never changes it. In
 - The direct engine is checked on a few setups only; other devices, sample rates and macOS versions are unverified.
 - To tell Safari from a Safari web app, the app asks the public `proc_pidinfo` for an undocumented flavor (`PROC_PIDCOALITIONINFO`). If a future macOS changes it, matching falls back to bundle-id rules, which are less precise.
 - Starts are queued: with several rows requested at once they start one after another, and a browser row can take a second or more.
+- After an app is relaunched, control comes back only once it plays, so the first second or two can play at full volume.
 
 ### Safety & Privacy
 

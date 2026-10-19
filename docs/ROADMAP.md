@@ -421,17 +421,16 @@ the owner's. 200% is not a promise of clean output for already-loud sources.
 **Priority**: Medium | **Risk**: Medium | **Status**: Explicit lifecycle handling done;
 deeper characterization still open
 
-**Done**: System sleep/wake now has explicit, deliberate lifecycle handling — sleep tears
-down all active/pending Process Tap work (typed `.systemSleep` reason); wake is refresh-only
-(output devices, system volume/mute, visible app list) with **no** automatic session restart.
-The rationale (conservative; avoids stale tap, stale helper PID, output-device-change, and
-restart-loop risks) is recorded in `docs/DECISIONS.md`. A basic real-hardware sleep/wake
-smoke test passed, and the fake-backed suite covers the sleep teardown and wake refresh-only
-behavior.
+**Done**: System sleep/wake has explicit lifecycle handling — sleep tears down all
+active/pending Process Tap work (typed `.systemSleep` reason); wake refreshes output devices,
+system volume/mute and the visible app list, and (since v2.5.3) reconnects the rows that were Real
+through a fresh resolution once their app plays again. Rationale and its revision are in
+`docs/DECISIONS.md`. A basic real-hardware sleep/wake smoke test passed, and the fake-backed suite
+covers the sleep teardown and the wake reconnect.
 
-**Still open**: automatic post-wake restart/recovery research (deferred — see DECISIONS);
-longer-duration and repeated sleep/wake characterization; varied output-device and
-helper-PID-replacement combinations; behavior with many (more than three) sessions; and the broader long-idle
+**Still open**: longer-duration and repeated sleep/wake characterization; varied output-device and
+helper-PID-replacement combinations; behavior with many sessions (five were seen running together on the owner's Mac at ~10% CPU with
+the panel open, v2.5.3; not measured with the panel closed); and the broader long-idle
 / app-exit / helper-exit / Core Audio failure resource characterization. Short-run Release CPU
 for one and two sessions has now been profiled (see below), but sustained (hours-long)
 CPU/latency/resource behavior is still unmeasured.

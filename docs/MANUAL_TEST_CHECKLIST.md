@@ -129,6 +129,12 @@ Do not treat unsigned XCTest or static source review as permission/Login Item ac
   new one at ~30% with no "output device changed" warning. A row at 100% and unmuted just stops.
 - **Red flags**: the app plays at full volume on the new device while the slider shows ~30%.
 
+### 2.7 Sample-rate change reconnects
+- Lower an app to ~30% (Real) on built-in speakers. In Audio MIDI Setup, change the speakers'
+  format (e.g. 48000 Hz ↔ 44100 Hz).
+- **Expected**: Audio drops for a moment and comes back at ~30%, at the right pitch. Log:
+  `Live control output sample rate changed`.
+
 ---
 
 ## 3. Running App Discovery
@@ -723,8 +729,8 @@ Steps:
    Advanced picker (by default the first eligible app).
    - **Expected**: only that app's session ends; all other Real apps keep running.
 5. **Output-device change** with all sessions active (speakers ↔ headphones, or connect AirPods).
-   - **Expected**: all Real sessions stop ("output device changed"), every app's audio returns to
-     normal on the new device without quitting anything; no orphaned mute; CPU returns to ~0%.
+   - **Expected**: all Real sessions stop for the old device and every lowered or muted row
+     reconnects on the new one at its level (since v2.5.3); no orphaned mute, nothing plays twice.
    - Record: time until all audio is back; any Drops/Fail/cleanup warnings in Console.
 6. **Stop All.** Make the apps Real again, then press Stop All in the banner.
    - **Expected**: every session stops and every app's audio returns. Stop All tears sessions down

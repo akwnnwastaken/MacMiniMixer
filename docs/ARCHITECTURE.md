@@ -654,7 +654,7 @@ controller is created):
   (main/clock sub-device) + the process tap (drift compensated), and one IOProc that reads the tap
   from `inInputData` and writes the faded/gained samples to `outOutputData` in the same callback.
   Input and output are on one clock, there is no `AudioQueue`, and no cross-thread buffer hand-off.
-- **`.audioQueue` (legacy fallback, scheduled for removal)** — a tap-only private aggregate whose
+- **`.audioQueue` (legacy fallback, still required)** — a tap-only private aggregate whose
   IOProc hands each buffer to a separate `AudioQueue` (`ProcessTapLiveOutputQueue`) that runs on the
   output device's clock. Its code is in
   `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift`. It is used when
@@ -715,8 +715,11 @@ Then, for both:
 - `ProcessTapLiveSession` created (its `output` is `.directAggregate(renderer)` or
   `.audioQueue(queue)`) and stored as `activeSession`.
 - Timers are started:
-    - Diagnostics timer: fires every 100ms, checks process liveness, checks output device
-      change (either one stops the session from inside the controller), and calls
+    - Diagnostics timer: fires every 100ms, checks that the primary *and every additional*
+      tapped process are still alive (`targetAppExited`), that the default output device is
+      unchanged and, for the direct engine, that its nominal sample rate still matches
+      `startOutputSampleRate` (`outputDeviceChanged`) — each stops the session from inside the
+      controller — and calls
       `onDiagnostics` through a per-session `ProcessTapDiagnosticsPublishGate` (~4 Hz, with
       escalation bypass).
     - Timeout timer: limited live sessions only; fires after 60s and calls
@@ -732,7 +735,8 @@ The average tap/output frames per cycle are new, defaulted diagnostics fields.
 
 `ProcessTapLiveGainState` is thread-safe (`NSLock`). It holds the current `ProcessTapReplayGainOption`.
 `updateLiveControlGain(_:)` updates it under lock. In legacy mode the IOProc reads
-`gainState.scalar` on each callback. In direct mode the session also posts the new target gain to
+`gainState.scalarForAudioThread()` on each callback, a `try()` read that keeps the last value
+while a writer holds the lock. In direct mode the session also posts the new target gain to
 the renderer (`updateTargetGain`), which the IOProc picks up through a non-blocking `try()` on a
 control lock (if the lock is momentarily held it keeps last cycle's value for one more cycle), so
 the audio thread never blocks, allocates or logs.
@@ -817,9 +821,11 @@ This logic is covered by `ProcessTapOutputBufferCopierTests`.
 `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapDiagnosticsAccumulator.swift`
 
 Thread-safe (`NSLock`) accumulator for IOProc callbacks. On each `observe(inputData)` call:
-- Increments `callbackCount`.
 - Iterates all `AudioBuffer` samples, skipping non-finite values.
-- Tracks running max (`peakLevel`) and sum-of-squares for RMS.
+- Adds the callback, its peak and sum-of-squares to pending totals owned by the callback thread.
+- Folds the pending totals into the shared ones only through `lock.try()`, so the audio thread
+  never waits for a `snapshot()` reader (a busy lock just folds on a later callback).
+`ProcessTapCallbackTimingAccumulator.record(hostTime:)` follows the same pattern.
 
 `snapshot()` returns a `ProcessTapDiagnosticsSnapshot` with:
 - `callbackCount`, `measuredSampleCount`, `peakLevel`, `rmsLevel`.
@@ -856,9 +862,12 @@ and helper resolution.
   sleep tears down all active/pending work exactly like termination but with accurate
   logs/diagnostics. Pending Product start tokens are invalidated and any late start is rejected
   as stale (session-ID-keyed teardown), preventing resurrection across sleep.
-- **`didWakeNotification` → `handleSystemDidWake()`** is refresh-only: it re-reads output
-  devices, system volume/mute, and the visible app list, and deliberately does not restart any
-  session. See `docs/DECISIONS.md` ("Why system wake is refresh-only").
+- **`didWakeNotification` → `handleSystemDidWake()`** re-reads output devices, system
+  volume/mute, and the visible app list, then calls `reconnectAfterWake()`: the rows that were Real
+  at sleep (captured by `tearDownProductStateForHardStop`) go through the automatic reconnect below.
+  See `docs/DECISIONS.md` ("Why system wake is refresh-only", superseded in v2.5.3).
+- **`didLaunchApplicationNotification`** refreshes the app list, so a relaunched app's new pid is
+  visible to a waiting reconnect even while the panel is closed.
 
 The hard teardown also clears queued Product starts (via the hard-teardown state reset).
 
@@ -874,6 +883,27 @@ The hard teardown also clears queued Product starts (via the hard-teardown state
 - **App exit**: `stopRealControlForExitedTargetApps` stops only the exited apps' sessions, drops
   their queued starts, and cancels a resolution for a vanished app. Quitting the app selected in
   the Advanced picker stops only Advanced manual control, never other product sessions.
+
+### Automatic reconnect
+
+When a Product session ends without the user asking, `ProductRealStopCoordinator` brings it back
+instead of leaving the row showing a level the app no longer plays at:
+
+- **Triggers**: an engine stop with `liveControlAppExited` (a tapped process exited: the app
+  quit, or a browser replaced its audio process) or `liveControlOutputChanged` (new default device
+  or a sample-rate change), and wake (`reconnectAfterWake`). A live session also ends itself on
+  purpose when the app gains an audio process nobody taps:
+  `ProductRealStartCoordinator.restartIfAppGainedAudioProcess` re-matches the app's processes on
+  its diagnostics callback at most every 2 s and stops the session as "app exited".
+- **Only rows that need it**: `MixerAppItem.needsRealControl` (lowered, boosted or muted). A row
+  at 100% unmuted stops as before, with its warning.
+- **`scheduleReconnect`** waits out the rest of a 10 s per-app spacing, then polls every 2 s until
+  the app is running and the resolver matches at least one Core Audio process for it, and calls
+  `requestAutomaticStart` (a fresh resolution at the row's level). It gives up when the row is
+  started again, set back to 100% unmuted, or after 30 minutes.
+- **Cancelled by** a per-app stop, Stop All / output-change teardown and the hard stop (sleep).
+- The stop display gets a neutral "Reconnecting …" result instead of the warning; an output change
+  still invalidates every cached helper target.
 
 ### Known Multi-Session Gaps (open, need real hardware)
 
@@ -1038,7 +1068,7 @@ becomes Real).
 | `MacMiniMixer/Services/Audio/ProcessTap/HelperProcessCandidateDiscovery.swift` | Process tree / name-match scanning |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLifecycle.swift` | `ProcessTapCoreAudio` utilities + `ProcessTapResourceContext` |
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live control implementation (direct aggregate output default, AudioQueue fallback) + session, direct renderer, gain ramp |
-| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift` | **Legacy** `AudioQueue` live output (`ProcessTapLiveOutputQueue`); fallback only, scheduled for removal |
+| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift` | **Legacy** `AudioQueue` live output (`ProcessTapLiveOutputQueue`); fallback for output devices with input streams (headsets, AirPods) and failed direct setups; cannot be removed until the direct engine handles those |
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapReplayProbe.swift` | Replay Probe implementation |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionManager.swift` | Session manager (`maxSessions: Int?`) + Core Audio lifecycle gate + compatibility adapter |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionState.swift` | Session ID, phase, state value types |

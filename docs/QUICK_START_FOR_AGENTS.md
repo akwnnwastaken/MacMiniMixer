@@ -7,9 +7,9 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 
 ---
 
-## Current Status (internal v0.14 checkpoint + `[Unreleased]` work)
+## Current Status (v2.5.4)
 
-- Unreleased: no tag, `MARKETING_VERSION` stays `0.13`. See `CHANGELOG.md` and `docs/HANDOFF.md`.
+- Released: v2.5.4 (`MARKETING_VERSION` `2.5.4`, build 13). See `CHANGELOG.md` and `docs/HANDOFF.md`.
 - Stable: system output volume control (with a proactive "Read-only" badge for non-writable
   devices), output device listing/switching, running app discovery.
 - Experimental: **Product Real Control** — per-app Process Tap control with **no app-count limit**
@@ -20,7 +20,8 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Live audio now plays through a **direct aggregate output engine** (default; one IOProc reads the
   tap and writes the output device on one clock, no `AudioQueue`), which removed the random crackle.
   The old `AudioQueue` path is a legacy fallback (override `MacMiniMixerLiveOutputMode=audioQueue`,
-  output device with input streams, or a failed direct setup), scheduled for removal. An app's audio
+  output device with input streams, or a failed direct setup); it is still required for headsets
+  and AirPods. An app's audio
   processes are tapped together and attributed by resource coalition.
 - Real-hardware **resource** evidence (CPU, teardown timing) covers **up to three** concurrent
   sessions only. The direct engine was additionally listened to with up to six sessions at 48 kHz and
@@ -38,7 +39,8 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 
 - Menu bar app, mixer panel, liquid/glass UI.
 - Real output device list, switching, live refresh, external default-output sync.
-- Real system volume read, set, mute-to-zero/restore, live sync.
+- Real system volume read, set and live sync; mute uses the device mute flag (volume zero only on
+  outputs without one).
 - Real running app discovery via NSWorkspace, with audio-relevance filtering.
 - Process Tap Test and Replay Probe (user-triggered, Advanced section, developer mode only).
 - Product Real Control for several apps at once (a three-session long-run smoke passed on one Mac),
@@ -51,6 +53,9 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
   panel closes.
 - System mute follows the device mute flag (keyboard mute key); the mute button and system slider
   clear it.
+- Automatic reconnect: a lowered, boosted or muted row whose control ended on its own (output
+  change or sample-rate change, wake, app relaunch, a browser replacing or adding an audio process)
+  reconnects once its app plays again (`ProductRealStopCoordinator.scheduleReconnect`).
 - macOS 14.2 availability guard; deployment target remains macOS 13.0.
 - VoiceOver labels/values/hints across the main panel and the Advanced diagnostics.
 - GitHub Actions build/test CI (plus a `package` job that uploads an ad-hoc signed zip), a
@@ -62,7 +67,8 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 ## What Is Experimental / Fragile
 
 - Browser/helper row resolution: helper PIDs change on tab reload, browser restart, or
-  navigation. Cache is validation-first but not persistent.
+  navigation. Cache is validation-first but not persistent; a replaced or added audio process
+  triggers an automatic reconnect (up to ~2 s at full volume while it is detected).
 - Live Control audio quality: fade-in/out ramp is tuned but not regression-tested across
   all macOS versions. The direct engine is crackle-free on the owner's Mac (built-in speakers at 48
   and 44.1 kHz, a second output device at 48 kHz) but not verified on other devices, sample rates or
@@ -98,7 +104,8 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
   private or undocumented calls.
 - **`ProcessTapLiveGainRamp`** — fade-in/fade-out frame math. Changes affect audio clicks.
 - **`ProcessTapDiagnosticsAccumulator`** — shared between Live and Replay paths. Changing
-  measurement semantics (peak, RMS) affects all diagnostics UI.
+  measurement semantics (peak, RMS) affects all diagnostics UI. `observe` runs on the audio thread
+  and must keep its try-lock fold (never a blocking lock).
 - **`AppConstants`** — timing values (fade durations, buffer count, timeout) are tuned.
   Changing them without testing can cause buffer drops or timing issues.
 - **`HelperAudioTargetResolver` cache logic** — validation-first design is intentional.
