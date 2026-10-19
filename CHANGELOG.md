@@ -16,6 +16,22 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.5.0] - 2026-10-19
+
+### Highlights
+- **Apps playing audio show up on their own.** You no longer need "Show all apps" to see an app
+  that is making sound, and its row stays listed until the panel closes.
+- **System mute works with the mute key.** A Mac muted from the keyboard now shows as muted in the
+  panel, and the mute button or the system slider unmutes it.
+
+### Fixed
+- The panel showed made-up output devices and apps when the real list was empty (for example a
+  Mac mini with no audio output).
+
+### Removed
+- The two-app readiness test in the Advanced section. Real app control has no app-count limit, so
+  it no longer guards anything.
+
 ## [v2.4.0] - 2026-10-14
 
 ### Highlights
