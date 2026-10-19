@@ -316,6 +316,14 @@ still blocking repeats).
 
 ## Why system wake is refresh-only (no automatic session restart)
 
+> **Superseded in part (v2.5.3, owner decision)**: wake still tears down at sleep and refreshes at
+> wake, but rows that were Real are then **reconnected** — each only once its app has a Core Audio
+> process again, and only if the row is still lowered, boosted or muted — through a fresh
+> resolution, so the stale-tap and stale-helper risks below still do not apply. The same
+> wait-for-audio reconnect now follows an output-device change and an app relaunch. Reason: the
+> row kept showing its lowered level while the app played at full volume, which the owner judged
+> worse than the restart risk. The text below is the original decision.
+
 **Decision**: On `NSWorkspace.willSleepNotification` the app synchronously tears down every
 active and pending Process Tap audio work item — Product Real Control sessions, Advanced
 manual live control, Two-App Readiness, and the related diagnostic/probe/resolver work —

@@ -27,6 +27,11 @@ struct MixerAppItem: Identifiable, Equatable {
         return processIdentifier > 0
     }
 
+    /// Whether the row asks for anything other than the app's own level, so it needs a live session.
+    var needsRealControl: Bool {
+        isMuted || volume != AppConstants.unityAppVolume
+    }
+
     var isLikelyAudioRelevant: Bool {
         let searchableText = "\(name) \(id)"
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)

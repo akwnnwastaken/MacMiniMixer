@@ -890,7 +890,15 @@ final class RecordingAppAudioTargetResolver: AppAudioTargetResolving, @unchecked
     func invalidateCachedTarget(for request: AppAudioTargetRequest) {
         lock.withLock { recordedInvalidatedTargetCount += 1 }
     }
-    func invalidateAllCachedTargets() {}
+    private var recordedInvalidatedAllCount = 0
+
+    var invalidatedAllCount: Int {
+        lock.withLock { recordedInvalidatedAllCount }
+    }
+
+    func invalidateAllCachedTargets() {
+        lock.withLock { recordedInvalidatedAllCount += 1 }
+    }
 
     // MARK: Process-object matching (multi-process start tests)
     //

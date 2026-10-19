@@ -16,6 +16,13 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Fixed
+- **The slider and the real volume stay in step.** When control ended on its own — an output
+  device change (e.g. AirPods connecting), sleep and wake, or the app being relaunched — the row
+  kept showing its lowered level while the app played at full volume. A lowered or muted row now
+  reconnects once its app plays again.
+- **New rows show 100%.** A row nobody has touched showed 70% while the app played at its own level.
+
 ## [v2.5.2] - 2026-10-19
 
 ### Highlights

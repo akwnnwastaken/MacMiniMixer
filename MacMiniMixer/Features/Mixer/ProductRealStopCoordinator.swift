@@ -27,6 +27,9 @@ final class ProductRealStopCoordinator {
     private var lastAutomaticRestartAt: [MixerAppItem.ID: Date] = [:]
     private var pendingReconnects: [MixerAppItem.ID: Task<Void, Never>] = [:]
     private let reconnectInterval: TimeInterval
+    private let reconnectPollInterval: TimeInterval
+    /// Rows that were Real when the system went to sleep, reconnected by `reconnectAfterWake()`.
+    private var appsToReconnectAfterWake: [MixerAppItem.ID] = []
 
     init(
         stateStore: ProductRealControlStateStore,
@@ -37,10 +40,12 @@ final class ProductRealStopCoordinator {
         context: ProductRealControlContext,
         cancelResolution: @escaping @MainActor (ProcessTapCandidateProbeStopReason) -> Void = { _ in },
         isProcessRunning: @escaping (Int32) -> Bool = { Darwin.kill($0, 0) == 0 || errno == EPERM },
-        reconnectInterval: TimeInterval = 10
+        reconnectInterval: TimeInterval = 10,
+        reconnectPollInterval: TimeInterval = 2
     ) {
         self.isProcessRunning = isProcessRunning
         self.reconnectInterval = reconnectInterval
+        self.reconnectPollInterval = reconnectPollInterval
         self.stateStore = stateStore
         self.liveSessionManager = liveSessionManager
         self.startSettleGate = startSettleGate
@@ -181,20 +186,26 @@ final class ProductRealStopCoordinator {
             // The stop transition for this row is complete: clear its rapid-toggle pending flag.
             productRealControlState.endOperation(for: stoppedAppID)
 
-            if result.outcome == .liveControlAppExited,
-               let stoppedApp = context?.apps.first(where: { $0.id == stoppedAppID }) {
-                appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
+            if let stoppedApp = context?.apps.first(where: { $0.id == stoppedAppID }) {
+                if result.outcome == .liveControlAppExited {
+                    appAudioTargetResolver.invalidateCachedTarget(for: stoppedApp.appAudioTargetRequest)
+                }
 
-                // The app is still running, so only an audio process (e.g. Safari's WebKit GPU
-                // process) was replaced: reconnect to the new one at the row's level instead of
-                // leaving its audio uncontrolled. At most once per `reconnectInterval` per app; a
-                // sooner one waits out the rest of it, so a helper that keeps dying cannot loop and
-                // control is never dropped.
-                if let processIdentifier = stoppedApp.processIdentifier,
-                   isProcessRunning(processIdentifier) {
+                // Control ended without the user asking: an audio process was replaced, the app
+                // relaunched, or the output device changed. The row still shows its level, so bring
+                // control back once the app plays again rather than letting it play at full volume.
+                // At most once per `reconnectInterval` per app; a sooner one waits out the rest of
+                // it, so a helper that keeps dying cannot loop and control is never dropped.
+                if [.liveControlAppExited, .liveControlOutputChanged].contains(result.outcome),
+                   stoppedApp.needsRealControl {
+                    if result.outcome == .liveControlOutputChanged {
+                        // The display path below no longer sees the output-change outcome, which
+                        // is what normally drops helper targets cached for the old device.
+                        appAudioTargetResolver.invalidateAllCachedTargets()
+                    }
                     let sinceLast = Date().timeIntervalSince(lastAutomaticRestartAt[stoppedAppID] ?? .distantPast)
                     scheduleReconnect(stoppedAppID, after: max(0, reconnectInterval - sinceLast))
-                    AppLogger.processTap.info("Product Real reconnecting after audio process exit app=\(stoppedApp.name, privacy: .public)")
+                    AppLogger.processTap.info("Product Real reconnecting app=\(stoppedApp.name, privacy: .public) after=\(result.outcome == .liveControlOutputChanged ? "output change" : "audio process exit", privacy: .public)")
                     updateActiveLiveControlAppNameAfterProductChange()
                     sideEffects?.applyLiveControlStoppedDisplay(
                         result: ProcessTapTestResult(
@@ -217,24 +228,42 @@ final class ProductRealStopCoordinator {
         sideEffects?.applyLiveControlStoppedDisplay(result: result, diagnostics: diagnostics)
     }
 
+    /// Restarts control for rows that were Real when the system went to sleep, once each app plays
+    /// again. Called by the view model after its wake refresh.
+    func reconnectAfterWake() {
+        let appIDs = appsToReconnectAfterWake
+        appsToReconnectAfterWake = []
+        for appID in appIDs {
+            scheduleReconnect(appID, after: 0)
+        }
+    }
+
+    /// Waits `delay`, then polls until the row's app is running and has a Core Audio process (it
+    /// plays, or has played, audio) and restarts its control at the row's level. Gives up when the
+    /// row is started again, set back to 100% unmuted, or after 30 minutes.
     private func scheduleReconnect(_ appID: MixerAppItem.ID, after delay: TimeInterval) {
         pendingReconnects[appID]?.cancel()
         pendingReconnects[appID] = Task { [weak self] in
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
-            guard !Task.isCancelled, let self else {
-                return
+            let giveUpAt = Date().addingTimeInterval(30 * 60)
+            while let self, !Task.isCancelled, Date() < giveUpAt {
+                guard self.productRealControlState.activeSessionsByAppID[appID] == nil,
+                      let app = self.context?.apps.first(where: { $0.id == appID }),
+                      app.needsRealControl else {
+                    break
+                }
+                if let processIdentifier = app.processIdentifier,
+                   self.isProcessRunning(processIdentifier),
+                   !self.appAudioTargetResolver.matchedAudioProcessIdentifiers(for: app.appAudioTargetRequest).isEmpty {
+                    self.pendingReconnects[appID] = nil
+                    self.lastAutomaticRestartAt[appID] = Date()
+                    self.restartAfterAudioProcessChange(appID)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: UInt64(self.reconnectPollInterval * 1_000_000_000))
             }
-            self.pendingReconnects[appID] = nil
-            // Skip when the row was started again or the app quit while waiting.
-            guard self.productRealControlState.activeSessionsByAppID[appID] == nil,
-                  let processIdentifier = self.context?.apps.first(where: { $0.id == appID })?.processIdentifier,
-                  self.isProcessRunning(processIdentifier) else {
-                return
-            }
-            self.lastAutomaticRestartAt[appID] = Date()
-            self.restartAfterAudioProcessChange(appID)
         }
     }
 
@@ -289,6 +318,8 @@ final class ProductRealStopCoordinator {
     /// `tearDownAllProcessTapWork` calls this (via the facade) in place of its previous inline resets.
     func tearDownProductStateForHardStop() {
         cancelPendingReconnects()
+        // Sleep (and quit) land here; remember the Real rows so wake can bring them back.
+        appsToReconnectAfterWake = productRealControlState.activeVisibleAppIDs
         productRealControlState.clearAllStartRequests()
         productRealControlState.clearAllResolutions()
         productRealControlState.clearActiveSession()

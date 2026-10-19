@@ -1867,7 +1867,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     // The engine watchdog leg of the same lifecycle: a per-session output-changed stop arriving
     // from the engine (panel closed, no view-model trigger) must clear that session's row state
     // and surface the user-visible warning, without disturbing another app's session.
-    func testEngineOutputDeviceChangedStopClearsSessionStateAndShowsWarning() async {
+    func testEngineOutputDeviceChangedStopClearsSessionStateAndReconnectsQuietly() async {
         let controller = FakeControlledLiveController()
         let harness = makeControlledHarness(liveController: controller)
         harness.viewModel.setExperimentalRealAppControlEnabled(true)
@@ -1878,8 +1878,8 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         controller.emitSessionStopped(handlerForSessionID: spotifyID, outcome: .liveControlOutputChanged)
         await waitFor { !harness.viewModel.isExperimentalControlActive(for: "spotify") }
 
-        XCTAssertEqual(harness.viewModel.statusMessage?.text, "Live control stopped: output device changed")
-        XCTAssertEqual(harness.viewModel.statusMessage?.style, .warning)
+        // The row is still lowered, so it waits to reconnect on the new device instead of warning.
+        XCTAssertNotEqual(harness.viewModel.statusMessage?.text, "Live control stopped: output device changed")
         XCTAssertEqual(harness.appAudioTargetResolver.invalidateAllCount, 1)
         XCTAssertTrue(harness.viewModel.isExperimentalControlActive(for: "music"))
         XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)

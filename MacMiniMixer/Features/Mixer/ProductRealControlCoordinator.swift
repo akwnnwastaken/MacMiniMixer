@@ -186,4 +186,9 @@ final class ProductRealControlCoordinator {
         stopCoordinator.tearDownProductStateForHardStop()
     }
 
+    /// Restarts control for the rows that were Real before sleep. Forwards to the stop coordinator.
+    func reconnectAfterWake() {
+        stopCoordinator.reconnectAfterWake()
+    }
+
 }

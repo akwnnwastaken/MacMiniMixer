@@ -96,7 +96,7 @@ The direct engine plays at the device's own sample rate and never changes it. In
 - **Public APIs only** — No private APIs and no third-party dependencies; the one grey area is the `proc_pidinfo` flavor above.
 - **Nothing starts on its own** — No capture at launch, none because an app appears in the list, none until you interact with its row. Helper discovery and diagnostics are user-triggered.
 - **System changes are yours** — The default output device and the system volume change only when you use the output selector or the System Output controls. The device's sample rate is never touched.
-- **Clean teardown** — Sessions are torn down on system sleep, output-device change, app quit, and when the app exits. Closing the panel does not stop active control; the menu bar icon and the orange waveform button in the panel header show that it is active.
+- **Clean teardown** — Sessions are torn down on system sleep, output-device change, app quit, and when the app exits. A row you lowered or muted reconnects on its own once its app plays again (after wake, on the new output device, or when the app is relaunched), so the slider and the real volume stay in step. Closing the panel does not stop active control; the menu bar icon and the orange waveform button in the panel header show that it is active.
 - **Permission** — macOS asks for **System Audio Recording** the first time a row becomes Real.
 
 > [!NOTE]

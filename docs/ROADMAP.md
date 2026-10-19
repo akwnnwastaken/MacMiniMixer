@@ -95,7 +95,8 @@ not yet a finished Windows Volume Mixer replacement.
   (`stopActiveAudioWorkForOutputDeviceChange`).
 - System sleep/wake lifecycle handling: app-lifetime observers in `MixerViewModel`
   synchronously tear down all active/pending Process Tap work on sleep (typed `.systemSleep`
-  stop reason) and do refresh-only reconciliation on wake, with no automatic session restart.
+  stop reason) and refresh on wake; since v2.5.3 the rows that were Real reconnect once their app
+  plays again.
 
 ---
 
@@ -151,8 +152,9 @@ not yet a finished Windows Volume Mixer replacement.
 - Process Tap features are guarded for macOS 14.2+ while deployment target remains
   macOS 13.0.
 - System sleep tears down all active/pending Product, Advanced manual, and
-  diagnostic work (no resurrection of stale starts); system wake only refreshes
-  device/volume/app state and never auto-restarts sessions. Rationale in `docs/DECISIONS.md`.
+  diagnostic work (no resurrection of stale starts); system wake refreshes device/volume/app
+  state, then (since v2.5.3) reconnects lowered or muted rows through a fresh resolution once their
+  app plays again. Rationale in `docs/DECISIONS.md`.
 - Safety constraints remain:
   - Public APIs only.
   - No HAL driver.

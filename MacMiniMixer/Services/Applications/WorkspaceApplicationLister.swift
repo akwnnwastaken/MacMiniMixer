@@ -3,7 +3,7 @@ import AppKit
 struct WorkspaceApplicationLister: ApplicationListing {
     private let defaultVolume: Double
 
-    init(defaultVolume: Double = 70) {
+    init(defaultVolume: Double = AppConstants.unityAppVolume) {
         self.defaultVolume = defaultVolume
     }
 

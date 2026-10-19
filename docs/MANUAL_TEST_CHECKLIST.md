@@ -122,11 +122,12 @@ Do not treat unsigned XCTest or static source review as permission/Login Item ac
 - **Expected**: Device list refreshes within ~2 seconds. New device appears. If AirPods
   auto-switch, selection updates.
 
-### 2.6 Device change stops active live control
-- Start live control for an app (see section 4).
-- Connect/disconnect an audio device so the default output changes.
-- **Expected**: Live control stops. Status message "Live control stopped: output device
-  changed". Menu bar icon reverts to non-active state.
+### 2.6 Device change reconnects active live control
+- Lower an app to ~30% so it becomes Real (see section 4), with audio playing.
+- Connect/disconnect an audio device so the default output changes (e.g. AirPods).
+- **Expected**: The session stops for the old device and, within a few seconds, reconnects on the
+  new one at ~30% with no "output device changed" warning. A row at 100% and unmuted just stops.
+- **Red flags**: the app plays at full volume on the new device while the slider shows ~30%.
 
 ---
 
@@ -386,16 +387,16 @@ to later sections stay valid. Concurrent sessions are covered by §16 and §19.
 
 ## 14. System Sleep / Wake
 
-These verify the deliberate sleep-teardown / wake-refresh-only behavior. No automatic
-session restart is expected after wake — the user re-engages manually. The sleep/wake
+These verify the sleep teardown and the wake reconnect: rows that were Real reconnect after wake
+once their app plays again (since v2.5.3). The sleep/wake
 observers are app-lifetime (in `MixerViewModel`), so they fire whether or not the panel is open.
 
 ### 14.1 Sleep tears down active Product live control
 - Start Product Real Control for an app (section 4). Confirm the banner and menu bar waveform.
 - Put the Mac to sleep (Apple menu → Sleep, or close the lid), wait a few seconds, then wake.
-- **Expected**: After wake, live control is no longer active (no banner, menu bar icon
-  reverted). The app's audio plays at its normal volume. No crash, no hung Core Audio
-  resources (check Console for cleanup logs). Real app control stays on (there is no toggle).
+- **Expected**: During sleep the session is torn down (Console cleanup logs, no hung Core Audio
+  resources). After wake, once the app plays, the row is Real again at its level. No crash.
+- **Red flags**: after wake the app plays at full volume while the slider still shows its level.
 
 ### 14.2 Sleep stops Advanced work
 - Start Advanced manual live control. Sleep, wake.
@@ -410,14 +411,14 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
   appears merely from waking (nothing was active to stop).
 
 ### 14.4 User re-engages after wake
-- After a wake that tore down a session (14.1), move the app's slider again.
+- After a wake, with a row back at 100% and unmuted (so it does not reconnect), move its slider.
 - **Expected**: A fresh live-control session starts normally (fresh helper resolution for
   browser rows). Behavior is identical to a first-time start.
 
 ### 14.5 Sleep/wake with the panel closed
 - Start live control, close the panel, sleep, wake, reopen the panel.
 - **Expected**: Same as 14.1 — the session was torn down at sleep even though the panel was
-  closed. The reopened panel shows no active banner.
+  closed, and reconnects after wake once the app plays.
 
 ### 14.6 Three-session sleep/wake smoke (cap=3 evidence gate)
 The sleep/wake teardown is collection-based and expected to be N-safe; this confirms it on real
@@ -433,16 +434,20 @@ Procedure:
 6. Put the Mac to sleep briefly (Apple menu → Sleep, or close the lid).
 7. Wake, then reopen the panel.
 
-- **Expected**: no Real session remains active; the banner is gone; real app control stays
-  on (no toggle); **all three apps' audio returns to normal without quitting/relaunching the
-  app**; no cleanup warning / drop / failure; CPU returns to ~0%.
-- **Red flags**: after wake an app stays silent/muted; audio only recovers when MacMiniMixer is
-  quit (orphan tap); a session still shows active (resurrection); any cleanup warning / drop /
-  failure; CPU does not drop after stop; crash.
+- **Expected**: the three sessions are torn down at sleep (no cleanup warning / drop / failure)
+  and, after wake, each lowered row reconnects at its level once its app plays; nothing plays
+  twice or stays silent.
+- **Red flags**: after wake an app stays silent/muted or plays at full volume while its slider is
+  lowered; audio only recovers when MacMiniMixer is quit (orphan tap); any cleanup warning / drop /
+  failure; crash.
 
 Notes:
 - This test was written for the Product cap=3 path (three sessions).
 - More than three sessions need their own evidence (§19); passing this only covers three.
+
+### 14.7 App relaunch keeps its level
+- Lower Spotify to ~30% (Real). Quit Spotify, reopen it and press play, with the panel closed.
+- **Expected**: Within a couple of seconds of playback the row is Real again at ~30%.
 
 ---
 

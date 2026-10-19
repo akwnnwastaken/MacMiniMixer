@@ -66,6 +66,7 @@ final class MixerViewModel: ObservableObject {
     private var terminationObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
+    private var launchObserver: NSObjectProtocol?
 
     init(
         applicationLister: ApplicationListing,
@@ -191,8 +192,8 @@ final class MixerViewModel: ObservableObject {
             }
         }
 
-        // `didWake` only refreshes device/app state — it is not time-critical (sessions were torn
-        // down at sleep and are not restored), so a deferred main-actor hop is fine. Same owner and
+        // `didWake` refreshes device/app state and queues reconnects for the rows that were Real;
+        // nothing here is time-critical, so a deferred main-actor hop is fine. Same owner and
         // lifetime as the sleep observer; fires regardless of panel state.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -201,6 +202,18 @@ final class MixerViewModel: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.handleSystemDidWake()
+            }
+        }
+
+        // A relaunched app gets a new pid; refreshing the list lets a waiting reconnect find it
+        // even while the panel is closed.
+        launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshApplications()
             }
         }
 
@@ -233,6 +246,9 @@ final class MixerViewModel: ObservableObject {
         }
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        if let launchObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(launchObserver)
         }
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
@@ -701,23 +717,22 @@ final class MixerViewModel: ObservableObject {
     /// the system is about to sleep. Reuses the same path as termination so logs/diagnostics carry
     /// the accurate `.systemSleep` reason while preserving the stale-start / session-ID guards: any
     /// pending start that completes after this is rejected (cleared token) and its orphan engine
-    /// session torn down by its own id. No automatic restart — the user re-engages after wake; the
-    /// global Real App Control toggle preference is left untouched. Surfaces no status/warning.
+    /// session torn down by its own id. The Real rows are remembered and reconnected after wake (see
+    /// `handleSystemDidWake`); the global Real App Control toggle is left untouched. No status/warning.
     func handleSystemWillSleep() {
         tearDownAllProcessTapWork(liveStopReason: .systemSleep)
     }
 
-    /// Refresh-only reconciliation after the system wakes. Output device, default selection,
-    /// system volume/mute, and the visible app list may all have changed during sleep, so this
-    /// pulls them fresh through the existing refresh paths (which also invalidate helper cache for
-    /// removed/changed app PIDs). It deliberately does NOT restart any Product session, resolve
-    /// helpers, re-enable anything, or touch the Real App Control toggle — sessions stay torn down
-    /// and the user re-engages. Idempotent and safe to call repeatedly; `refreshOutputDevices`
-    /// surfaces no "output changed" teardown/warning here because nothing is active post-sleep.
+    /// Reconciliation after the system wakes. Output device, default selection, system volume/mute,
+    /// and the visible app list may all have changed during sleep, so this pulls them fresh through
+    /// the existing refresh paths, then asks Product Real to reconnect the rows that were Real before
+    /// sleep — each one only once its app plays audio again, and only if the row is still lowered,
+    /// boosted or muted. Idempotent and safe to call repeatedly.
     func handleSystemDidWake() {
         refreshOutputDevices()
         refreshSystemOutputVolume()
         refreshApplications()
+        productRealControlCoordinator.reconnectAfterWake()
     }
 
     /// Shared teardown body for termination and system sleep. The two differ only in the live stop

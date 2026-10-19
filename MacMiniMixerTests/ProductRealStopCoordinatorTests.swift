@@ -187,32 +187,25 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
         var restartedAppIDs: [MixerAppItem.ID] = []
         harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
         let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [appA.id: [1]]
 
         harness.coordinator.handleProductLiveControlStopped(
             sessionID: sidA, result: makeResult(.liveControlAppExited), diagnostics: nil
         )
 
         // The app is still running: reconnect quietly instead of warning "app exited".
-        await waitUntil { restartedAppIDs == [appA.id] }
+        await waitFor { restartedAppIDs == [appA.id] }
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlStopped)
 
         // A second exit right away waits out the interval, then reconnects again.
-        let sidA2 = ProcessTapLiveSessionID()
-        harness.stateStore.productRealControlState.beginSession(
-            visibleAppID: appA.id, displayName: appA.name,
-            controlledProcessIdentifier: appA.processIdentifier,
-            source: .directVisiblePID, liveSessionID: sidA2
-        )
+        let sidA2 = beginSession(for: appA, in: harness)
         let secondStop = Date()
         harness.coordinator.handleProductLiveControlStopped(
             sessionID: sidA2, result: makeResult(.liveControlAppExited), diagnostics: nil
         )
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlStopped)
         XCTAssertEqual(restartedAppIDs, [appA.id])
-        let deadline = Date().addingTimeInterval(3)
-        while restartedAppIDs.count < 2 && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
+        await waitFor { restartedAppIDs.count == 2 }
         XCTAssertEqual(restartedAppIDs, [appA.id, appA.id])
         XCTAssertGreaterThan(Date().timeIntervalSince(secondStop), 0.2)
     }
@@ -222,31 +215,49 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
         var restartedAppIDs: [MixerAppItem.ID] = []
         harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
         let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [appA.id: [1]]
         harness.coordinator.handleProductLiveControlStopped(
             sessionID: sidA, result: makeResult(.liveControlAppExited), diagnostics: nil
         )
-        await waitUntil { restartedAppIDs == [appA.id] }
+        await waitFor { restartedAppIDs == [appA.id] }
 
-        let sidA2 = ProcessTapLiveSessionID()
-        harness.stateStore.productRealControlState.beginSession(
-            visibleAppID: appA.id, displayName: appA.name,
-            controlledProcessIdentifier: appA.processIdentifier,
-            source: .directVisiblePID, liveSessionID: sidA2
-        )
+        let sidA2 = beginSession(for: appA, in: harness)
         harness.coordinator.handleProductLiveControlStopped(
             sessionID: sidA2, result: makeResult(.liveControlAppExited), diagnostics: nil
         )
-        harness.coordinator.stopProductLiveSessions(reason: .outputDeviceChanged)
+        harness.coordinator.stopProductLiveSessions(reason: .userStopped)
         try? await Task.sleep(nanoseconds: 400_000_000)
 
         XCTAssertEqual(restartedAppIDs, [appA.id])
     }
 
-    func testAppExitDoesNotReconnectWhenAppProcessIsGone() {
-        let harness = makeStopHarness()
+    func testOutputChangeReconnectsLoweredRowOnceItPlays() async {
+        let harness = makeStopHarness(isProcessRunning: { _ in true })
         var restartedAppIDs: [MixerAppItem.ID] = []
         harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
-        let (_, _, sidA, _) = makeTwoConfirmedSessions(harness)
+        let (appA, _, sidA, _) = makeTwoConfirmedSessions(harness)
+
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA, result: makeResult(.liveControlOutputChanged), diagnostics: nil
+        )
+        XCTAssertEqual(harness.resolver.invalidatedAllCount, 1)
+        XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlStopped)
+
+        // Nothing restarts until the app has an audio process again.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(restartedAppIDs.isEmpty)
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [appA.id: [1]]
+        await waitFor { restartedAppIDs == [appA.id] }
+    }
+
+    func testRowAtFullLevelDoesNotReconnect() {
+        let harness = makeStopHarness(isProcessRunning: { _ in true })
+        var restartedAppIDs: [MixerAppItem.ID] = []
+        harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
+        let (appA, appB, sidA, _) = makeTwoConfirmedSessions(harness)
+        var fullLevelA = appA
+        fullLevelA.volume = AppConstants.unityAppVolume
+        harness.context.apps = [fullLevelA, appB]
 
         harness.coordinator.handleProductLiveControlStopped(
             sessionID: sidA, result: makeResult(.liveControlAppExited), diagnostics: nil
@@ -254,6 +265,39 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(restartedAppIDs.isEmpty)
         XCTAssertEqual(harness.sideEffects.stoppedDisplayCalls.last?.result.outcome, .liveControlAppExited)
+    }
+
+    func testRelaunchedAppReconnectsWithItsNewProcess() async {
+        let harness = makeStopHarness(isProcessRunning: { $0 == 9 })
+        var restartedAppIDs: [MixerAppItem.ID] = []
+        harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
+        let (appA, appB, sidA, _) = makeTwoConfirmedSessions(harness)
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [appA.id: [9]]
+
+        // The app quit (pid 1 is gone): wait instead of giving up.
+        harness.coordinator.handleProductLiveControlStopped(
+            sessionID: sidA, result: makeResult(.liveControlAppExited), diagnostics: nil
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(restartedAppIDs.isEmpty)
+
+        // It relaunches with pid 9; the row keeps its level.
+        harness.context.apps = [makeApp(id: appA.id, name: appA.name, pid: 9), appB]
+        await waitFor { restartedAppIDs == [appA.id] }
+    }
+
+    func testWakeReconnectsRowsThatWereRealBeforeSleep() async {
+        let harness = makeStopHarness(isProcessRunning: { _ in true })
+        var restartedAppIDs: [MixerAppItem.ID] = []
+        harness.coordinator.setRestartAfterAudioProcessChange { restartedAppIDs.append($0) }
+        let (appA, appB, _, _) = makeTwoConfirmedSessions(harness)
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [appA.id: [1], appB.id: [2]]
+
+        harness.coordinator.tearDownProductStateForHardStop()
+        XCTAssertTrue(harness.stateStore.productRealControlState.activeSessions.isEmpty)
+        harness.coordinator.reconnectAfterWake()
+
+        await waitFor { Set(restartedAppIDs) == [appA.id, appB.id] }
     }
 
     // MARK: - App-exit stop slice
@@ -461,7 +505,8 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
 
     private func makeStopHarness(
         isProcessRunning: @escaping (Int32) -> Bool = { _ in false },
-        reconnectInterval: TimeInterval = 10
+        reconnectInterval: TimeInterval = 10,
+        reconnectPollInterval: TimeInterval = 0.02
     ) -> StopHarness {
         let stateStore = ProductRealControlStateStore()
         let liveSessionManager = FakeProductRealLiveSessionManager()
@@ -479,7 +524,8 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
             context: context,
             cancelResolution: { reason in cancelResolutionSpy.record(reason) },
             isProcessRunning: isProcessRunning,
-            reconnectInterval: reconnectInterval
+            reconnectInterval: reconnectInterval,
+            reconnectPollInterval: reconnectPollInterval
         )
         return StopHarness(
             coordinator: coordinator,
@@ -538,6 +584,30 @@ final class ProductRealStopCoordinatorTests: XCTestCase {
 
     /// Polls a deterministic condition via cooperative yields — no sleeps. Bounded so a logic error
     /// fails fast instead of hanging.
+    /// Wall-clock wait for conditions that depend on real sleeps (the reconnect delay and poll).
+    private func waitFor(
+        timeout: TimeInterval = 3,
+        _ condition: @escaping @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(condition(), "waitFor condition not met within \(timeout) s", file: file, line: line)
+    }
+
+    private func beginSession(for app: MixerAppItem, in harness: StopHarness) -> ProcessTapLiveSessionID {
+        let sessionID = ProcessTapLiveSessionID()
+        harness.stateStore.productRealControlState.beginSession(
+            visibleAppID: app.id, displayName: app.name,
+            controlledProcessIdentifier: app.processIdentifier,
+            source: .directVisiblePID, liveSessionID: sessionID
+        )
+        return sessionID
+    }
+
     private func waitUntil(_ condition: @escaping @MainActor () -> Bool, iterations: Int = 5000) async {
         var i = 0
         while !condition() && i < iterations {
