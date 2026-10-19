@@ -391,7 +391,7 @@ primary one was watched, so a replaced WebKit GPU process played on uncontrolled
 is still running, `ProductRealStopCoordinator` reconnects it at the row's level through
 `requestAutomaticStart`, at most once per 10 s per app, without the "app exited" warning.
 
-**Done (unreleased)**: a helper *added* while the old one lives on is caught too.
+**Done (v2.5.2)**: a helper *added* while the old one lives on is caught too.
 `ProductRealStartCoordinator` re-matches the app's audio processes every 2 s per live session (on
 its diagnostics callback); an untapped one ends the session as "app exited", and the same reconnect
 path restarts it with the new process included.

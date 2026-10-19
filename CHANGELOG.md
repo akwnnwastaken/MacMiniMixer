@@ -16,10 +16,18 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.5.2] - 2026-10-19
+
+### Highlights
+- **Browser control holds through new audio processes.** If Safari or Chrome starts an extra audio
+  process, control now covers it within about two seconds, and a reconnect is never dropped.
+
 ### Fixed
 - **A browser's new audio process is controlled too.** If Safari or Chrome starts an extra audio
   process while the old one keeps running, control now restarts within about two seconds to include
   it, instead of letting it play at full volume.
+- **Reconnects no longer give up.** A second reconnect within 10 seconds used to stop control with
+  an "app exited" warning; it now waits out the rest of the 10 seconds and reconnects.
 
 ## [v2.5.1] - 2026-10-19
 
