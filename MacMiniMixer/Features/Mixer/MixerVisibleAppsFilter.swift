@@ -7,12 +7,13 @@ enum MixerVisibleAppsFilter {
     /// The apps that should be shown in the mixer panel.
     ///
     /// When `showAllApps` is true, every app is returned in its original order. Otherwise an app is
-    /// shown when it is likely audio-relevant, is an active live-control target, or is currently
-    /// resolving its app-audio target. Ordering follows `apps`; no app appears twice.
+    /// shown when it is likely audio-relevant, is currently playing audio, is an active live-control
+    /// target, or is currently resolving its app-audio target. Ordering follows `apps`; no app appears twice.
     ///
     /// - Parameters:
     ///   - apps: The full app list, in the order it should be displayed.
     ///   - showAllApps: When true, bypass filtering and return `apps` unchanged.
+    ///   - outputActiveAppIDs: App ids Core Audio currently reports as playing audio.
     ///   - activeVisibleAppIDs: Visible app ids with an active/optimistic Product Real session.
     ///   - resolvingAppIDs: Visible app ids currently resolving an app-audio target.
     ///   - selectedProcessTapAppID: The Advanced diagnostic selection, if any.
@@ -20,6 +21,7 @@ enum MixerVisibleAppsFilter {
     static func visibleApps(
         apps: [MixerAppItem],
         showAllApps: Bool,
+        outputActiveAppIDs: Set<MixerAppItem.ID> = [],
         activeVisibleAppIDs: Set<MixerAppItem.ID>,
         resolvingAppIDs: Set<MixerAppItem.ID>,
         selectedProcessTapAppID: MixerAppItem.ID?,
@@ -31,6 +33,7 @@ enum MixerVisibleAppsFilter {
 
         return apps.filter { app in
             app.isLikelyAudioRelevant ||
+                outputActiveAppIDs.contains(app.id) ||
                 isActiveLiveControlTarget(
                     app.id,
                     activeVisibleAppIDs: activeVisibleAppIDs,

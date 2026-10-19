@@ -53,6 +53,25 @@ final class MixerVisibleAppsFilterTests: XCTestCase {
         XCTAssertEqual(visible.map(\.id), ["b", "d"])
     }
 
+    func testAppPlayingAudioIsVisibleEvenWhenNotAudioRelevant() {
+        let apps = [
+            makeApp(id: "finder", name: "Finder"),
+            makeApp(id: "widget", name: "Widget")
+        ]
+
+        let visible = MixerVisibleAppsFilter.visibleApps(
+            apps: apps,
+            showAllApps: false,
+            outputActiveAppIDs: ["finder", "widget"],
+            activeVisibleAppIDs: [],
+            resolvingAppIDs: [],
+            selectedProcessTapAppID: nil,
+            isLiveControlActive: false
+        )
+
+        XCTAssertEqual(visible.map(\.id), ["finder", "widget"])
+    }
+
     func testActiveProductRealAppStaysVisibleEvenWhenNotAudioRelevant() {
         let apps = [
             makeApp(id: "widget", name: "Widget"),

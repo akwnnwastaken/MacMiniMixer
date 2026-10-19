@@ -409,6 +409,7 @@ final class MixerViewModel: ObservableObject {
         MixerVisibleAppsFilter.visibleApps(
             apps: apps,
             showAllApps: showAllApps,
+            outputActiveAppIDs: activeOutputAppIDs,
             activeVisibleAppIDs: Set(productRealControlState.activeVisibleAppIDs),
             // A row whose Product start is queued behind the start lane stays visible like a
             // resolving row, so its pending state cannot be filtered out.
