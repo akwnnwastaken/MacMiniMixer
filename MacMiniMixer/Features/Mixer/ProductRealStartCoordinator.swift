@@ -55,6 +55,7 @@ final class ProductRealStartCoordinator {
     /// one debug log so an intermittent Starv spike can be attributed to a specific session/app. See
     /// `ProductRealStarvationAttributionLog`.
     private var starvationAttribution = ProductRealStarvationAttributionLog()
+    private var lastAudioProcessCheckAt: [MixerAppItem.ID: Date] = [:]
 
     /// The app whose Product Real session owns the single shared Advanced live-diagnostics surface
     /// (`setProcessTapLiveDiagnostics` / `setLiveControlDiagnosticProgress`), so concurrent sessions
@@ -472,6 +473,35 @@ final class ProductRealStartCoordinator {
         app.audioTargetRequest(amongRunningApps: context?.apps ?? [])
     }
 
+    /// A browser can start a new audio process (e.g. a second WebKit GPU process) while the old one
+    /// lives on. The running tap does not cover it, so its audio would play at full volume. Every 2 s
+    /// per session, re-match the app's audio processes; one nobody taps ends this session as "app
+    /// exited", and the stop side reconnects it (once per 10 s) with the new process included.
+    private func restartIfAppGainedAudioProcess(appID: MixerAppItem.ID, sessionID: ProcessTapLiveSessionID) {
+        let now = Date()
+        guard now.timeIntervalSince(lastAudioProcessCheckAt[appID] ?? .distantPast) >= 2,
+              let session = productRealControlState.activeSessionsByAppID[appID],
+              session.liveSessionID == sessionID,
+              let app = context?.apps.first(where: { $0.id == appID }) else {
+            return
+        }
+        lastAudioProcessCheckAt[appID] = now
+
+        let tapped = productRealControlState.processIdentifiersControlledByOtherSessions(than: appID)
+            .union(session.controlledProcessIdentifiers)
+        let untapped = appAudioTargetResolver.matchedAudioProcessIdentifiers(for: audioTargetRequest(for: app))
+            .filter { !tapped.contains($0) }
+        guard !untapped.isEmpty else {
+            return
+        }
+
+        AppLogger.processTap.info("Product Real restarting for a new audio process app=\(app.name, privacy: .public) pids=\(ProductRealStartCoordinator.processIdentifierList(untapped), privacy: .public)")
+        let stopTask = Task {
+            _ = await liveSessionManager.stopSession(id: sessionID, reason: .targetAppExited)
+        }
+        startSettleGate.registerStop(stopTask)
+    }
+
     /// Drops from `target` every process another app's Product Real session (optimistic or
     /// confirmed) already taps, so no process is ever tapped twice — two `.mutedWhenTapped` taps over
     /// one process would replay its audio twice. Keeps the primary process when it survives,
@@ -643,6 +673,7 @@ final class ProductRealStartCoordinator {
                         appName: app.name,
                         diagnostics: diagnostics
                     )
+                    self.restartIfAppGainedAudioProcess(appID: app.id, sessionID: sessionID)
                 }
             } onStopped: { sessionID, result, diagnostics in
                 Task { @MainActor in

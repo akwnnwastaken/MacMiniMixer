@@ -641,6 +641,38 @@ final class ProductRealStartCoordinatorTests: XCTestCase {
         XCTAssertFalse(harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 11 })
     }
 
+    // MARK: - New audio process while live
+
+    func testNewUntappedAudioProcessRestartsSession() async {
+        let harness = makeStartHarness()
+        let app = makeApp(id: "safari", name: "Safari", pid: 1)
+        harness.context.apps = [app]
+        let sessionID = ProcessTapLiveSessionID()
+        await startConfirmedDiagnosticsSession(app, sessionID: sessionID, in: harness)
+
+        // Only the tapped process plays: nothing to do.
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [app.id: [1]]
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sessionID, makeDiagnostics(callbackCount: 1))
+        await waitUntil { harness.sideEffects.diagnosticProgressHistory.contains { $0?.callbackCount == 1 } }
+        XCTAssertTrue(harness.liveSessionManager.stopSessionCalls.isEmpty)
+    }
+
+    func testAudioProcessAddedWhileLiveEndsSessionForReconnect() async {
+        let harness = makeStartHarness()
+        let app = makeApp(id: "safari", name: "Safari", pid: 1)
+        harness.context.apps = [app]
+        let sessionID = ProcessTapLiveSessionID()
+        await startConfirmedDiagnosticsSession(app, sessionID: sessionID, in: harness)
+
+        // Safari started a second audio process the tap does not cover.
+        harness.resolver.matchedAudioProcessIdentifiersByAppID = [app.id: [1, 77]]
+        harness.liveSessionManager.emitCapturedDiagnostics(id: sessionID, makeDiagnostics(callbackCount: 1))
+        await waitUntil { !harness.liveSessionManager.stopSessionCalls.isEmpty }
+
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.id, sessionID)
+        XCTAssertEqual(harness.liveSessionManager.stopSessionCalls.first?.reason, .targetAppExited)
+    }
+
     // MARK: - Live diagnostics: focused session only, and only while the display is visible
     //
     // Diagnostics are delivered through each session's captured `onDiagnostics` closure. Every

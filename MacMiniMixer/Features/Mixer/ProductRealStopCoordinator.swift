@@ -25,6 +25,8 @@ final class ProductRealStopCoordinator {
     private var restartAfterAudioProcessChange: @MainActor (MixerAppItem.ID) -> Void = { _ in }
     private let isProcessRunning: (Int32) -> Bool
     private var lastAutomaticRestartAt: [MixerAppItem.ID: Date] = [:]
+    private var pendingReconnects: [MixerAppItem.ID: Task<Void, Never>] = [:]
+    private let reconnectInterval: TimeInterval
 
     init(
         stateStore: ProductRealControlStateStore,
@@ -34,9 +36,11 @@ final class ProductRealStopCoordinator {
         sideEffects: ProductRealControlSideEffects,
         context: ProductRealControlContext,
         cancelResolution: @escaping @MainActor (ProcessTapCandidateProbeStopReason) -> Void = { _ in },
-        isProcessRunning: @escaping (Int32) -> Bool = { Darwin.kill($0, 0) == 0 || errno == EPERM }
+        isProcessRunning: @escaping (Int32) -> Bool = { Darwin.kill($0, 0) == 0 || errno == EPERM },
+        reconnectInterval: TimeInterval = 10
     ) {
         self.isProcessRunning = isProcessRunning
+        self.reconnectInterval = reconnectInterval
         self.stateStore = stateStore
         self.liveSessionManager = liveSessionManager
         self.startSettleGate = startSettleGate
@@ -81,6 +85,7 @@ final class ProductRealStopCoordinator {
         for appID: MixerAppItem.ID,
         reason: ProcessTapLiveStopReason = .userStopped
     ) {
+        pendingReconnects.removeValue(forKey: appID)?.cancel()
         // Per-app stop invalidates only this app's pending start, leaving other apps untouched.
         // `clearStartRequest` also drops this app's queued start (if it is still waiting for the
         // start lane), so a queued row never starts after being stopped.
@@ -119,6 +124,7 @@ final class ProductRealStopCoordinator {
     /// Delegated to by the view model's `stopProcessTapLiveControl` router; it clears no advanced-manual
     /// state.
     func stopProductLiveSessions(reason: ProcessTapLiveStopReason) {
+        cancelPendingReconnects()
         let sessionIDs = productRealControlState.activeSessions.compactMap(\.liveSessionID)
         guard !sessionIDs.isEmpty else {
             // Optimistic window before the engine returned a session id: clean up locally,
@@ -181,12 +187,13 @@ final class ProductRealStopCoordinator {
 
                 // The app is still running, so only an audio process (e.g. Safari's WebKit GPU
                 // process) was replaced: reconnect to the new one at the row's level instead of
-                // leaving its audio uncontrolled. At most once per 10 s per app, so a helper that
-                // keeps dying cannot loop.
+                // leaving its audio uncontrolled. At most once per `reconnectInterval` per app; a
+                // sooner one waits out the rest of it, so a helper that keeps dying cannot loop and
+                // control is never dropped.
                 if let processIdentifier = stoppedApp.processIdentifier,
-                   isProcessRunning(processIdentifier),
-                   lastAutomaticRestartAt[stoppedAppID].map({ Date().timeIntervalSince($0) > 10 }) ?? true {
-                    lastAutomaticRestartAt[stoppedAppID] = Date()
+                   isProcessRunning(processIdentifier) {
+                    let sinceLast = Date().timeIntervalSince(lastAutomaticRestartAt[stoppedAppID] ?? .distantPast)
+                    scheduleReconnect(stoppedAppID, after: max(0, reconnectInterval - sinceLast))
                     AppLogger.processTap.info("Product Real reconnecting after audio process exit app=\(stoppedApp.name, privacy: .public)")
                     updateActiveLiveControlAppNameAfterProductChange()
                     sideEffects?.applyLiveControlStoppedDisplay(
@@ -197,7 +204,6 @@ final class ProductRealStopCoordinator {
                         ),
                         diagnostics: diagnostics
                     )
-                    restartAfterAudioProcessChange(stoppedAppID)
                     return
                 }
             }
@@ -209,6 +215,32 @@ final class ProductRealStopCoordinator {
 
         updateActiveLiveControlAppNameAfterProductChange()
         sideEffects?.applyLiveControlStoppedDisplay(result: result, diagnostics: diagnostics)
+    }
+
+    private func scheduleReconnect(_ appID: MixerAppItem.ID, after delay: TimeInterval) {
+        pendingReconnects[appID]?.cancel()
+        pendingReconnects[appID] = Task { [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+            guard !Task.isCancelled, let self else {
+                return
+            }
+            self.pendingReconnects[appID] = nil
+            // Skip when the row was started again or the app quit while waiting.
+            guard self.productRealControlState.activeSessionsByAppID[appID] == nil,
+                  let processIdentifier = self.context?.apps.first(where: { $0.id == appID })?.processIdentifier,
+                  self.isProcessRunning(processIdentifier) else {
+                return
+            }
+            self.lastAutomaticRestartAt[appID] = Date()
+            self.restartAfterAudioProcessChange(appID)
+        }
+    }
+
+    private func cancelPendingReconnects() {
+        pendingReconnects.values.forEach { $0.cancel() }
+        pendingReconnects.removeAll()
     }
 
     // MARK: - App-exit stop slice
@@ -256,6 +288,7 @@ final class ProductRealStopCoordinator {
     /// the `productRealControlState` property so `onWillChange` still fires. The view model's
     /// `tearDownAllProcessTapWork` calls this (via the facade) in place of its previous inline resets.
     func tearDownProductStateForHardStop() {
+        cancelPendingReconnects()
         productRealControlState.clearAllStartRequests()
         productRealControlState.clearAllResolutions()
         productRealControlState.clearActiveSession()

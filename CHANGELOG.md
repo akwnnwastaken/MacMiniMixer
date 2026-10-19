@@ -16,6 +16,11 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Fixed
+- **A browser's new audio process is controlled too.** If Safari or Chrome starts an extra audio
+  process while the old one keeps running, control now restarts within about two seconds to include
+  it, instead of letting it play at full volume.
+
 ## [v2.5.1] - 2026-10-19
 
 ### Highlights

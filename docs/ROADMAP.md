@@ -391,8 +391,10 @@ primary one was watched, so a replaced WebKit GPU process played on uncontrolled
 is still running, `ProductRealStopCoordinator` reconnects it at the row's level through
 `requestAutomaticStart`, at most once per 10 s per app, without the "app exited" warning.
 
-**Still open**: a helper that is *added* without one exiting is not picked up until the next
-restart.
+**Done (unreleased)**: a helper *added* while the old one lives on is caught too.
+`ProductRealStartCoordinator` re-matches the app's audio processes every 2 s per live session (on
+its diagnostics callback); an untapped one ends the session as "app exited", and the same reconnect
+path restarts it with the new process included.
 
 **Research questions**:
 - Should a stopped helper session offer a fresh resolution retry?
