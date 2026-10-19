@@ -30,7 +30,6 @@ Services constructed at launch:
 | `CoreAudioProcessTapTester` | real | `ProcessTapTesting` |
 | `CoreAudioProcessTapReplayProbe` | real | `ProcessTapReplayProbing` |
 | `ProcessTapLiveSessionManager(maxSessions: AppConstants.maxConcurrentLiveSessions /* nil = unlimited */, controllerFactory: { CoreAudioProcessTapLiveController() })` | real | `ProcessTapLiveControlling` & `ProcessTapLiveSessionManaging` |
-| `CoreAudioProcessTapTwoAppReadinessTester` | real | `ProcessTapTwoAppReadinessTesting` |
 | `CoreAudioProcessTapCandidateAudioProbe` | real | `ProcessTapCandidateAudioProbing` |
 | `SystemProcessLister` | real | `ProcessListing` |
 | `HelperAudioTargetResolver` | real | `AppAudioTargetResolving` |
@@ -40,8 +39,8 @@ Services constructed at launch:
 system-volume display value. It never touches Core Audio. Per-app volume has no real
 system-level API, so the per-app slider state is UI-only unless Product Real Control is
 active for that row; real system volume goes through `SystemVolumeReading` /
-`SystemVolumeControlling`. The only `Mock*` types left in the app target are
-`MockApplicationLister` and `MockOutputDeviceLister`, which the real listers use as fallbacks.
+`SystemVolumeControlling`. The app target has no `Mock*` types; an empty real app or device
+list stays empty.
 
 `MixerViewModel` builds the Product Real stack itself: a `ProductRealStartSettleGate` (a
 defaulted initializer parameter, injectable in tests) and, at the end of `init`, the
@@ -71,7 +70,6 @@ Extracted coordinators:
 | `SystemOutputCoordinator` | System volume/device state, proactive volume-writability probe, and pure volume/device operations |
 | `AdvancedProcessTapDiagnosticsCoordinator` | Process Tap Test, Mute Probe, Replay Probe, diagnostic target selection, and replay gain/result state |
 | `AdvancedLiveControlCoordinator` | Manual Advanced Live start/stop orchestration |
-| `TwoAppReadinessCoordinator` | Advanced Two-App Readiness selection, target options, start/stop orchestration, snapshot/result state, and selection repair |
 | `ProductRealControlCoordinator` | Thin **facade** for Product Real Control — the only Product Real type the view model knows. Constructs the three objects below, wires their three cross-edges as `[weak self]` closures, and forwards its public API |
 | `ProductRealControlStateStore` | The single `ProductRealControlState` source (sessions, start-request tokens, pending operations, resolution state, queued starts) + `onWillChange`, shared by reference |
 | `ProductRealStartCoordinator` | App-audio resolution, start preflight, `requestAutomaticStart`, both `startExperimentalControl` overloads, the queued start lane, cached-helper retry, stale-start rejection, live-diagnostics focus, starvation attribution logging |
@@ -133,18 +131,18 @@ corners. Sections from top to bottom:
 7. **Advanced section** — **developer mode only**: the section is not built at all unless the
    `MacMiniMixerDeveloperMode` bool default is true (read once when the panel is created; enable with
    `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES` and relaunch).
-   When built it is collapsible and contains `ProcessTapTestView`, `HelperProcessDiscoveryView`,
-   `TwoAppReadinessTestView`.
+   When built it is collapsible and contains `ProcessTapTestView` and `HelperProcessDiscoveryView`.
 
 `onAppear` records whether the Advanced section is visible
 (`setLiveDiagnosticsDisplayVisible`; always false outside developer mode), then refreshes apps,
-output devices, and system volume.
+output devices, and system volume, and turns on output-activity tracking
+(`setOutputActivityVisible(true)`).
 The Advanced disclosure action updates the same flag (no `onChange`, for macOS 13).
 Two async `Task` loops run while the panel is visible: one refreshes system volume every
 1 second, another refreshes output devices every 2 seconds.
-`onDisappear` clears the visibility flag and calls `stopTwoAppReadinessForPanelClose()`, which
-also drops queued Product Real starts and cancels an in-flight helper resolution (active
-sessions keep running).
+`onDisappear` clears the visibility flag, turns output-activity tracking off, and calls
+`cancelPendingWorkForPanelClose()`, which drops queued Product Real starts, stops helper
+auto-detect, and cancels an in-flight helper resolution (active sessions keep running).
 
 All panel, row, and Advanced views carry explicit VoiceOver labels/values/hints (macOS
 13-compatible SwiftUI modifiers).
@@ -167,7 +165,9 @@ rows show an orange waveform indicator. Resolving rows show a "Resolving" spinne
 a start/stop in flight, or with a start queued behind the start lane, show a non-interactive
 pending ("working") badge (`isExperimentalControlPending`). Active, resolving, and queued rows
 stay visible even when "Show all apps" is off and the app is not otherwise considered
-audio-relevant (`MixerVisibleAppsFilter`).
+audio-relevant (`MixerVisibleAppsFilter`). So does a row Core Audio has reported as playing
+(`activeOutputAppIDs`) since the panel opened: `MixerViewModel.outputSeenAppIDs` keeps it listed
+through pauses in its audio and is cleared when the panel closes.
 
 ### Advanced Section Views
 
@@ -175,8 +175,6 @@ audio-relevant (`MixerVisibleAppsFilter`).
   probe / start/stop live control. Shows advanced target info when set.
 - **`HelperProcessDiscoveryView`** — select visible app, scan for helper candidates, probe
   individual candidate, run auto-detect, use candidate as advanced target.
-- **`TwoAppReadinessTestView`** — select App A, App B, gain; start/stop two-app test;
-  per-session diagnostics display.
 
 ### OutputDeviceSelectorView
 
@@ -210,10 +208,17 @@ badge) is known before the first slider drag. `nil` assumes writable (no false b
 rejected or successful write still updates the flag; refreshes without a device change do not
 re-probe, so evidence from a rejected write is kept.
 
-**Mute**: `SystemOutputCoordinator` implements mute as set-to-zero + restore.
+**Mute**: The panel's mute button mutes by setting the volume to zero and restoring it.
 `lastNonZeroSystemVolume` remembers the pre-mute value. On unmute,
 `restoredSystemOutputVolume` returns that value or `defaultSystemOutputRestoreVolume`
 (50) as fallback.
+
+The device also has its own mute flag (`kAudioDevicePropertyMute`, set by the keyboard mute key)
+that is separate from its volume. `CoreAudioSystemVolumeReader.readCurrentOutputMuted()` reads it
+(output scope, then global, main element only) at init and on every volume refresh, and
+`isSystemOutputMuted` is true when it is set or the volume is zero. The mute button clears it
+first (`CoreAudioSystemVolumeController.setCurrentOutputMuted(false)`) and only restores the
+volume if that is also zero; raising the system slider clears it too, like the volume keys.
 
 **Live sync**: `MixerPanelView` runs a background loop that refreshes volume every 1 second
 while the panel is open, so external changes (e.g., physical keyboard keys) stay in sync.
@@ -239,7 +244,7 @@ device is always included even if virtual. Icons are heuristically assigned by n
 `SystemOutputCoordinator` refreshes device state. If the default output changes externally
 (AirPods auto-connect), `MixerViewModel.refreshOutputDevices()` invalidates every pending
 Product start (and the start queue), then `stopActiveAudioWorkForOutputDeviceChange` stops all
-Product Real sessions (or Advanced manual Live Control), Two-App Readiness, helper probe /
+Product Real sessions (or Advanced manual Live Control), helper probe /
 auto-detect, an in-flight helper resolution, and Replay Probe, and the helper cache is
 invalidated.
 
@@ -288,19 +293,17 @@ is exercised only by tests.
 **`requestAutomaticStart(for:)` order** (`ProductRealStartCoordinator`):
 1. `isExperimentalRealAppControlEnabled` must be set (silent return otherwise; the app sets it at
    launch, so it only matters in tests).
-2. Two-App Readiness must not be running ("Stop two-app test first").
-3. The app must still be in `context.apps` and eligible (`isEligibleForExperimentalLiveControl`).
-4. Dedupe: already resolving, or pending (start/stop in flight or queued) → no-op.
-5. A helper probe / auto-detect must not be running ("Stop helper probe first").
-6. Already active for this app → no-op.
-7. **Lane busy → enqueue** (see "Queued Start Lane").
-8. Only with the lane free: `productSessionStartBlockReason` — blocks while an Advanced diagnostic
+2. The app must still be in `context.apps` and eligible (`isEligibleForExperimentalLiveControl`).
+3. Dedupe: already resolving, or pending (start/stop in flight or queued) → no-op.
+4. A helper probe / auto-detect must not be running ("Stop helper probe first").
+5. Already active for this app → no-op.
+6. **Lane busy → enqueue** (see "Queued Start Lane").
+7. Only with the lane free: `productSessionStartBlockReason` — blocks while an Advanced diagnostic
    is running or Advanced manual Live Control is active (mutually exclusive with product), and,
    only when a cap is configured, once that many sessions exist.
-9. `startResolvedExperimentalControl(for: app)`.
+8. `startResolvedExperimentalControl(for: app)`.
 
-The row toggle path (`startExperimentalControl(for:)`) checks Two-App Readiness, then enqueues
-while the lane is busy, then ("Process Tap is already busy" — now only for Advanced work) the
+The row toggle path (`startExperimentalControl(for:)`) enqueues while the lane is busy, then ("Process Tap is already busy" — now only for Advanced work) the
 same block-reason check plus app/eligibility/PID/`NSRunningApplication` validation before calling
 the async start body.
 
@@ -568,10 +571,9 @@ mechanism with the same duration, but adds early-accept logic and caching.
 Set by `AdvancedHelperDiscoveryCoordinator.useHelperCandidateAsAdvancedTarget(_:)`.
 Cleared by `AdvancedHelperDiscoveryCoordinator.clearAdvancedProcessTapTarget()`.
 
-When `advancedProcessTapTarget` is set, Process Tap Test, Replay Probe, and Two-App
-Readiness can operate against this target's PID from Advanced. The UI shows the visible
-parent app name + `" helper"` label. `MixerViewModel` forwards the target to Process Tap
-diagnostics and Two-App Readiness.
+When `advancedProcessTapTarget` is set, Process Tap Test and Replay Probe can operate against
+this target's PID from Advanced. The UI shows the visible parent app name + `" helper"` label.
+`MixerViewModel` forwards the target to Process Tap diagnostics.
 
 The Advanced helper target is manual, temporary, Advanced-only, and not persisted across launches.
 Helper-target diagnostics help evaluate feasibility; they are not a stable tab-level browser
@@ -606,48 +608,6 @@ Gain is a constant scalar applied per-sample via `ProcessTapOutputBufferCopier`.
 
 ---
 
-## Two-App Readiness
-
-`MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift`
-
-`TwoAppReadinessCoordinator` owns the Advanced UI-facing readiness state: selected App A,
-selected App B, gain, tap eligibility, target options including one selected Advanced
-helper target, running flag, snapshots, results, selection repair, and start/stop calls.
-`MixerViewModel` forwards this state to existing views and still triggers cross-feature
-cleanup for panel close, output-device changes, app termination, and Advanced helper
-target removal.
-
-`MacMiniMixer/Services/Audio/ProcessTap/ProcessTapTwoAppReadinessTesting.swift`
-
-`CoreAudioProcessTapTwoAppReadinessTester.startTest(appA:, appB:, gain:, onUpdate:, onFinished:)`:
-
-1. Preflights both targets for tap eligibility.
-2. Creates a `TwoAppReadinessRun` with a **separate** `ProcessTapLiveSessionManager(maxSessions: 2)`.
-   This is **isolated from the main product session manager**.
-3. Starts App A session via `run.manager.startSession(...)`. On failure, marks setup failed.
-4. Starts App B session. On failure, stops App A and marks setup failed.
-5. Starts a timeout `Task` for the selected duration (`ProcessTapTwoAppReadinessDurationOption`:
-   10 s by default, or 1 / 5 / 30 minutes).
-6. Returns `.running`.
-
-`TwoAppReadinessRun` tracks `sessions: [Slot: SessionSnapshot]` and
-`sessionSlots: [SessionID: Slot]`. Diagnostics from each live session are merged into the
-snapshot. `onUpdate` fires on each diagnostic tick.
-
-**Stop paths**: user calls `stopAll`, timeout fires, or one session's `onStopped` fires
-(which cascades to stop the other). An output-device change, the selected app exiting, panel close
-for the Advanced test, or app quit also stops the test.
-
-**Evidence**: Music + Spotify have run together successfully in testing, with callbacks, peak/RMS,
-queued buffers, and zero drops/failures observed. Spotify + a YouTube helper target has also run
-successfully in Advanced diagnostics. It stays an Advanced diagnostic with its own two-session
-manager; the main mixer's multi-app control goes through Product Real Control instead.
-
-`finalizeUnresolvedStoppingSessions()` ensures any session still in `.starting` or
-`.stopping` is finalized as `.failed` or `.stopped` before the snapshot is published.
-
----
-
 ## Process Tap Session Manager
 
 `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionManager.swift`
@@ -665,7 +625,6 @@ behind a session abstraction.
   each controller reads its live output mode (`ProcessTapLiveOutputMode.configured()`, default direct
   aggregate output) and its resample mode (`ProcessTapDirectResampleMode.configured()`) from
   UserDefaults when it is created.
-- For Two-App Readiness, a separate manager with `maxSessions = 2` and its own factory.
 - The compatibility initializer `init(controller:)` shares one controller and keeps
   `maxSessions = 1`.
 - A `ProductRealCoreAudioLifecycleGate` (actor) serializes every session create/destroy this
@@ -887,7 +846,7 @@ holder. Its `cleanup()` method:
 On app termination (`NSApplication.willTerminateNotification` + `deinit`),
 `stopProcessTapLiveControlForTermination()` runs a synchronous (no async) teardown of every
 active/pending Process Tap work item via the shared `tearDownAllProcessTapWork(liveStopReason:)`
-helper — `stopLiveControlNow`, Two-App Readiness stop, and cancellation of all tasks, probes,
+helper — `stopLiveControlNow` and cancellation of all tasks, probes,
 and helper resolution.
 
 `MixerViewModel` also owns two app-lifetime `NSWorkspace` observers for system sleep/wake
@@ -1009,11 +968,8 @@ becomes Real).
   Real session is UI state only, no system effect. Slider moves on a row that is not tap-eligible,
   whose real start failed, or has not become Real, do nothing to real audio. (Rows are preview
   until the user interacts with an eligible row; browser/helper targets are never main-UI rows.)
-- `MockApplicationLister`, `MockOutputDeviceLister` — fallbacks inside
-  `WorkspaceApplicationLister` / `CoreAudioOutputDeviceLister`, not the main app flow. The other
-  former production mocks (`MockSystemVolumeController`, `MockSystemVolumeReader`,
-  `MockOutputDeviceController`, `MockProcessTapTester`) were deleted; tests use their own private
-  fakes.
+- There are no production mocks. The former `Mock*` listers, readers and controllers were
+  deleted (the app/device fallback listers in v2.5.0); tests use their own private fakes.
 
 ---
 
@@ -1067,13 +1023,12 @@ becomes Real).
 | `MacMiniMixer/Features/Mixer/ProductRealStopCoordinator.swift` | Per-app stop, Stop All, stop callback, app-exit cleanup, hard-teardown reset |
 | `MacMiniMixer/Features/Mixer/ProductRealControlSideEffects.swift` | Seam protocols between the Product Real coordinators and the view model |
 | `MacMiniMixer/Features/Mixer/RealControlBannerPresenter.swift` | Pure banner text/labels ("first two +N more", Stop / Stop All) |
-| `MacMiniMixer/Features/Mixer/MixerVisibleAppsFilter.swift` | Pure visible-row filter (audio-relevant, active, resolving, queued) |
+| `MacMiniMixer/Features/Mixer/MixerVisibleAppsFilter.swift` | Pure visible-row filter (audio-relevant, played audio, active, resolving, queued) |
 | `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryCoordinator.swift` | Advanced helper discovery, probe, auto-detect, and Advanced helper target |
 | `MacMiniMixer/Features/Mixer/AdvancedHelperDiscoveryState.swift` | Advanced helper target and auto-detect score value types |
 | `MacMiniMixer/Features/Mixer/SystemOutputCoordinator.swift` | System volume/device state and pure operations |
 | `MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift` | Process Tap Test, Mute Probe, and Replay Probe orchestration |
 | `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
-| `MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift` | Advanced Two-App Readiness orchestration |
 | `MacMiniMixer/Features/MenuBar/MixerPanelView.swift` | Panel UI layout |
 | `MacMiniMixer/Features/MenuBar/MenuBarRootView.swift` | Thin root wrapper |
 | `MacMiniMixer/Features/Mixer/MixerAppRowView.swift` | Per-app row UI |
@@ -1085,7 +1040,6 @@ becomes Real).
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live control implementation (direct aggregate output default, AudioQueue fallback) + session, direct renderer, gain ramp |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift` | **Legacy** `AudioQueue` live output (`ProcessTapLiveOutputQueue`); fallback only, scheduled for removal |
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapReplayProbe.swift` | Replay Probe implementation |
-| `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapTwoAppReadinessTesting.swift` | Two-App Readiness implementation |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionManager.swift` | Session manager (`maxSessions: Int?`) + Core Audio lifecycle gate + compatibility adapter |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionState.swift` | Session ID, phase, state value types |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapOutputBufferCopier.swift` | Shared Float32 sample copy + gain; direct-output copier, frame FIFO and sample-rate resampler |

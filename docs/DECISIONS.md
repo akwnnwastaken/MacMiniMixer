@@ -685,6 +685,9 @@ be debug-gated while its *engine* stays (the product still needs it).
 **Would revisit if**: the multi-app goal is ever abandoned — in that case Two-App Readiness
 (~1670 LOC) becomes the single largest removal candidate.
 
+> **Update (v2.5.0)**: Two-App Readiness has been removed (see "Why Two-App Readiness was
+> removed"). The other classifications above still apply.
+
 ---
 
 ## Why there is no Product Real app-count limit (owner decision)
@@ -940,3 +943,28 @@ audio-path changes.
 **Would revisit if**: the owner wants an opt-out or a user-visible diagnostics entry back. Either is
 a UI change on top of the retained view-model API; agents should not re-add a toggle or expose
 Advanced by default on their own.
+
+---
+
+## Why Two-App Readiness was removed (v2.5.0)
+
+**Context**: Two-App Readiness was the Advanced two-session diagnostic kept as evidence while the
+product went from one Real session to many (see "Diagnostic tooling classification"). Product Real
+Control has since shipped with no app-count limit and has its own many-app checks
+(`docs/MANUAL_TEST_CHECKLIST.md` §16 and §19).
+
+**Decision**: Remove it: the tester, coordinator, state, view, its tests, and the
+"Stop two-app test first" guards in the Product Real start path. The owner asked for the removal
+after a repo audit.
+
+**Reasoning**:
+- Its sunset condition was "multi-app ships"; that has happened, and nothing else used it.
+- It added a sixth busy flag that every Product start, Advanced diagnostic and teardown had to
+  check, for a tool only reachable in developer mode.
+
+**What it does not change**: Process Tap Test, Mute Probe, Replay Probe and Helper Discovery stay
+in Advanced. `ProcessTapLiveSessionManager` keeps its `maxSessions` parameter (the product passes
+`nil`).
+
+**Would revisit if**: a regression needs a controlled two-session measurement again; the
+removal commit (`d444eb7`) can be used as the starting point.

@@ -42,9 +42,10 @@ MacMiniMixer sits in your menu bar, next to the system volume, and lets you turn
 - **Browsers and web apps:** Safari and a Safari web app, or Chrome and a Chrome PWA / Canary, are separate rows that can each be controlled.
 - **Crackle-free output:** A direct output engine plays at your device's own sample rate and never changes it.
 - **Always on, nothing automatic:** There is no toggle, and nothing is captured until you touch a row. Rows you have not touched yet are a UI preview and change no audio.
-- **System output:** System volume and mute, kept in sync live while the panel is open, plus the output device list and switching, refreshed live (for example when AirPods connect).
+- **System output:** System volume and mute (including the keyboard mute key), kept in sync live while the panel is open, plus the output device list and switching, refreshed live (for example when AirPods connect).
 - **Read-only badge:** Outputs that have no writable volume are marked before you drag anything.
 - **Liquid Glass panel:** On macOS 26 and later the panel uses Liquid Glass, with thick Control Center–style sliders that show each app's name and level inside the track. Earlier macOS versions get the same layout with standard materials.
+- **Apps that are playing show up:** An app making sound appears in the list even if it is not a typical audio app, without turning on **Show all apps**.
 - **Simple header:** An output-device button, a `⋯` menu with **Show all apps** and **Launch at Login**, and a power button to quit. While apps are under control, a small orange waveform button appears there too; click it to stop all of them.
 - **Launch at Login:** Enable it from the `⋯` menu to start MacMiniMixer when you log in. If macOS requires approval, use the menu shortcut to System Settings.
 - **Menu bar only:** No Dock icon and no window. Labels and hints for VoiceOver are included.
@@ -143,13 +144,13 @@ The suite covers pure logic, fake-backed coordinators and synthetic audio buffer
 ## Usage
 
 1. Launch **MacMiniMixer** — a slider icon appears in your menu bar
-2. Click the icon to open the panel: **Output** on top, your **Apps** below (`⋯` → **Show all apps** reveals the rest)
+2. Click the icon to open the panel: **Output** on top, your **Apps** below. Apps that are playing sound appear on their own; `⋯` → **Show all apps** reveals the rest
 3. Move an app's slider or click its icon to mute it. Drag past the 100% notch to boost a quiet app up to 200%
 4. The first time, macOS asks for **System Audio Recording** — allow it
 5. The row shows a small orange waveform button and its slider now sets that app's real volume. Control other apps the same way — queued ones show a spinner and start one after another 🎚️
 6. Click an app's waveform button to stop controlling it, or the waveform button in the panel header to stop all of them. Click the power button in the header to quit and stop everything
 
-To mute or unmute the system output, click the speaker icon inside the Output slider.
+To mute or unmute the system output, click the speaker icon inside the Output slider. If the Mac was muted with the keyboard mute key, the panel shows it as muted, and the speaker icon or raising the slider unmutes it.
 
 To start MacMiniMixer automatically when you log in, enable **Launch at Login** in the `⋯` menu. The setting follows the macOS login-item status; if approval is required, choose **Approve Launch at Login in System Settings…**. Turn it off in the same menu to stop automatic launches.
 

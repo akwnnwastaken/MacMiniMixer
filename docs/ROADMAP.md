@@ -54,10 +54,10 @@ not yet a finished Windows Volume Mixer replacement.
 - Advanced Helper Process Discovery, manual helper Probe, Find audio helper, and
   Advanced helper target selection.
 - Advanced Process Tap Test, Mute Probe, Replay Probe, manual Advanced Live Control,
-  and Two-App Readiness.
+  and Two-App Readiness (removed in v2.5.0 once multi-app shipped).
 - XCTest target with fake-backed coverage for helper discovery, helper resolver/cache,
   permission messaging, live session management, Product/Advanced live behavior,
-  coordinators, Two-App Readiness, diagnostics accumulation, and output buffer copying.
+  coordinators, diagnostics accumulation, and output buffer copying.
 - GitHub Actions build/test CI.
 - MIT License.
 - Shared `ProcessTapDiagnosticsAccumulator`.
@@ -67,7 +67,7 @@ not yet a finished Windows Volume Mixer replacement.
   - `SystemOutputCoordinator`
   - `AdvancedProcessTapDiagnosticsCoordinator`
   - `AdvancedLiveControlCoordinator`
-  - `TwoAppReadinessCoordinator`
+  - `TwoAppReadinessCoordinator` (removed in v2.5.0)
   - `ProductRealControlCoordinator` (the Product Real **thin facade**, ~180 lines, no start/stop
     implementation — composes three internal sub-objects: `ProductRealControlStateStore`,
     `ProductRealStartCoordinator`, `ProductRealStopCoordinator`; the cross-subsystem router, lifecycle
@@ -150,7 +150,7 @@ not yet a finished Windows Volume Mixer replacement.
 - Helper PID/process names stay hidden from the main mixer UI.
 - Process Tap features are guarded for macOS 14.2+ while deployment target remains
   macOS 13.0.
-- System sleep tears down all active/pending Product, Advanced manual, Two-App Readiness, and
+- System sleep tears down all active/pending Product, Advanced manual, and
   diagnostic work (no resurrection of stale starts); system wake only refreshes
   device/volume/app state and never auto-restarts sessions. Rationale in `docs/DECISIONS.md`.
 - Safety constraints remain:
@@ -315,7 +315,7 @@ suspension-point behavior.
 Each Advanced tool has been classified in `docs/DECISIONS.md`. **Outcome: retain everything
 for now** — the maintainer's goal is a full Windows-style mixer (simultaneous per-app
 control for every listed app), so every diagnostic is on the critical path to that goal,
-either as evidence (Two-App Readiness) or as a building-block diagnostic. Sunset triggers
+either as evidence (Two-App Readiness, since removed in v2.5.0) or as a building-block diagnostic. Sunset triggers
 are recorded: after multi-app ships and is validated, Replay Probe and Mute Probe are the
 first removal candidates, and the manual Helper Discovery UI can be debug-gated (its engine
 stays, since the product depends on it).
@@ -394,48 +394,14 @@ recovery is still manual/user-triggered.
 
 ---
 
-### Two-App Readiness repeatability and latency characterization
+### Per-app volume boost — done (v2.4.0)
 
-**Priority**: Medium | **Risk**: Medium
+**Status**: Shipped in v2.4.0. Per-app volume ranges 0–200% (100% is the app's own level), a soft
+limiter (`ProcessTapSoftLimiter`) bends replayed samples above 0.9 toward full scale instead of
+clipping, and gain changes are slewed after the fade-in. System output stays 0–100%.
 
-Continue measuring callbacks, peak/RMS, queued buffers, drops, failures, cleanup behavior,
-and latency across more eligible app combinations and repeated runs.
-
-**Goal**: Use this only as Advanced diagnostic evidence. Main-UI multi-app control now goes
-through Product Real Control itself.
-
----
-
-### Experimental per-app volume boost
-
-**Priority**: Low | **Risk**: High | **Status**: Later research / experimental
-
-Product Real App Control may eventually allow an eligible selected app to be amplified
-above its original audio level, with a research target of up to 200%.
-
-**User value**: Mute, reduce, or experimentally boost applications that provide no
-built-in volume controls.
-
-Constraints:
-- Off by default.
-- Separate explicit opt-in from normal 0-100% control.
-- Public Process Tap/Core Audio APIs only.
-- No HAL driver, persistent virtual audio device, private APIs, third-party dependencies,
-  or disk audio saving.
-- Start with one boosted app at a time, even though normal control has no app-count limit.
-- Affect only the selected application.
-- Do not boost system output volume.
-- Do not affect unrelated applications.
-- Test direct visible-PID and browser/helper-PID paths separately.
-- Warn users before enabling gain above 100%, especially with headphones.
-
-Before implementation, require a read-only assessment of current gain mapping, headroom,
-clipping, distortion, hard clipping versus limiter or soft-clipping options, CPU, latency,
-long-session resources, repeated gain updates, sleep/wake behavior, output changes,
-app/helper exit cleanup, and Core Audio failure recovery.
-
-Treat 200% as a research target, not a promise of clean output. Start later with
-characterization tests and a narrowly scoped experimental mode.
+**Still open**: long-session CPU/latency at high gain, and how boost sounds on devices other than
+the owner's. 200% is not a promise of clean output for already-loud sources.
 
 ---
 
@@ -710,7 +676,7 @@ former README roadmap items already have their own sections above: the N-session
 widening direct-engine device coverage and removing the legacy `AudioQueue` output (including the
 Replay Probe's own queue), routing engine-initiated stops through the gates / faster Stop All /
 shorter main-thread teardown / narrowing what the menu bar label observes ("Many-session hardening"),
-Two-App Readiness with more apps, helper PID changes, long-run CPU / latency / buffer-drop
+helper PID changes, long-run CPU / latency / buffer-drop
 diagnostics ("Sleep/wake and long-running resource characterization"), the optional read-only
 `MixerViewModel` reassessment, independent sessions versus a centralized mixer/renderer, and Developer
 ID signing + notarization.

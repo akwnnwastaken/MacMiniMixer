@@ -15,8 +15,8 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Experimental: **Product Real Control** — per-app Process Tap control with **no app-count limit**
   (owner decision; `AppConstants.maxConcurrentLiveSessions` is `nil`). Any number of rows can be
   Real at once; starts go through a single **queued start lane** (one resolution or start in flight,
-  the rest wait FIFO with the pending badge). Also browser/helper row resolution, Replay Probe, and
-  the Two-App Readiness diagnostic.
+  the rest wait FIFO with the pending badge). Also browser/helper row resolution and Replay Probe. (The Two-App
+  Readiness diagnostic was removed in v2.5.0.)
 - Live audio now plays through a **direct aggregate output engine** (default; one IOProc reads the
   tap and writes the output device on one clock, no `AudioQueue`), which removed the random crackle.
   The old `AudioQueue` path is a legacy fallback (override `MacMiniMixerLiveOutputMode=audioQueue`,
@@ -47,14 +47,15 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 - Browser/helper row resolution after explicit row interaction.
 - Validation-first in-memory helper cache.
 - Advanced Helper Process Discovery + Find audio helper auto-detect.
-- Two-App Readiness diagnostic (Advanced only, 10 s by default with 1/5/30 min options, isolated
-  from the main product).
+- Rows Core Audio reports as playing are listed without "Show all apps" and stay listed until the
+  panel closes.
+- System mute follows the device mute flag (keyboard mute key); the mute button and system slider
+  clear it.
 - macOS 14.2 availability guard; deployment target remains macOS 13.0.
 - VoiceOver labels/values/hints across the main panel and the Advanced diagnostics.
 - GitHub Actions build/test CI (plus a `package` job that uploads an ad-hoc signed zip), a
   draft-only release workflow, an XCTest target, and fake-backed characterization tests for helper
-  discovery, helper resolution, live control, the Product Real coordinators and start lane, and
-  Two-App Readiness.
+  discovery, helper resolution, live control, and the Product Real coordinators and start lane.
 
 ---
 
@@ -69,8 +70,6 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
   `path=converting` resampler branch has not been seen on real hardware (the HAL passes through).
 - Per-app process attribution: relies on an undocumented `proc_pidinfo` coalition flavor with a
   bundle-id fallback; rows that share one coalition contend for the same helpers.
-- Two-App Readiness: works in controlled tests (Spotify + YouTube helper, 0 drops).
-  It is a diagnostic, separate from Product Real Control.
 - Many concurrent Product Real sessions: allowed, but not characterized on real hardware beyond
   three. Known open items: engine self-stops bypass the lifecycle/settle gates, the sleep/quit hard
   teardown blocks the main thread longer with every session, and Stop All is sequential.
@@ -132,7 +131,6 @@ No third-party dependencies. No private APIs. No HAL driver. No App Store target
 | `MacMiniMixer/Features/Mixer/SystemOutputCoordinator.swift` | System volume/device state and pure volume/device operations |
 | `MacMiniMixer/Features/Mixer/AdvancedProcessTapDiagnosticsCoordinator.swift` | Advanced Process Tap Test, Mute Probe, and Replay Probe |
 | `MacMiniMixer/Features/Mixer/AdvancedLiveControlCoordinator.swift` | Manual Advanced Live start/stop orchestration |
-| `MacMiniMixer/Features/Mixer/TwoAppReadinessCoordinator.swift` | Advanced Two-App Readiness selection, target options, start/stop, snapshot/result state |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLiveSessionManager.swift` | Multi-session engine (`maxSessions: Int?`) + Core Audio lifecycle gate |
 | `MacMiniMixer/Services/Audio/ProcessTap/CoreAudioProcessTapLiveController.swift` | Live Control implementation (one controller per session): direct aggregate output (default) + fallback to the legacy path, direct renderer |
 | `MacMiniMixer/Services/Audio/ProcessTap/ProcessTapLegacyAudioQueueOutput.swift` | **Legacy** `AudioQueue` live output; fallback only, scheduled for removal |
@@ -181,7 +179,6 @@ After touching the audio path or MixerViewModel, at minimum verify:
 - Product Real stops on output device change; Advanced manual Live Control also stops on its 60s
   timeout.
 - App quit during live control stops session cleanly (check Console for cleanup logs).
-- Two-App Readiness runs 10s with zero drops for Spotify + Music.
 - The full XCTest suite passes.
 
 Full checklist: `docs/MANUAL_TEST_CHECKLIST.md`
@@ -209,7 +206,7 @@ Full checklist: `docs/MANUAL_TEST_CHECKLIST.md`
   CI anyway.
 - **Product starts stay serialized** through the queued start lane, and product create/destroy stays
   behind the settle and lifecycle gates.
-- **Advanced tools stay in Advanced.** Process Tap Test, Replay Probe, Two-App Readiness,
+- **Advanced tools stay in Advanced.** Process Tap Test, Replay Probe,
   and Helper Discovery must remain in the collapsed, developer-mode-only Advanced section, not exposed in the
   main mixer UI.
 - **Helper mappings are not persisted.** Cache is in-memory, validation-first, and

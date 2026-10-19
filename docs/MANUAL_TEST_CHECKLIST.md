@@ -13,7 +13,7 @@ Panel and mode notes (owner decisions):
 - **Real app control is always on** — there is no toggle. A row becomes Real only after you interact
   with it (move its slider or click its mute); nothing is captured before that.
 - `Show all apps` and `Quit MacMiniMixer` live in the header `⋯` menu.
-- **Developer mode.** The Advanced section (§7–§10 and every step that reads the Advanced
+- **Developer mode.** The Advanced section (§7–§9 and every step that reads the Advanced
   diagnostics card) exists only in developer mode:
   `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES`, then relaunch
   (`defaults delete com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode` hides it again).
@@ -84,6 +84,15 @@ Do not treat unsigned XCTest or static source review as permission/Login Item ac
 - **Red flags**: the badge only appears after dragging; the badge shows on a writable device; the
   badge stays after switching to a writable device.
 
+### 1.8 Keyboard mute key is shown and can be undone
+- Set system volume to about 50%. Press the keyboard mute key (or mute from Control Center).
+- **Expected**: Within ~1 second the System Output mute button shows muted and the slider stays
+  at its level. Clicking the mute button restores sound at the same level.
+- Mute with the key again, then drag the System Output slider up.
+- **Expected**: Sound comes back (raising the slider clears the mute, like the volume keys).
+- **Red flags**: the panel shows unmuted while the Mac is muted; the mute button or slider leaves
+  the Mac silent.
+
 ---
 
 ## 2. Output Device Listing and Switching
@@ -136,7 +145,13 @@ Do not treat unsigned XCTest or static source review as permission/Login Item ac
 - Turn on **Show all apps** in the header `⋯` menu.
 - **Expected**: All regular running apps including non-audio ones appear.
 
-### 3.4 App exit removes it from list
+### 3.4 An app playing audio appears without Show all apps
+- With **Show all apps** off, play sound from an app whose name is not an audio app (for example a
+  game).
+- **Expected**: The app appears in the list while it plays, and stays listed through short pauses
+  until the panel is closed.
+
+### 3.5 App exit removes it from list
 - Quit Spotify while panel is open.
 - Open panel again (or wait for next refresh).
 - **Expected**: Spotify no longer appears.
@@ -261,8 +276,8 @@ Setup: developer mode on (see the top of this file).
 
 ### 7.4 Use as Advanced Target
 - Click "Use as target" on a tap-eligible candidate.
-- **Expected**: Advanced Target shows the helper info. Process Tap Test, Replay Probe, and
-  Two-App Readiness now operate against this helper PID.
+- **Expected**: Advanced Target shows the helper info. Process Tap Test and Replay Probe now
+  operate against this helper PID.
 
 ---
 
@@ -306,33 +321,10 @@ Setup: developer mode on (see the top of this file).
 
 ---
 
-## 10. Advanced: Two-App Readiness
+## 10. (Removed) Two-App Readiness
 
-Setup: developer mode on (see the top of this file).
-
-### 10.1 Spotify + Music simultaneous readiness test
-- Select Spotify as App A, Music as App B. Choose 50% gain. Click "Start".
-- **Expected**: Both sessions start. Both show active state with increasing callback
-  count, non-zero peak/RMS. Test auto-stops at 10s with "Two-app test stopped: timeout".
-  Both callback counts should be similar (e.g., ~90–100 in 10s at 100ms diagnostic interval).
-  Drops = 0, failures = 0 is the healthy target.
-
-### 10.2 Spotify + YouTube helper target
-- Set YouTube helper as Advanced target. Select Spotify as App A and helper as App B.
-  Start test.
-- **Expected**: Both sessions active, both reporting audio. Similar to 10.1.
-
-### 10.3 Stop All stops both sessions
-- Start two-app test. Click "Stop All" before timeout.
-- **Expected**: Both sessions stop immediately. "Two-app test stopped" message.
-
-### 10.4 Ineligible target shows setup failure
-- Select an app not tap-eligible as App A or B. Click Start.
-- **Expected**: "Core Audio process unavailable" or similar. Test does not start.
-
-### 10.5 Same app selected for both slots
-- Select Spotify for both App A and App B. Click Start.
-- **Expected**: "Choose two different apps" warning. Test does not start.
+The Two-App Readiness diagnostic was removed in v2.5.0; section numbers are kept so references
+to later sections stay valid. Concurrent sessions are covered by §16 and §19.
 
 ---
 
@@ -343,9 +335,6 @@ Setup: developer mode on (see the top of this file).
 
 ### 11.2 Timeout fires at 60s for live control
 - Covered in section 4.6.
-
-### 11.3 "Stop All" in Two-App Readiness stops both
-- Covered in section 10.3.
 
 ### 11.4 App quit during live control stops gracefully
 - Covered in section 4.7.
@@ -362,10 +351,6 @@ Setup: developer mode on (see the top of this file).
 ### 12.1 Output device change stops live control
 - Covered in section 2.6.
 
-### 12.2 Output device change stops Two-App Readiness
-- Start two-app readiness. Change default output device.
-- **Expected**: Both sessions stop. "Two-app test stopped: output changed".
-
 ### 12.3 Output device change stops helper probe
 - Probe a helper candidate in Advanced (developer mode). Change default output device during probe.
 - **Expected**: Probe stops. Result shows output-changed outcome.
@@ -374,17 +359,13 @@ Setup: developer mode on (see the top of this file).
 
 ## 13. Panel Close and Reopen
 
-### 13.1 Panel close stops Two-App Readiness
-- Start two-app readiness test (Advanced, developer mode). Click outside panel to close it.
-- **Expected**: `onDisappear` fires, `stopTwoAppReadinessForPanelClose()` stops the test.
-
 ### 13.2 Panel close does NOT stop live control
 - Start live control. Close panel.
 - **Expected**: Live control continues. Menu bar icon shows waveform-circle.fill. No
   orange banner visible (panel closed), but waveform icon indicates active.
 
 ### 13.3 Reopen panel shows active banner
-- While live control active (12.2), reopen panel.
+- While live control active (13.2), reopen panel.
 - **Expected**: Orange "Real control: AppName" banner shown. Stop button works.
 
 ### 13.4 Panel refresh on reopen
@@ -406,8 +387,8 @@ observers are app-lifetime (in `MixerViewModel`), so they fire whether or not th
   reverted). The app's audio plays at its normal volume. No crash, no hung Core Audio
   resources (check Console for cleanup logs). Real app control stays on (there is no toggle).
 
-### 14.2 Sleep stops Two-App Readiness and Advanced work
-- Start a Two-App Readiness test (section 10) or Advanced manual live control. Sleep, wake.
+### 14.2 Sleep stops Advanced work
+- Start Advanced manual live control. Sleep, wake.
 - **Expected**: The test / live control is stopped after wake; nothing resumes on its own.
 
 ### 14.3 Wake refreshes device, volume, and app state
@@ -451,8 +432,6 @@ Procedure:
 
 Notes:
 - This test was written for the Product cap=3 path (three sessions).
-- The Advanced Two-App Readiness diagnostic is a separate two-session measurement tool and must
-  not be conflated with this.
 - More than three sessions need their own evidence (§19); passing this only covers three.
 
 ---
@@ -466,7 +445,7 @@ Notes:
 ### 15.2 Tests pass
 - `xcodebuild test -project MacMiniMixer.xcodeproj -scheme MacMiniMixer -destination 'platform=macOS'`
 - **Expected**: The full XCTest suite passes, including fake-backed coordinator,
-  helper discovery/resolver, live-control, Two-App Readiness, diagnostics accumulator,
+  helper discovery/resolver, live-control, diagnostics accumulator,
   and output buffer copier tests.
 
 ### 15.3 GitHub Actions build passes

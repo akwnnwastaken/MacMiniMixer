@@ -162,7 +162,7 @@ changes. It is **not** a public release document — v2.5.0 / build 9 is the rel
     to `coordinator.stopProductLiveSessions`; `handleAdvancedManualLiveControlStopped` (advanced-manual stop).
     The public no-argument `stopProcessTapLiveControl()` (banner Stop / Stop All) also calls
     `coordinator.cancelAppAudioTargetResolution(reason: .userStopped)` since `774268a`.
-  - `stopTwoAppReadinessForPanelClose` (panel `onDisappear`) — calls `coordinator.clearQueuedStarts()`
+  - `cancelPendingWorkForPanelClose` (panel `onDisappear`) — calls `coordinator.clearQueuedStarts()`
     **before** cancelling the in-flight resolution, so queued starts never drain into background
     helper probing after the panel closes.
   - `isLiveDiagnosticsDisplayVisible` — a plain stored property (**not** `@Published`, hidden by
@@ -176,7 +176,7 @@ changes. It is **not** a public release document — v2.5.0 / build 9 is the rel
     used by both product and advanced-manual stops — reached from the coordinator through the seam's
     `applyLiveControlStoppedDisplay` callback; do **not** move into the product coordinator).
   - `setExperimentalRealAppControlEnabled` (global Real-off command; no longer reachable from the UI), `stopActiveAudioWorkForOutputDeviceChange`
-    (5-subsystem output-change fan-out), `tearDownAllProcessTapWork` (global sleep/termination teardown
+    (4-subsystem output-change fan-out), `tearDownAllProcessTapWork` (global sleep/termination teardown
     fan-out — delegates **only** its Product Real state-reset sub-block to
     `coordinator.tearDownProductStateForHardStop()`; the engine hard stop, resolver/helper/diagnostics
     cleanup, advanced-manual reset, and the earlier-positioned `cancelResolutionTask()` all stay in place
@@ -194,7 +194,7 @@ changes. It is **not** a public release document — v2.5.0 / build 9 is the rel
     handler directly.
   - `ProductRealControlContext` (read side, VM → coordinator): `apps`,
     `isExperimentalRealAppControlEnabled`, `advancedManualLiveControlActive`,
-    `isTwoAppReadinessRunning`, `isProcessTapTesting`, `isHelperBusy`, `isAppAudioTargetResolving`,
+    `isProcessTapTesting`, `isHelperBusy`, `isAppAudioTargetResolving`,
     `isProcessTapLiveControlActive`, `processTapLiveDiagnostics` (added Prompt 216 for the Stop All
     no-active-session display path), and `isLiveDiagnosticsDisplayVisible` (added in `5a78656`; gates
     only the per-callback product diagnostics publish). The unused `selectedProcessTapAppID`
@@ -256,7 +256,7 @@ changes. It is **not** a public release document — v2.5.0 / build 9 is the rel
   *physically* in flight. A start requested meanwhile (slider/mute → `requestAutomaticStart`, or the
   row toggle; direct-PID or helper) is queued FIFO in `ProductRealControlState.queuedStarts`. Queued
   apps report `isOperationPending` (pending badge + dedupe) and stay visible in the row filter.
-  Ordering: dedupe → hard blocks reject immediately (Real off, two-app test, ineligible app, helper
+  Ordering: dedupe → hard blocks reject immediately (Real off, ineligible app, helper
   probe busy) → lane busy ⇒ enqueue → `productSessionStartBlockReason` only once the lane is free.
   The lane drains only when it physically frees: at the end of a start's post-await block (after a
   cached-helper retry has taken the lane; in the stale branch only after the orphan teardown is
@@ -657,15 +657,15 @@ moving them into a product-scoped type would *increase* coupling:
 - `applyLiveControlStoppedDisplay` + `showLiveControlWarningIfNeeded` — **shared** display/status
   cleanup used by both product and advanced-manual stops (reached from the coordinator through the seam).
 - `tearDownAllProcessTapWork` — the global sleep/termination teardown **fan-out** (engine hard stop,
-  two-app readiness, helper/probe, resolver invalidation, diagnostics/replay, advanced-manual reset,
+  helper/probe, resolver invalidation, diagnostics/replay, advanced-manual reset,
   `cancelResolutionTask()`); only its Product Real state-reset sub-block delegates to
   `coordinator.tearDownProductStateForHardStop()`.
-- `stopActiveAudioWorkForOutputDeviceChange` — the 5-subsystem output-device-change fan-out.
+- `stopActiveAudioWorkForOutputDeviceChange` — the 4-subsystem output-device-change fan-out.
 - `setExperimentalRealAppControlEnabled`, `handleSystemWillSleep` / `handleSystemDidWake` /
-  `stopProcessTapLiveControlForTermination`, `stopTwoAppReadinessForPanelClose` (also clears queued
+  `stopProcessTapLiveControlForTermination`, `cancelPendingWorkForPanelClose` (also clears queued
   starts), `setLiveDiagnosticsDisplayVisible`, and `refreshApplications` / running-app orchestration
   (delegates only the app-exit product slice).
-- Advanced diagnostics, helper discovery/probe, and Two-App Readiness orchestration.
+- Advanced diagnostics and helper discovery/probe orchestration.
 
 ### Recommended next engineering direction (conservative)
 

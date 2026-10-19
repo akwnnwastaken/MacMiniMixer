@@ -5,6 +5,9 @@ simultaneous, independent per-app volume control for every app in the audio list
 deliberately incremental and evidence-gated. The first concrete milestone is **sustained
 two-app live control**.
 
+> **Note (v2.5.0):** the Two-App Readiness diagnostic this plan cites as evidence has been removed;
+> references to it below are historical.
+>
 > **Status (current):** Phases 0–5 are **done in code**. The product went from one session to two,
 > then three, and then — by **owner decision** (`08d49bc`) — to **no app-count limit**
 > (`maxConcurrentLiveSessions = nil`, manager `maxSessions: nil`). Gap B (resolution queue) is closed
