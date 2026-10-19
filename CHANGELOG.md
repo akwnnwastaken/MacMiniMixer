@@ -16,6 +16,14 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.5.1] - 2026-10-19
+
+### Highlights
+- **Browser volume holds.** When Safari or Chrome restarts the process that plays its audio, the
+  app's level is applied again on its own instead of jumping back to full volume.
+- **Mute keeps your level.** The System Output mute button now uses the Mac's own mute, like the
+  keyboard key.
+
 ### Fixed
 - **Browser control no longer drops silently.** When Safari or Chrome replaces the process that
   plays its audio (for example the WebKit GPU process), the new one was not controlled and played

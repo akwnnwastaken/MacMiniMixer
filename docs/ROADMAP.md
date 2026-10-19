@@ -386,7 +386,7 @@ characterization above and get its own small, test-first change plus a hardware 
 Helper PIDs can change after browser navigation, tab close/reopen, helper restart, or app
 updates.
 
-**Done (unreleased)**: a live session now stops when *any* tapped process exits (before, only the
+**Done (v2.5.1)**: a live session now stops when *any* tapped process exits (before, only the
 primary one was watched, so a replaced WebKit GPU process played on uncontrolled). If the app itself
 is still running, `ProductRealStopCoordinator` reconnects it at the row's level through
 `requestAutomaticStart`, at most once per 10 s per app, without the "app exited" warning.

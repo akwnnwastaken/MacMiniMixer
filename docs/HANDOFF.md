@@ -2,7 +2,7 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v2.5.0 / build 9 is the release for 2026-10-19
+changes. It is **not** a public release document — v2.5.1 / build 10 is the release for 2026-10-19
 (see `CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
@@ -41,6 +41,9 @@ changes. It is **not** a public release document — v2.5.0 / build 9 is the rel
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
+- **v2.5.1 release (2026-10-19):** a live session stops when any tapped process exits and
+  `ProductRealStopCoordinator` reconnects it while the app still runs (once per 10 s per app); the
+  System Output mute button sets the device mute flag (volume zero only as a fallback).
 - **v2.5.0 release (2026-10-19):** apps Core Audio reports as playing are listed without "Show
   all apps" and stay listed until the panel closes; the device mute flag (`kAudioDevicePropertyMute`)
   is read and cleared by `SystemOutputCoordinator`; the mock app/device fallbacks and the two-app
@@ -55,7 +58,7 @@ changes. It is **not** a public release document — v2.5.0 / build 9 is the rel
   (pending-start tokens, rollback through the lifecycle gate), and a System Audio Recording hint on
   the Advanced card's silent "No app audio detected" state. v2.3.6 (2026-10-12) added the
   app-icon backplate removal and the green active-output row outline (macOS 14.2+).
-  `MARKETING_VERSION` is **`2.5.0`** and `CURRENT_PROJECT_VERSION` is `9` (all 4 build configurations).
+  `MARKETING_VERSION` is **`2.5.1`** and `CURRENT_PROJECT_VERSION` is `10` (all 4 build configurations).
   The owner selected this version/build and the existing ad-hoc-signed, not-notarized release
   workflow. Per-app audio remains experimental.
   Do not bump the version again until the owner asks. Final packaged-app System Audio Recording /
