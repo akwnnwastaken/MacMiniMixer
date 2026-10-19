@@ -18,7 +18,6 @@ final class AdvancedLiveControlCoordinator {
         selectedAppID: MixerAppItem.ID?,
         gain: ProcessTapReplayGainOption,
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool,
         onDiagnostics: @escaping @MainActor (ProcessTapLiveDiagnostics) -> Void,
         onStarted: @escaping @MainActor (String) -> Void,
@@ -27,7 +26,6 @@ final class AdvancedLiveControlCoordinator {
     ) {
         guard !diagnostics.isRunningDiagnostics,
               !isLiveControlActive,
-              !isTwoAppReadinessRunning,
               !isAppAudioTargetResolving else {
             return
         }

@@ -21,7 +21,6 @@ final class AdvancedLiveControlCoordinatorTests: XCTestCase {
             selectedAppID: "music",
             gain: selectedGain,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         ) { diagnostics in
             liveDiagnostics = diagnostics
@@ -59,7 +58,6 @@ final class AdvancedLiveControlCoordinatorTests: XCTestCase {
             selectedAppID: nil,
             gain: .defaultOption,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         ) { _ in
             XCTFail("No diagnostics should be emitted")
@@ -89,7 +87,6 @@ final class AdvancedLiveControlCoordinatorTests: XCTestCase {
             selectedAppID: "music",
             gain: .defaultOption,
             isLiveControlActive: true,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         ) { _ in
             XCTFail("No diagnostics should be emitted")

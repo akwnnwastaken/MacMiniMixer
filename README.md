@@ -216,7 +216,7 @@ CI runs on pull requests and pushes to `main` (docs-only changes skip it). When 
 
 ### Developer mode
 
-The **Advanced** diagnostics section (Process Tap tests, helper discovery, two-app readiness) is hidden by default. To show it:
+The **Advanced** diagnostics section (Process Tap tests, helper discovery) is hidden by default. To show it:
 
 ```bash
 defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES   # then relaunch

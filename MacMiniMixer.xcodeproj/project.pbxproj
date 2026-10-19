@@ -25,21 +25,18 @@
 		9B7D1B0F2C8F4A9A8B2D0101 /* ProductRealControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1B102C8F4A9A8B2D0101 /* ProductRealControlCoordinator.swift */; };
 		9B7D1AE22C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */; };
 		9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */; };
-		9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */; };
 		9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */; };
 		9B7D1A362C8F4A9A8B2D0201 /* VolumeSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */; };
 		9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */; };
 		9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */; };
 		9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */; };
 		9B7D1A3E2C8F4A9A8B2D0101 /* ApplicationListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */; };
-		9B7D1A402C8F4A9A8B2D0101 /* MockApplicationLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */; };
 		9B7D1A422C8F4A9A8B2D0101 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */; };
 		9B7D1A4C2C8F4A9A8B2D0101 /* OutputDeviceItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */; };
 		9B7D1A4E2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */; };
 		9B7D1A502C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */; };
 		9B7D1A522C8F4A9A8B2D0101 /* OutputDeviceListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */; };
 		9B7D1A542C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */; };
-		9B7D1A562C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */; };
 		9B7D1A582C8F4A9A8B2D0101 /* SystemVolumeReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */; };
 		9B7D1A5A2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */; };
 		9B7D1A5E2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */; };
@@ -63,9 +60,7 @@
 		9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */; };
 		9B7D1A882C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */; };
 		9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */; };
-		9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */; };
 		9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AA72C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift */; };
-		9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */; };
 		9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */; };
 		9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */; };
 		9B7D1A942C8F4A9A8B2D0101 /* ProcessListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1A952C8F4A9A8B2D0101 /* ProcessListing.swift */; };
@@ -97,9 +92,6 @@
 		9B7D1AE42C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE52C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift */; };
 		9B7D1AE62C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */; };
 		9B7D1AEA2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AEB2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift */; };
-		9B7D1AEC2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AED2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift */; };
-		9B7D1AEE2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AEF2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift */; };
-		9B7D1AF22C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF32C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift */; };
 		9B7D1AF52C8F4A9A8B2D0101 /* ProductRealControlState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF42C8F4A9A8B2D0101 /* ProductRealControlState.swift */; };
 		9B7D1AF72C8F4A9A8B2D0101 /* ProductRealControlStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7D1AF62C8F4A9A8B2D0101 /* ProductRealControlStateTests.swift */; };
 /* End PBXBuildFile section */
@@ -134,21 +126,18 @@
 		9B7D1B102C8F4A9A8B2D0101 /* ProductRealControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRealControlCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedProcessTapDiagnosticsCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinator.swift; sourceTree = "<group>"; };
-		9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinator.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppRowView.swift; sourceTree = "<group>"; };
 		9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSlider.swift; sourceTree = "<group>"; };
 		9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerAppItem.swift; sourceTree = "<group>"; };
 		9B7D1A392C8F4A9A8B2D0101 /* AudioControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioControlling.swift; sourceTree = "<group>"; };
 		9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewAudioStateController.swift; sourceTree = "<group>"; };
 		9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationListing.swift; sourceTree = "<group>"; };
-		9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockApplicationLister.swift; sourceTree = "<group>"; };
 		9B7D1A412C8F4A9A8B2D0101 /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
 		9B7D1A4B2C8F4A9A8B2D0101 /* OutputDeviceItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceItem.swift; sourceTree = "<group>"; };
 		9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceSelectorView.swift; sourceTree = "<group>"; };
 		9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceApplicationLister.swift; sourceTree = "<group>"; };
 		9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceListing.swift; sourceTree = "<group>"; };
 		9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioOutputDeviceLister.swift; sourceTree = "<group>"; };
-		9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockOutputDeviceLister.swift; sourceTree = "<group>"; };
 		9B7D1A572C8F4A9A8B2D0101 /* SystemVolumeReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeReading.swift; sourceTree = "<group>"; };
 		9B7D1A592C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSystemVolumeReader.swift; sourceTree = "<group>"; };
 		9B7D1A5D2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeControlling.swift; sourceTree = "<group>"; };
@@ -173,9 +162,7 @@
 		9B7D1A852C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLifecycle.swift; sourceTree = "<group>"; };
 		9B7D1A872C8F4A9A8B2D0101 /* ProcessTapLiveSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionState.swift; sourceTree = "<group>"; };
 		9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapLiveSessionManager.swift; sourceTree = "<group>"; };
-		9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapTwoAppReadinessTesting.swift; sourceTree = "<group>"; };
 		9B7D1AA72C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapDiagnosticsAccumulator.swift; sourceTree = "<group>"; };
-		9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessTestView.swift; sourceTree = "<group>"; };
 		9B7D1A8F2C8F4A9A8B2D0101 /* CoreAudioHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioHelpers.swift; sourceTree = "<group>"; };
 		9B7D1A912C8F4A9A8B2D0101 /* Comparable+Clamped.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Comparable+Clamped.swift"; sourceTree = "<group>"; };
 		9B7D1A952C8F4A9A8B2D0101 /* ProcessListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessListing.swift; sourceTree = "<group>"; };
@@ -207,9 +194,6 @@
 		9B7D1AE52C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedProcessTapDiagnosticsCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModelLiveControlTests.swift; sourceTree = "<group>"; };
 		9B7D1AEB2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLiveControlCoordinatorTests.swift; sourceTree = "<group>"; };
-		9B7D1AED2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixerViewModelTwoAppReadinessTests.swift; sourceTree = "<group>"; };
-		9B7D1AEF2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessState.swift; sourceTree = "<group>"; };
-		9B7D1AF32C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoAppReadinessCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B7D1AF42C8F4A9A8B2D0101 /* ProductRealControlState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRealControlState.swift; sourceTree = "<group>"; };
 		9B7D1AF62C8F4A9A8B2D0101 /* ProductRealControlStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRealControlStateTests.swift; sourceTree = "<group>"; };
 		9B7D1AB62C8F4A9A8B2D0101 /* MacMiniMixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacMiniMixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -310,7 +294,6 @@
 				9B7D1A4D2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift */,
 				9B7D1A742C8F4A9A8B2D0101 /* ProcessTapTestView.swift */,
 				9B7D1A992C8F4A9A8B2D0101 /* HelperProcessDiscoveryView.swift */,
-				9B7D1A8D2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift */,
 			);
 			path = MenuBar;
 			sourceTree = "<group>";
@@ -320,7 +303,6 @@
 			children = (
 				9B7D1A332C8F4A9A8B2D0101 /* MixerViewModel.swift */,
 				9B7D1AD82C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryState.swift */,
-				9B7D1AEF2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift */,
 				9B7D1AF42C8F4A9A8B2D0101 /* ProductRealControlState.swift */,
 				9B7D1ADA2C8F4A9A8B2D0101 /* AdvancedHelperDiscoveryCoordinator.swift */,
 				9B7D1ADF2C8F4A9A8B2D0101 /* SystemOutputCoordinator.swift */,
@@ -334,7 +316,6 @@
 				9B7D1B102C8F4A9A8B2D0101 /* ProductRealControlCoordinator.swift */,
 				9B7D1AE32C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift */,
 				9B7D1AE92C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift */,
-				9B7D1AF12C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift */,
 				9B7D1A352C8F4A9A8B2D0101 /* MixerAppRowView.swift */,
 				9B7D1A352C8F4A9A8B2D0201 /* VolumeSlider.swift */,
 				9B7D1A372C8F4A9A8B2D0101 /* MixerAppItem.swift */,
@@ -352,7 +333,6 @@
 				9B7D1A3B2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift */,
 				9B7D1A512C8F4A9A8B2D0101 /* OutputDeviceListing.swift */,
 				9B7D1A532C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift */,
-				9B7D1A552C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift */,
 				9B7D1A632C8F4A9A8B2D0101 /* OutputDeviceControlling.swift */,
 				9B7D1A652C8F4A9A8B2D0101 /* CoreAudioOutputDeviceController.swift */,
 				9B7D1A6B2C8F4A9A8B2D0101 /* ProcessTap */,
@@ -383,7 +363,6 @@
 				9B7D1A892C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift */,
 				9B7D1A832C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift */,
 				9B7D1B1F2C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift */,
-				9B7D1A8B2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift */,
 				9B7D1A9C2C8F4A9A8B2D0101 /* ProcessTapCandidateAudioProbing.swift */,
 				9B7D1AA12C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift */,
 				9B7D1AA32C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift */,
@@ -403,7 +382,6 @@
 			isa = PBXGroup;
 			children = (
 				9B7D1A3D2C8F4A9A8B2D0101 /* ApplicationListing.swift */,
-				9B7D1A3F2C8F4A9A8B2D0101 /* MockApplicationLister.swift */,
 				9B7D1A4F2C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift */,
 			);
 			path = Applications;
@@ -442,8 +420,6 @@
 				9B7D1AE52C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift */,
 				9B7D1AE72C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift */,
 				9B7D1AEB2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift */,
-				9B7D1AED2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift */,
-				9B7D1AF32C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift */,
 				9B7D1AF62C8F4A9A8B2D0101 /* ProductRealControlStateTests.swift */,
 			);
 			path = MacMiniMixerTests;
@@ -567,21 +543,18 @@
 				9B7D1B0F2C8F4A9A8B2D0101 /* ProductRealControlCoordinator.swift in Sources */,
 				9B7D1AE22C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinator.swift in Sources */,
 				9B7D1AE82C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinator.swift in Sources */,
-				9B7D1AF02C8F4A9A8B2D0101 /* TwoAppReadinessCoordinator.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0101 /* MixerAppRowView.swift in Sources */,
 				9B7D1A362C8F4A9A8B2D0201 /* VolumeSlider.swift in Sources */,
 				9B7D1A382C8F4A9A8B2D0101 /* MixerAppItem.swift in Sources */,
 				9B7D1A3A2C8F4A9A8B2D0101 /* AudioControlling.swift in Sources */,
 				9B7D1A3C2C8F4A9A8B2D0101 /* PreviewAudioStateController.swift in Sources */,
 				9B7D1A3E2C8F4A9A8B2D0101 /* ApplicationListing.swift in Sources */,
-				9B7D1A402C8F4A9A8B2D0101 /* MockApplicationLister.swift in Sources */,
 				9B7D1A422C8F4A9A8B2D0101 /* AppConstants.swift in Sources */,
 				9B7D1A4C2C8F4A9A8B2D0101 /* OutputDeviceItem.swift in Sources */,
 				9B7D1A4E2C8F4A9A8B2D0101 /* OutputDeviceSelectorView.swift in Sources */,
 				9B7D1A502C8F4A9A8B2D0101 /* WorkspaceApplicationLister.swift in Sources */,
 				9B7D1A522C8F4A9A8B2D0101 /* OutputDeviceListing.swift in Sources */,
 				9B7D1A542C8F4A9A8B2D0101 /* CoreAudioOutputDeviceLister.swift in Sources */,
-				9B7D1A562C8F4A9A8B2D0101 /* MockOutputDeviceLister.swift in Sources */,
 				9B7D1A582C8F4A9A8B2D0101 /* SystemVolumeReading.swift in Sources */,
 				9B7D1A5A2C8F4A9A8B2D0101 /* CoreAudioSystemVolumeReader.swift in Sources */,
 				9B7D1A5E2C8F4A9A8B2D0101 /* SystemVolumeControlling.swift in Sources */,
@@ -603,10 +576,8 @@
 				9B7D1A8A2C8F4A9A8B2D0101 /* ProcessTapLiveSessionManager.swift in Sources */,
 				9B7D1A842C8F4A9A8B2D0101 /* CoreAudioProcessTapLiveController.swift in Sources */,
 				9B7D1B202C8F4A9A8B2D0101 /* ProcessTapLegacyAudioQueueOutput.swift in Sources */,
-				9B7D1A8C2C8F4A9A8B2D0101 /* ProcessTapTwoAppReadinessTesting.swift in Sources */,
 				9B7D1AA62C8F4A9A8B2D0101 /* ProcessTapDiagnosticsAccumulator.swift in Sources */,
 				9B7D1AC12C8F4A9A8B2D0101 /* ProcessTapOutputBufferCopier.swift in Sources */,
-				9B7D1A8E2C8F4A9A8B2D0101 /* TwoAppReadinessTestView.swift in Sources */,
 				9B7D1A862C8F4A9A8B2D0101 /* ProcessTapLifecycle.swift in Sources */,
 				9B7D1A902C8F4A9A8B2D0101 /* CoreAudioHelpers.swift in Sources */,
 				9B7D1A922C8F4A9A8B2D0101 /* Comparable+Clamped.swift in Sources */,
@@ -617,7 +588,6 @@
 				9B7D1AA02C8F4A9A8B2D0101 /* HelperProcessCandidateDiscovery.swift in Sources */,
 				9B7D1AA22C8F4A9A8B2D0101 /* AppAudioTargetResolving.swift in Sources */,
 				9B7D1AA42C8F4A9A8B2D0101 /* AppLogger.swift in Sources */,
-				9B7D1AEE2C8F4A9A8B2D0101 /* TwoAppReadinessState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -646,8 +616,6 @@
 				9B7D1AE42C8F4A9A8B2D0101 /* AdvancedProcessTapDiagnosticsCoordinatorTests.swift in Sources */,
 				9B7D1AE62C8F4A9A8B2D0101 /* MixerViewModelLiveControlTests.swift in Sources */,
 				9B7D1AEA2C8F4A9A8B2D0101 /* AdvancedLiveControlCoordinatorTests.swift in Sources */,
-				9B7D1AEC2C8F4A9A8B2D0101 /* MixerViewModelTwoAppReadinessTests.swift in Sources */,
-				9B7D1AF22C8F4A9A8B2D0101 /* TwoAppReadinessCoordinatorTests.swift in Sources */,
 				9B7D1AF72C8F4A9A8B2D0101 /* ProductRealControlStateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

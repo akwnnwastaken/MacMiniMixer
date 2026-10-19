@@ -213,7 +213,7 @@ final class ProductRealStopCoordinator {
     // MARK: - Hard-teardown state reset
     //
     // Only the Product Real-owned *state* reset block of `tearDownAllProcessTapWork` — the engine hard
-    // stop, two-app readiness, helper/probe, resolver invalidation, diagnostics/replay cleanup,
+    // stop, helper/probe, resolver invalidation, diagnostics/replay cleanup,
     // advanced-manual reset, and the resolution-task cancel all stay in the view model's teardown at
     // their existing positions. No engine `stopSession` is issued here.
 

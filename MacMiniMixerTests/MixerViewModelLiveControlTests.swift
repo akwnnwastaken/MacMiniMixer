@@ -488,7 +488,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setAppVolume(60, for: "spotify")
         XCTAssertTrue(harness.viewModel.isExperimentalControlPending(for: "spotify"))
 
-        harness.viewModel.stopTwoAppReadinessForPanelClose()
+        harness.viewModel.cancelPendingWorkForPanelClose()
 
         XCTAssertFalse(harness.viewModel.isExperimentalControlPending(for: "spotify"))
         XCTAssertFalse(harness.viewModel.isResolvingExperimentalControl(for: "youtube"))
@@ -867,7 +867,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         harness.viewModel.setAppVolume(50, for: "spotify")
         await waitFor { harness.viewModel.isExperimentalControlActive(for: "spotify") }
 
-        harness.viewModel.stopTwoAppReadinessForPanelClose()
+        harness.viewModel.cancelPendingWorkForPanelClose()
         await drainMainActor()
 
         XCTAssertTrue(harness.viewModel.isProcessTapLiveControlActive)
@@ -1733,7 +1733,6 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         processLister: FakeLiveControlProcessLister = FakeLiveControlProcessLister(),
         processTapReplayProbe: FakeLiveControlReplayProbe = FakeLiveControlReplayProbe(),
         helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe = FakeLiveControlCandidateAudioProbe(),
-        twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester = FakeLiveControlTwoAppReadinessTester(),
         systemVolumeReader: FakeLiveControlSystemVolumeReader = FakeLiveControlSystemVolumeReader(volumeScalar: 0.5),
         productRealStartSettleGate: ProductRealStartSettling = ProductRealStartSettleGate(sleeper: { _ in }),
         eligibilityByPID: [Int32: ProcessTapProcessEligibility] = [:]
@@ -1752,7 +1751,6 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             processTapTester: FakeLiveControlProcessTapTester(),
             processTapReplayProbe: processTapReplayProbe,
             processTapLiveController: liveController,
-            twoAppReadinessTester: twoAppReadinessTester,
             helperProcessAudioProbe: helperProcessAudioProbe,
             appAudioTargetResolver: appAudioTargetResolver,
             processLister: processLister,
@@ -1773,7 +1771,6 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             outputDeviceLister: outputDeviceLister,
             liveController: liveController,
             appAudioTargetResolver: appAudioTargetResolver,
-            twoAppReadinessTester: twoAppReadinessTester,
             systemVolumeReader: volumeReader
         )
     }
@@ -2891,7 +2888,7 @@ final class MixerViewModelLiveControlTests: XCTestCase {
     // and no panel/onAppear — the observer is owned by the app-lifetime view model, so cleanup is
     // independent of panel lifecycle). They lock in: confirmed Product teardown with .systemSleep,
     // banner/state clearing, helper cache invalidation, pending/late-completion stale safety,
-    // Advanced Manual stop, Two-App Readiness reason forwarding, idempotency, and sleep-then-quit.
+    // Advanced Manual stop, idempotency, and sleep-then-quit.
 
     func testSystemSleepTearsDownConfirmedProductSessionsAndClearsBanner() async {
         let harness = makeHarness()
@@ -3010,17 +3007,6 @@ final class MixerViewModelLiveControlTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.isProcessTapLiveControlActive)
         XCTAssertNil(harness.viewModel.activeLiveControlAppName)
         XCTAssertNil(harness.viewModel.realControlBannerPresentation)
-    }
-
-    func testSystemSleepForwardsSystemSleepReasonToTwoAppReadiness() async {
-        let tester = FakeLiveControlTwoAppReadinessTester()
-        let harness = makeHarness(twoAppReadinessTester: tester)
-
-        harness.viewModel.handleSystemWillSleep()
-
-        // The two-app readiness test is torn down through its synchronous stop path with the
-        // system-sleep reason (a normal controlled stop, not timeout/failure).
-        XCTAssertEqual(tester.stopAllNowReasons, [.systemSleep])
     }
 
     func testRepeatedSystemSleepIsIdempotent() async {
@@ -3282,7 +3268,6 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             processTapTester: FakeLiveControlProcessTapTester(),
             processTapReplayProbe: FakeLiveControlReplayProbe(),
             processTapLiveController: liveController,
-            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
             helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
             appAudioTargetResolver: appAudioTargetResolver,
             processLister: FakeLiveControlProcessLister(),
@@ -3364,7 +3349,6 @@ final class MixerViewModelLiveControlTests: XCTestCase {
             processTapTester: FakeLiveControlProcessTapTester(),
             processTapReplayProbe: FakeLiveControlReplayProbe(),
             processTapLiveController: liveController,
-            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
             helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
             appAudioTargetResolver: appAudioTargetResolver,
             processLister: FakeLiveControlProcessLister(),
@@ -3395,7 +3379,6 @@ private struct LiveControlHarness {
     let outputDeviceLister: FakeLiveControlOutputDeviceLister
     let liveController: FakeLiveControlController
     let appAudioTargetResolver: FakeAppAudioTargetResolver
-    let twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester
     let systemVolumeReader: FakeLiveControlSystemVolumeReader
 }
 
@@ -4110,37 +4093,6 @@ private final class FakeLiveControlCandidateAudioProbe: ProcessTapCandidateAudio
     }
 }
 
-private final class FakeLiveControlTwoAppReadinessTester: ProcessTapTwoAppReadinessTesting, @unchecked Sendable {
-    private let lock = NSLock()
-    private var stopAllNowReasonsStorage: [ProcessTapLiveStopReason] = []
-    /// Stop reasons forwarded to the synchronous `stopAllNow` path, so a test can assert system
-    /// sleep tears the two-app test down with `.systemSleep`.
-    var stopAllNowReasons: [ProcessTapLiveStopReason] { lock.lock(); defer { lock.unlock() }; return stopAllNowReasonsStorage }
-
-    func startTest(
-        appA: ProcessTapTarget,
-        appB: ProcessTapTarget,
-        gain: ProcessTapReplayGainOption,
-        duration: TimeInterval,
-        onUpdate: @escaping @Sendable (ProcessTapTwoAppReadinessSnapshot) -> Void,
-        onFinished: @escaping @Sendable (ProcessTapTwoAppReadinessResult, ProcessTapTwoAppReadinessSnapshot) -> Void
-    ) async -> ProcessTapTwoAppReadinessResult {
-        .idle
-    }
-
-    func stopAll(reason: ProcessTapLiveStopReason) async -> ProcessTapTwoAppReadinessResult {
-        .idle
-    }
-
-    @discardableResult
-    func stopAllNow(reason: ProcessTapLiveStopReason) -> ProcessTapTwoAppReadinessResult? {
-        lock.lock()
-        stopAllNowReasonsStorage.append(reason)
-        lock.unlock()
-        return .idle
-    }
-}
-
 /// Fake HAL process-object list for tests that run the real `HelperAudioTargetResolver`.
 private final class FakeLiveControlAudioProcessObjectLister: AudioProcessObjectListing, @unchecked Sendable {
     private let lock = NSLock()
@@ -4222,7 +4174,6 @@ final class MixerOutputActivityTests: XCTestCase {
             processTapTester: FakeLiveControlProcessTapTester(),
             processTapReplayProbe: FakeLiveControlReplayProbe(),
             processTapLiveController: live,
-            twoAppReadinessTester: FakeLiveControlTwoAppReadinessTester(),
             helperProcessAudioProbe: FakeLiveControlCandidateAudioProbe(),
             appAudioTargetResolver: FakeAppAudioTargetResolver(),
             processLister: processes,
@@ -4248,6 +4199,20 @@ final class MixerOutputActivityTests: XCTestCase {
         objects.objects = [object(101, active: false)]
         model.refreshOutputActivity()
         XCTAssertTrue(model.activeOutputAppIDs.isEmpty)
+    }
+
+    func testRowThatPlayedStaysVisibleUntilPanelCloses() {
+        let row = app("example.one", pid: 101)
+        let objects = FakeLiveControlAudioProcessObjectLister(objects: [object(101)])
+        let model = makeModel(applications: .init(apps: [row]), objects: objects)
+        XCTAssertFalse(row.isLikelyAudioRelevant)
+        model.setOutputActivityVisible(true)
+        XCTAssertEqual(model.visibleMixerApps.map(\.id), [row.id])
+        objects.objects = [object(101, active: false)]
+        model.refreshOutputActivity()
+        XCTAssertEqual(model.visibleMixerApps.map(\.id), [row.id])
+        model.setOutputActivityVisible(false)
+        XCTAssertTrue(model.visibleMixerApps.isEmpty)
     }
 
     func testChildAttributionUsesOneSharedSnapshotAndExcludesOtherRowsOwnPID() {

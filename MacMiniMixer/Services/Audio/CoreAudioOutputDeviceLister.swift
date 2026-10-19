@@ -29,18 +29,8 @@ struct CoreAudioOutputDeviceLister: OutputDeviceListing {
         return uid.hasPrefix(ownAggregateDeviceUIDPrefix)
     }
 
-    private let fallbackLister: OutputDeviceListing
-
-    init(fallbackLister: OutputDeviceListing = MockOutputDeviceLister()) {
-        self.fallbackLister = fallbackLister
-    }
-
     func listOutputDevices() -> [OutputDeviceItem] {
         let devices = realOutputDevices()
-        guard !devices.isEmpty else {
-            return fallbackLister.listOutputDevices()
-        }
-
         let userFacingDevices = devices.filter(isUserFacingOutputDevice)
         return userFacingDevices.isEmpty ? devices : userFacingDevices
     }

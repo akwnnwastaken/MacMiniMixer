@@ -65,7 +65,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
     private let controllerFactory: @Sendable () -> ProcessTapLiveControlling
     /// Maximum concurrent (starting/active/stopping) sessions, or `nil` for no limit. The Product
     /// Real manager is built with `AppConstants.maxConcurrentLiveSessions` (nil = unlimited); the
-    /// compatibility initializer and diagnostics (e.g. Two-App Readiness) pass explicit caps.
+    /// compatibility initializer passes an explicit cap.
     private let maxSessions: Int?
     /// Serializes all Core Audio session create/destroy across every session this manager owns, so a
     /// teardown never overlaps a setup (or another teardown) and churns the shared route twice at
@@ -140,7 +140,7 @@ final class ProcessTapLiveSessionManager: ProcessTapLiveSessionManaging, Process
         )
     }
 
-    // Non-private so multi-session callers (e.g. Two-App Readiness) can choose a timeout
+    // Non-private so multi-session callers can choose a timeout
     // policy other than `.standard`; the protocol method keeps the `.standard` default.
     func startSession(
         for target: ProcessTapTarget,

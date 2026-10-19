@@ -38,8 +38,6 @@ protocol ProductRealControlContext: AnyObject {
     var isExperimentalRealAppControlEnabled: Bool { get }
     /// Whether the Advanced manual live-control session is active (mutually exclusive with product).
     var advancedManualLiveControlActive: Bool { get }
-    /// Whether the two-app readiness test is running.
-    var isTwoAppReadinessRunning: Bool { get }
     /// Whether an Advanced Process Tap diagnostic is running.
     var isProcessTapTesting: Bool { get }
     /// Whether a helper-process probe or auto-detect is in flight.

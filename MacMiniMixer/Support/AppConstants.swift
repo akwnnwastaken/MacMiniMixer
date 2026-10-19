@@ -20,7 +20,6 @@ enum AppConstants {
     static let processTapHelperEarlyAcceptPeakLevel: Double = 0.05
     static let processTapReplayProbeDuration: TimeInterval = 2.5
     static let processTapLiveControlMaxDuration: TimeInterval = 60
-    static let processTapTwoAppReadinessDuration: TimeInterval = 10
     /// Optional cap on concurrent live Process Tap sessions for Product Real Control; `nil` means
     /// unlimited. Owner decision: Product Real Control has **no app-count limit** — like the
     /// Windows Volume Mixer, every app the user interacts with can be controlled at the same time

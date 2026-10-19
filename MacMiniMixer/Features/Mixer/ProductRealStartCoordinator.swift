@@ -222,11 +222,6 @@ final class ProductRealStartCoordinator {
                 return
             }
 
-            guard context?.isTwoAppReadinessRunning != true else {
-                sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
-                return
-            }
-
             if let blockReason = productSessionStartBlockReason(for: app.id) {
                 sideEffects?.showProductRealStatus(blockReason, style: .warning, action: nil)
                 return
@@ -307,11 +302,6 @@ final class ProductRealStartCoordinator {
     /// the gain — from current `context.apps`, so a drained entry uses the slider value at drain time.
     func requestAutomaticStart(for appID: MixerAppItem.ID) {
         guard context?.isExperimentalRealAppControlEnabled == true else {
-            return
-        }
-
-        guard context?.isTwoAppReadinessRunning != true else {
-            sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
             return
         }
 
@@ -403,11 +393,6 @@ final class ProductRealStartCoordinator {
     /// resolution/start is in flight the toggle is queued (see "Queued start lane") and re-runs this
     /// preflight when it drains.
     func startExperimentalControl(for appID: MixerAppItem.ID) {
-        guard context?.isTwoAppReadinessRunning != true else {
-            sideEffects?.showProductRealStatus("Stop two-app test first", style: .warning, action: nil)
-            return
-        }
-
         if isStartLaneBusy {
             if !productRealControlState.isOperationPending(for: appID),
                !productRealControlState.isResolving(appID: appID) {
@@ -724,7 +709,6 @@ final class ProductRealStartCoordinator {
                     // retry; other Product sessions run concurrently (a normal start resolves alongside them).
                     if resolutionSource == .cachedHelper,
                        context?.isExperimentalRealAppControlEnabled == true,
-                       context?.isTwoAppReadinessRunning != true,
                        context?.advancedManualLiveControlActive != true,
                        context?.isAppAudioTargetResolving != true {
                         startResolvedExperimentalControl(for: app, allowsCachedLookup: false)

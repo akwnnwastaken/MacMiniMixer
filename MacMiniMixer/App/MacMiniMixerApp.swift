@@ -19,7 +19,6 @@ struct MacMiniMixerApp: App {
             maxSessions: AppConstants.maxConcurrentLiveSessions,
             controllerFactory: { CoreAudioProcessTapLiveController() }
         )
-        let twoAppReadinessTester = CoreAudioProcessTapTwoAppReadinessTester()
         let helperProcessAudioProbe = CoreAudioProcessTapCandidateAudioProbe()
         let processLister = SystemProcessLister()
         let appAudioTargetResolver = HelperAudioTargetResolver(
@@ -39,7 +38,6 @@ struct MacMiniMixerApp: App {
                     processTapTester: processTapTester,
                     processTapReplayProbe: processTapReplayProbe,
                     processTapLiveController: processTapLiveController,
-                    twoAppReadinessTester: twoAppReadinessTester,
                     helperProcessAudioProbe: helperProcessAudioProbe,
                     appAudioTargetResolver: appAudioTargetResolver,
                     processLister: processLister

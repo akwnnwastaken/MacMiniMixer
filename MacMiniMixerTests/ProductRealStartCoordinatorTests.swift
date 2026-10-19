@@ -1483,11 +1483,6 @@ final class ProductRealStartLaneTests: XCTestCase {
         harness.coordinator.requestAutomaticStart(for: notes.id)
         harness.context.isHelperBusy = false
 
-        harness.context.isTwoAppReadinessRunning = true
-        harness.coordinator.requestAutomaticStart(for: notes.id)
-        harness.coordinator.startExperimentalControl(for: notes.id)
-        harness.context.isTwoAppReadinessRunning = false
-
         harness.coordinator.requestAutomaticStart(for: radio.id)
 
         harness.context.isExperimentalRealAppControlEnabled = false
@@ -1496,8 +1491,6 @@ final class ProductRealStartLaneTests: XCTestCase {
 
         XCTAssertEqual(harness.sideEffects.statusMessages, [
             "Stop helper probe first",
-            "Stop two-app test first",
-            "Stop two-app test first",
             "This app is not available for real app control"
         ])
         XCTAssertTrue(laneState(harness).queuedStarts.isEmpty)

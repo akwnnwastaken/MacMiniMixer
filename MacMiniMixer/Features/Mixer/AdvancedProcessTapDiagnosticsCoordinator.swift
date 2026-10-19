@@ -64,7 +64,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         apps: [MixerAppItem],
         advancedTarget: AdvancedProcessTapTarget?,
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) {
         Task {
@@ -72,7 +71,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
                 apps: apps,
                 advancedTarget: advancedTarget,
                 isLiveControlActive: isLiveControlActive,
-                isTwoAppReadinessRunning: isTwoAppReadinessRunning,
                 isAppAudioTargetResolving: isAppAudioTargetResolving
             )
         }
@@ -82,7 +80,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         apps: [MixerAppItem],
         advancedTarget: AdvancedProcessTapTarget?,
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) async {
         await startProcessTapTest(
@@ -90,7 +87,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
             apps: apps,
             advancedTarget: advancedTarget,
             isLiveControlActive: isLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
             isAppAudioTargetResolving: isAppAudioTargetResolving
         )
     }
@@ -98,14 +94,12 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
     func testSelectedProcessTapMuteProbe(
         apps: [MixerAppItem],
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) {
         Task {
             await testSelectedProcessTapMuteProbeNow(
                 apps: apps,
                 isLiveControlActive: isLiveControlActive,
-                isTwoAppReadinessRunning: isTwoAppReadinessRunning,
                 isAppAudioTargetResolving: isAppAudioTargetResolving
             )
         }
@@ -114,7 +108,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
     func testSelectedProcessTapMuteProbeNow(
         apps: [MixerAppItem],
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) async {
         await startProcessTapTest(
@@ -122,7 +115,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: isLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
             isAppAudioTargetResolving: isAppAudioTargetResolving
         )
     }
@@ -130,12 +122,10 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
     @discardableResult
     func selectReplayGain(
         _ gain: ProcessTapReplayGainOption,
-        isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool
+        isLiveControlActive: Bool
     ) -> Bool {
         guard !isRunningDiagnostics,
-              !isLiveControlActive,
-              !isTwoAppReadinessRunning else {
+              !isLiveControlActive else {
             return false
         }
 
@@ -149,7 +139,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         apps: [MixerAppItem],
         advancedTarget: AdvancedProcessTapTarget?,
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) {
         Task {
@@ -157,7 +146,6 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
                 apps: apps,
                 advancedTarget: advancedTarget,
                 isLiveControlActive: isLiveControlActive,
-                isTwoAppReadinessRunning: isTwoAppReadinessRunning,
                 isAppAudioTargetResolving: isAppAudioTargetResolving
             )
         }
@@ -167,12 +155,10 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         apps: [MixerAppItem],
         advancedTarget: AdvancedProcessTapTarget?,
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) async {
         guard !isRunningDiagnostics,
               !isLiveControlActive,
-              !isTwoAppReadinessRunning,
               !isAppAudioTargetResolving else {
             return
         }
@@ -258,12 +244,10 @@ final class AdvancedProcessTapDiagnosticsCoordinator {
         apps: [MixerAppItem],
         advancedTarget: AdvancedProcessTapTarget?,
         isLiveControlActive: Bool,
-        isTwoAppReadinessRunning: Bool,
         isAppAudioTargetResolving: Bool
     ) async {
         guard !isRunningDiagnostics,
               !isLiveControlActive,
-              !isTwoAppReadinessRunning,
               !isAppAudioTargetResolving else {
             return
         }

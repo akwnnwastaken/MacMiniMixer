@@ -79,7 +79,7 @@ struct MixerPanelView: View {
         .onDisappear {
             viewModel.setOutputActivityVisible(false)
             viewModel.setLiveDiagnosticsDisplayVisible(false)
-            viewModel.stopTwoAppReadinessForPanelClose()
+            viewModel.cancelPendingWorkForPanelClose()
         }
     }
 
@@ -481,23 +481,6 @@ struct MixerPanelView: View {
                         autoDetectHelper: viewModel.autoDetectHelperProcessCandidate,
                         probeCandidate: viewModel.probeHelperProcessCandidate,
                         useCandidateAsAdvancedTarget: viewModel.useHelperCandidateAsAdvancedTarget
-                    )
-
-                    TwoAppReadinessTestView(
-                        targets: viewModel.twoAppReadinessTargets,
-                        selectedAppAID: viewModel.selectedTwoAppReadinessAppAID,
-                        selectedAppBID: viewModel.selectedTwoAppReadinessAppBID,
-                        selectedGain: viewModel.selectedTwoAppReadinessGain,
-                        selectedDuration: viewModel.selectedTwoAppReadinessDuration,
-                        snapshot: viewModel.twoAppReadinessSnapshot,
-                        result: viewModel.twoAppReadinessResult,
-                        isRunning: viewModel.isTwoAppReadinessRunning,
-                        selectAppA: viewModel.selectTwoAppReadinessAppA,
-                        selectAppB: viewModel.selectTwoAppReadinessAppB,
-                        selectGain: viewModel.selectTwoAppReadinessGain,
-                        selectDuration: viewModel.selectTwoAppReadinessDuration,
-                        startTest: viewModel.startTwoAppReadinessTest,
-                        stopAll: viewModel.stopTwoAppReadinessTest
                     )
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))

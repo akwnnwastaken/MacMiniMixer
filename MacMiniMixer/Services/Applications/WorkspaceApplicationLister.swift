@@ -1,21 +1,16 @@
 import AppKit
 
 struct WorkspaceApplicationLister: ApplicationListing {
-    private let fallbackLister: ApplicationListing
     private let defaultVolume: Double
 
-    init(
-        fallbackLister: ApplicationListing = MockApplicationLister(),
-        defaultVolume: Double = 70
-    ) {
-        self.fallbackLister = fallbackLister
+    init(defaultVolume: Double = 70) {
         self.defaultVolume = defaultVolume
     }
 
     func listApplications() -> [MixerAppItem] {
         var seenAppIDs = Set<MixerAppItem.ID>()
 
-        let applications = NSWorkspace.shared.runningApplications
+        return NSWorkspace.shared.runningApplications
             .filter(isUserFacingApplication)
             .compactMap { application -> MixerAppItem? in
                 guard let name = cleanName(for: application) else {
@@ -38,8 +33,6 @@ struct WorkspaceApplicationLister: ApplicationListing {
             .sorted { first, second in
                 first.name.localizedCaseInsensitiveCompare(second.name) == .orderedAscending
             }
-
-        return applications.isEmpty ? fallbackLister.listApplications() : applications
     }
 
     private func isUserFacingApplication(_ application: NSRunningApplication) -> Bool {

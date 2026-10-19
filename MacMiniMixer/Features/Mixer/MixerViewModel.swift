@@ -5,6 +5,9 @@ import Foundation
 final class MixerViewModel: ObservableObject {
     @Published private(set) var apps: [MixerAppItem]
     @Published private(set) var activeOutputAppIDs: Set<MixerAppItem.ID> = []
+    /// Rows that played since the panel opened stay listed, so a pause in an app's audio does not
+    /// pull its row out from under the slider. Cleared when the panel closes.
+    private var outputSeenAppIDs: Set<MixerAppItem.ID> = []
     private var isOutputActivityVisible = false
     private let audioProcessObjectLister: AudioProcessObjectListing
     private let activityProcessLister: ProcessListing
@@ -45,7 +48,6 @@ final class MixerViewModel: ObservableObject {
     private let advancedProcessTapDiagnostics: AdvancedProcessTapDiagnosticsCoordinator
     private let advancedLiveControl: AdvancedLiveControlCoordinator
     private let processTapLiveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging
-    private let twoAppReadiness: TwoAppReadinessCoordinator
     private let helperProcessAudioProbe: ProcessTapCandidateAudioProbing
     private let advancedHelperDiscovery: AdvancedHelperDiscoveryCoordinator
     private let appAudioTargetResolver: AppAudioTargetResolving
@@ -75,7 +77,6 @@ final class MixerViewModel: ObservableObject {
         processTapTester: ProcessTapTesting,
         processTapReplayProbe: ProcessTapReplayProbing,
         processTapLiveController: ProcessTapLiveControlling & ProcessTapLiveSessionManaging,
-        twoAppReadinessTester: ProcessTapTwoAppReadinessTesting,
         helperProcessAudioProbe: ProcessTapCandidateAudioProbing,
         appAudioTargetResolver: AppAudioTargetResolving,
         processLister: ProcessListing,
@@ -115,11 +116,6 @@ final class MixerViewModel: ObservableObject {
             liveController: processTapLiveController,
             diagnostics: advancedProcessTapDiagnostics
         )
-        self.twoAppReadiness = TwoAppReadinessCoordinator(
-            tester: twoAppReadinessTester,
-            initialApps: initialApps,
-            processTapEligibility: processTapEligibility
-        )
         self.advancedHelperDiscovery = AdvancedHelperDiscoveryCoordinator(
             processLister: processLister,
             helperProcessAudioProbe: helperProcessAudioProbe,
@@ -137,12 +133,8 @@ final class MixerViewModel: ObservableObject {
         advancedHelperDiscovery.setOnWillChange { [weak self] in
             self?.objectWillChange.send()
         }
-        twoAppReadiness.setOnWillChange { [weak self] in
-            self?.objectWillChange.send()
-        }
-        advancedHelperDiscovery.setOnAdvancedTargetChanged { [weak self] removedTargetID in
+        advancedHelperDiscovery.setOnAdvancedTargetChanged { [weak self] _ in
             self?.advancedProcessTapDiagnostics.clearResultAndProgress()
-            self?.refreshTwoAppReadinessSelectionsAfterTargetChange(removedTargetID: removedTargetID)
         }
 
         // `willTerminate` is posted on the main thread and AppKit calls `exit()` right after the
@@ -242,7 +234,6 @@ final class MixerViewModel: ObservableObject {
         }
 
         _ = processTapLiveController.stopLiveControlNow(reason: .appTerminating)
-        _ = twoAppReadiness.stopNowForTermination(reason: .appTerminating)
         // The resolution task now lives in `productRealControlCoordinator`, whose own `deinit`
         // cancels it as it is released alongside this view model.
         appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
@@ -333,38 +324,6 @@ final class MixerViewModel: ObservableObject {
         advancedProcessTapDiagnostics.isRunningDiagnostics
     }
 
-    var selectedTwoAppReadinessAppAID: MixerAppItem.ID? {
-        twoAppReadiness.selectedAppAID
-    }
-
-    var selectedTwoAppReadinessAppBID: MixerAppItem.ID? {
-        twoAppReadiness.selectedAppBID
-    }
-
-    var selectedTwoAppReadinessGain: ProcessTapReplayGainOption {
-        twoAppReadiness.selectedGain
-    }
-
-    var selectedTwoAppReadinessDuration: ProcessTapTwoAppReadinessDurationOption {
-        twoAppReadiness.selectedDuration
-    }
-
-    var twoAppReadinessEligibilityByAppID: [MixerAppItem.ID: ProcessTapProcessEligibility] {
-        twoAppReadiness.eligibilityByAppID
-    }
-
-    var twoAppReadinessSnapshot: ProcessTapTwoAppReadinessSnapshot {
-        twoAppReadiness.snapshot
-    }
-
-    var twoAppReadinessResult: ProcessTapTwoAppReadinessResult? {
-        twoAppReadiness.result
-    }
-
-    var isTwoAppReadinessRunning: Bool {
-        twoAppReadiness.isRunning
-    }
-
     var selectedHelperDiscoveryAppID: MixerAppItem.ID? {
         advancedHelperDiscovery.selectedAppID
     }
@@ -409,7 +368,7 @@ final class MixerViewModel: ObservableObject {
         MixerVisibleAppsFilter.visibleApps(
             apps: apps,
             showAllApps: showAllApps,
-            outputActiveAppIDs: activeOutputAppIDs,
+            outputActiveAppIDs: outputSeenAppIDs,
             activeVisibleAppIDs: Set(productRealControlState.activeVisibleAppIDs),
             // A row whose Product start is queued behind the start lane stays visible like a
             // resolving row, so its pending state cannot be filtered out.
@@ -417,13 +376,6 @@ final class MixerViewModel: ObservableObject {
                 .union(productRealControlState.queuedStartAppIDs),
             selectedProcessTapAppID: selectedProcessTapAppID,
             isLiveControlActive: isProcessTapLiveControlActive
-        )
-    }
-
-    var twoAppReadinessTargets: [TwoAppReadinessTargetOption] {
-        twoAppReadiness.targetOptions(
-            apps: apps,
-            advancedTarget: advancedProcessTapTarget
         )
     }
 
@@ -435,8 +387,9 @@ final class MixerViewModel: ObservableObject {
         isOutputActivityVisible = isVisible
         if isVisible {
             refreshOutputActivity()
-        } else if !activeOutputAppIDs.isEmpty {
-            activeOutputAppIDs = []
+        } else {
+            outputSeenAppIDs = []
+            if !activeOutputAppIDs.isEmpty { activeOutputAppIDs = [] }
         }
     }
 
@@ -483,6 +436,7 @@ final class MixerViewModel: ObservableObject {
                 $0.id == displayedApp.id && $0.processIdentifier == displayedApp.processIdentifier
             }
         }.map(\.id))
+        outputSeenAppIDs.formUnion(activeIDs)
         if activeIDs != activeOutputAppIDs { activeOutputAppIDs = activeIDs }
     }
 
@@ -571,11 +525,6 @@ final class MixerViewModel: ObservableObject {
             stopProcessTapLiveControl(reason: .outputDeviceChanged)
         }
 
-        if isTwoAppReadinessRunning {
-            logChange("stopping two-app readiness")
-            stopTwoAppReadiness(reason: .outputDeviceChanged)
-        }
-
         if helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning {
             logChange("stopping helper probe")
             stopHelperProcessProbe(reason: .outputDeviceChanged)
@@ -609,22 +558,6 @@ final class MixerViewModel: ObservableObject {
         _ = advancedHelperDiscovery.clearAdvancedTarget(notify: false)
     }
 
-    func selectTwoAppReadinessAppA(_ appID: MixerAppItem.ID) {
-        twoAppReadiness.selectAppA(appID, targets: twoAppReadinessTargets)
-    }
-
-    func selectTwoAppReadinessAppB(_ appID: MixerAppItem.ID) {
-        twoAppReadiness.selectAppB(appID, targets: twoAppReadinessTargets)
-    }
-
-    func selectTwoAppReadinessGain(_ gain: ProcessTapReplayGainOption) {
-        twoAppReadiness.selectGain(gain)
-    }
-
-    func selectTwoAppReadinessDuration(_ duration: ProcessTapTwoAppReadinessDurationOption) {
-        twoAppReadiness.selectDuration(duration)
-    }
-
     func selectHelperDiscoveryApp(_ appID: MixerAppItem.ID) {
         advancedHelperDiscovery.selectApp(
             appID,
@@ -651,15 +584,12 @@ final class MixerViewModel: ObservableObject {
     }
 
     func clearAdvancedProcessTapTarget() {
-        let removedTargetID = advancedProcessTapTarget?.id
-
         if isHelperProcessAutoDetectRunning {
             stopHelperProcessAutoDetect(reason: .userStopped)
         }
 
         _ = advancedHelperDiscovery.clearAdvancedTarget(notify: false)
         advancedProcessTapDiagnostics.clearResultAndProgress()
-        refreshTwoAppReadinessSelectionsAfterTargetChange(removedTargetID: removedTargetID)
     }
 
     func probeHelperProcessCandidate(_ processIdentifier: Int32) {
@@ -681,7 +611,6 @@ final class MixerViewModel: ObservableObject {
             apps: apps,
             advancedTarget: advancedProcessTapTarget,
             isLiveControlActive: isProcessTapLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
             isAppAudioTargetResolving: isAppAudioTargetResolving
         )
     }
@@ -690,7 +619,6 @@ final class MixerViewModel: ObservableObject {
         advancedProcessTapDiagnostics.testSelectedProcessTapMuteProbe(
             apps: apps,
             isLiveControlActive: isProcessTapLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
             isAppAudioTargetResolving: isAppAudioTargetResolving
         )
     }
@@ -698,8 +626,7 @@ final class MixerViewModel: ObservableObject {
     func selectProcessTapReplayGain(_ gain: ProcessTapReplayGainOption) {
         advancedProcessTapDiagnostics.selectReplayGain(
             gain,
-            isLiveControlActive: isProcessTapLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning
+            isLiveControlActive: isProcessTapLiveControlActive
         )
     }
 
@@ -708,7 +635,6 @@ final class MixerViewModel: ObservableObject {
             apps: apps,
             advancedTarget: advancedProcessTapTarget,
             isLiveControlActive: isProcessTapLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
             isAppAudioTargetResolving: isAppAudioTargetResolving
         )
     }
@@ -720,7 +646,6 @@ final class MixerViewModel: ObservableObject {
             selectedAppID: selectedProcessTapAppID,
             gain: selectedProcessTapReplayGain,
             isLiveControlActive: isProcessTapLiveControlActive,
-            isTwoAppReadinessRunning: isTwoAppReadinessRunning,
             isAppAudioTargetResolving: isAppAudioTargetResolving
         ) { [weak self] diagnostics in
             self?.processTapLiveDiagnostics = diagnostics
@@ -800,7 +725,6 @@ final class MixerViewModel: ObservableObject {
     /// state and stops already-stopped engines safely.
     private func tearDownAllProcessTapWork(liveStopReason: ProcessTapLiveStopReason) {
         _ = processTapLiveController.stopLiveControlNow(reason: liveStopReason)
-        _ = twoAppReadiness.stopNow(reason: liveStopReason)
         advancedHelperDiscovery.stopAutoDetect(reason: .userStopped)
         productRealControlCoordinator.cancelResolutionTask()
         appAudioTargetResolver.cancelCurrentResolution(reason: .userStopped)
@@ -814,34 +738,10 @@ final class MixerViewModel: ObservableObject {
         productRealControlCoordinator.tearDownProductStateForHardStop()
     }
 
-    func startTwoAppReadinessTest() {
-        twoAppReadiness.startTest(
-            apps: apps,
-            advancedTarget: advancedProcessTapTarget,
-            isProcessTapTesting: isProcessTapTesting,
-            isLiveControlActive: isProcessTapLiveControlActive,
-            isAppAudioTargetResolving: isAppAudioTargetResolving
-        ) { [weak self] message in
-            self?.showStatus(message, style: .warning)
-        }
-    }
-
-    func stopTwoAppReadinessTest() {
-        stopTwoAppReadiness(reason: .userStopped)
-    }
-
-    func stopTwoAppReadinessForPanelClose() {
+    func cancelPendingWorkForPanelClose() {
         // Queued Product starts must not drain into background helper probing once the panel is
         // closed: drop them before cancelling the in-flight resolution below.
         productRealControlCoordinator.clearQueuedStarts()
-
-        guard isTwoAppReadinessRunning else {
-            stopHelperProcessAutoDetect(reason: .userStopped)
-            productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
-            return
-        }
-
-        stopTwoAppReadiness(reason: .userStopped)
         stopHelperProcessAutoDetect(reason: .userStopped)
         productRealControlCoordinator.cancelAppAudioTargetResolution(reason: .userStopped)
     }
@@ -895,11 +795,9 @@ final class MixerViewModel: ObservableObject {
             updatedApp.isMuted = existingState.isMuted
             return updatedApp
         }
-        refreshTwoAppReadinessEligibility()
         invalidateCachedAudioTargetsForRemovedOrChangedApps(previousApps: previousApps, refreshedApps: apps)
         productRealControlCoordinator.stopRealControlForExitedTargetApps()
         refreshProcessTapSelectionAfterAppRefresh(previousProcessTapAppID: previousProcessTapAppID)
-        refreshTwoAppReadinessSelectionsAfterAppRefresh()
         refreshHelperDiscoverySelectionAfterAppRefresh()
         refreshOutputActivity()
     }
@@ -1005,10 +903,6 @@ final class MixerViewModel: ObservableObject {
         }
     }
 
-    private func stopTwoAppReadiness(reason: ProcessTapLiveStopReason) {
-        twoAppReadiness.stop(reason: reason)
-    }
-
     private func stopHelperProcessProbe(reason: ProcessTapCandidateProbeStopReason) {
         guard helperProcessProbeRunningPID != nil || isHelperProcessAutoDetectRunning else {
             return
@@ -1023,14 +917,6 @@ final class MixerViewModel: ObservableObject {
 
     private func stopHelperProcessAutoDetect(reason: ProcessTapCandidateProbeStopReason) {
         advancedHelperDiscovery.stopAutoDetect(reason: reason)
-    }
-
-    private func refreshTwoAppReadinessSelectionsAfterAppRefresh() {
-        twoAppReadiness.refreshSelectionsAfterAppRefresh(targets: twoAppReadinessTargets)
-    }
-
-    private func refreshTwoAppReadinessSelectionsAfterTargetChange(removedTargetID: String? = nil) {
-        twoAppReadiness.handleRemovedTarget(id: removedTargetID, targets: twoAppReadinessTargets)
     }
 
     private func refreshHelperDiscoverySelectionAfterAppRefresh() {
@@ -1057,10 +943,6 @@ final class MixerViewModel: ObservableObject {
                 appAudioTargetResolver.invalidateCachedTarget(for: previousApp.appAudioTargetRequest)
             }
         }
-    }
-
-    private func refreshTwoAppReadinessEligibility() {
-        twoAppReadiness.refreshEligibility(apps: apps)
     }
 
     private func updateExperimentalGainIfActive(for app: MixerAppItem) {

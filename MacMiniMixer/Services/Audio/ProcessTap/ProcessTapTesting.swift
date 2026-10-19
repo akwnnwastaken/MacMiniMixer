@@ -7,7 +7,7 @@ struct ProcessTapTarget: Equatable, Sendable {
     /// Further processes that belong to the same app and are tapped together with
     /// `processIdentifier` in one tap (browser / Electron audio helpers, the WebKit GPU process,
     /// child processes). Empty for a classic single-process target. Only the Product Real live path
-    /// honors it; the Advanced tester, probes and Two-App Readiness tap `processIdentifier` alone.
+    /// honors it; the Advanced tester and probes tap `processIdentifier` alone.
     var additionalProcessIdentifiers: [Int32] = []
 
     /// The primary process (when valid) followed by the additional ones, without duplicates or

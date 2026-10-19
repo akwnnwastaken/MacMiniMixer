@@ -23,7 +23,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -45,7 +44,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: helperTarget,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -62,7 +60,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
         await coordinator.testSelectedProcessTapMuteProbeNow(
             apps: apps,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -79,7 +76,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: [],
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -125,7 +121,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -141,7 +136,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -172,7 +166,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: true,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -190,7 +183,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -213,7 +205,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: helperTarget,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -228,8 +219,7 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
 
         let didSelect = coordinator.selectReplayGain(
             ProcessTapReplayGainOption.options[0],
-            isLiveControlActive: false,
-            isTwoAppReadinessRunning: false
+            isLiveControlActive: false
         )
 
         XCTAssertTrue(didSelect)
@@ -246,7 +236,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: [],
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -268,7 +257,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: makeAdvancedTarget(parentName: "YouTube", pid: 201),
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -293,7 +281,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -322,7 +309,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
@@ -351,7 +337,6 @@ final class AdvancedProcessTapDiagnosticsCoordinatorTests: XCTestCase {
             apps: apps,
             advancedTarget: nil,
             isLiveControlActive: false,
-            isTwoAppReadinessRunning: false,
             isAppAudioTargetResolving: false
         )
 
