@@ -2,7 +2,7 @@
 
 A self-contained snapshot of the project so a fresh Claude/Codex chat can continue without prior
 context. This file is committed to the repo and should be kept current when the project state
-changes. It is **not** a public release document — v2.5.2 / build 11 is the release for 2026-10-19
+changes. It is **not** a public release document — v2.5.3 / build 12 is the release for 2026-10-19
 (see `CHANGELOG.md`).
 
 > Always verify the live state before trusting this file — run the commands in
@@ -41,6 +41,12 @@ changes. It is **not** a public release document — v2.5.2 / build 11 is the re
 ## 3. Critical guardrails
 
 - **No release or tag** unless explicitly requested.
+- **v2.5.3 release (2026-10-19):** `ProductRealStopCoordinator.scheduleReconnect` waits until the
+  row's app runs and has a Core Audio process, then restarts it; used after an output-device change,
+  after wake (`reconnectAfterWake`, rows captured at hard stop) and after an app relaunch (a
+  `didLaunchApplication` observer refreshes the app list). Only rows that are lowered, boosted or
+  muted (`MixerAppItem.needsRealControl`) reconnect. Untouched rows default to 100%. The
+  refresh-only wake decision is superseded (see DECISIONS).
 - **v2.5.2 release (2026-10-19):** live sessions re-match the app's audio processes every 2 s
   (`ProductRealStartCoordinator.restartIfAppGainedAudioProcess`) and restart to include a new one;
   a reconnect inside the 10 s window is delayed, not dropped, and Stop/Stop All/output change/sleep
@@ -62,7 +68,7 @@ changes. It is **not** a public release document — v2.5.2 / build 11 is the re
   (pending-start tokens, rollback through the lifecycle gate), and a System Audio Recording hint on
   the Advanced card's silent "No app audio detected" state. v2.3.6 (2026-10-12) added the
   app-icon backplate removal and the green active-output row outline (macOS 14.2+).
-  `MARKETING_VERSION` is **`2.5.2`** and `CURRENT_PROJECT_VERSION` is `11` (all 4 build configurations).
+  `MARKETING_VERSION` is **`2.5.3`** and `CURRENT_PROJECT_VERSION` is `12` (all 4 build configurations).
   The owner selected this version/build and the existing ad-hoc-signed, not-notarized release
   workflow. Per-app audio remains experimental.
   Do not bump the version again until the owner asks. Final packaged-app System Audio Recording /

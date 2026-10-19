@@ -16,6 +16,12 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+## [v2.5.3] - 2026-10-19
+
+### Highlights
+- **Your levels survive AirPods, sleep and app restarts.** A row you lowered or muted reconnects on
+  its own once the app plays again, instead of silently going back to full volume.
+
 ### Fixed
 - **The slider and the real volume stay in step.** When control ended on its own — an output
   device change (e.g. AirPods connecting), sleep and wake, or the app being relaunched — the row
