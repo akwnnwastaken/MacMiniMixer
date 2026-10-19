@@ -27,6 +27,11 @@ final class ProcessTapDiagnosticsAccumulator: @unchecked Sendable {
     private var measuredSampleCount: UInt64 = 0
     private var peakLevel: Double = 0
     private var sumOfSquares: Double = 0
+    // Touched only by the single callback thread that calls `observe`, so no lock is needed.
+    private var pendingCallbackCount = 0
+    private var pendingSampleCount: UInt64 = 0
+    private var pendingPeakLevel: Double = 0
+    private var pendingSumOfSquares: Double = 0
 
     /// Observes one input callback and returns whether it contained real (non-silent) audio, so the
     /// caller can latch "real audio has been seen" without a second scan. The peak used for the
@@ -62,12 +67,24 @@ final class ProcessTapDiagnosticsAccumulator: @unchecked Sendable {
             }
         }
 
-        lock.lock()
-        callbackCount += 1
-        peakLevel = max(peakLevel, localPeak)
-        sumOfSquares += localSumOfSquares
-        measuredSampleCount += localSampleCount
-        lock.unlock()
+        pendingCallbackCount += 1
+        pendingPeakLevel = max(pendingPeakLevel, localPeak)
+        pendingSumOfSquares += localSumOfSquares
+        pendingSampleCount += localSampleCount
+
+        // Never block the audio thread on a reader: if `snapshot()` holds the lock, these totals
+        // fold in on a later callback instead.
+        if lock.try() {
+            callbackCount += pendingCallbackCount
+            peakLevel = max(peakLevel, pendingPeakLevel)
+            sumOfSquares += pendingSumOfSquares
+            measuredSampleCount += pendingSampleCount
+            lock.unlock()
+            pendingCallbackCount = 0
+            pendingPeakLevel = 0
+            pendingSumOfSquares = 0
+            pendingSampleCount = 0
+        }
 
         return localPeak > AppConstants.processTapRealAudioPeakThreshold
     }
@@ -103,8 +120,8 @@ struct ProcessTapCallbackTimingSnapshot: Equatable {
 /// jitter (a stall between callbacks can cause an audible glitch with drops == 0). This tracks the
 /// gap between consecutive callbacks using the host time the Core Audio IOProc already provides.
 ///
-/// Realtime-safe: `record` does only integer arithmetic under a short lock — no allocation, no
-/// logging. Separate from `ProcessTapDiagnosticsAccumulator` so the shared `observe` path (used by
+/// Realtime-safe: `record` does only integer arithmetic and never waits for a lock (it folds its
+/// totals in when the lock is free) — no allocation, no logging. Separate from `ProcessTapDiagnosticsAccumulator` so the shared `observe` path (used by
 /// probes and the tap test) is unchanged.
 final class ProcessTapCallbackTimingAccumulator: @unchecked Sendable {
     /// Conservative absolute threshold for a "late" callback. Normal audio IOProc callbacks arrive
@@ -119,6 +136,8 @@ final class ProcessTapCallbackTimingAccumulator: @unchecked Sendable {
     private var previousHostTime: UInt64 = 0
     private var maxGapNanoseconds: UInt64 = 0
     private var lateCallbackCount = 0
+    private var pendingMaxGapNanoseconds: UInt64 = 0
+    private var pendingLateCallbackCount = 0
     private let timebaseNumerator: UInt64
     private let timebaseDenominator: UInt64
 
@@ -132,20 +151,26 @@ final class ProcessTapCallbackTimingAccumulator: @unchecked Sendable {
     /// Records one IOProc callback at the given Core Audio host time (mach absolute time units).
     /// The first callback only seeds the baseline; the gap is measured from the second onward.
     func record(hostTime: UInt64) {
-        lock.lock()
+        // `previousHostTime` and the pending values belong to the callback thread alone; only the
+        // published totals are shared, and the audio thread never waits for them.
         if hasPreviousHostTime, hostTime > previousHostTime {
             let deltaHostTime = hostTime - previousHostTime
             let deltaNanoseconds = deltaHostTime * timebaseNumerator / timebaseDenominator
-            if deltaNanoseconds > maxGapNanoseconds {
-                maxGapNanoseconds = deltaNanoseconds
-            }
+            pendingMaxGapNanoseconds = max(pendingMaxGapNanoseconds, deltaNanoseconds)
             if deltaNanoseconds > Self.lateThresholdNanoseconds {
-                lateCallbackCount += 1
+                pendingLateCallbackCount += 1
             }
         }
         previousHostTime = hostTime
         hasPreviousHostTime = true
-        lock.unlock()
+
+        if lock.try() {
+            maxGapNanoseconds = max(maxGapNanoseconds, pendingMaxGapNanoseconds)
+            lateCallbackCount += pendingLateCallbackCount
+            lock.unlock()
+            pendingMaxGapNanoseconds = 0
+            pendingLateCallbackCount = 0
+        }
     }
 
     func snapshot() -> ProcessTapCallbackTimingSnapshot {

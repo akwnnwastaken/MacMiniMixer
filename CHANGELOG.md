@@ -16,6 +16,13 @@ multi-app per-application control is not claimed. Older entries that say "capped
 
 ## [Unreleased]
 
+### Fixed
+- **Sample rate changes are followed.** If a DAW, a game or Audio MIDI Setup changes the output
+  device's sample rate while an app is controlled, the session now restarts with the new rate
+  instead of converting for the old one.
+- **The audio thread never waits for a lock.** Level and timing measurements, and the legacy output
+  path's gain read, now skip a busy lock instead of blocking the real-time callback.
+
 ## [v2.5.3] - 2026-10-19
 
 ### Highlights

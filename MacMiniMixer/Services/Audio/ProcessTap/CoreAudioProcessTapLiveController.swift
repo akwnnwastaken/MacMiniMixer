@@ -335,6 +335,7 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             targetName: target.appName,
             gainState: gainState,
             startDefaultOutputDeviceID: startDefaultOutputDeviceID,
+            startOutputSampleRate: ProcessTapCoreAudio.nominalSampleRate(for: startDefaultOutputDeviceID),
             resources: resources,
             output: .directAggregate(renderer),
             accumulator: accumulator,
@@ -496,6 +497,17 @@ final class CoreAudioProcessTapLiveController: ProcessTapLiveControlling, @unche
             }
 
             if ProcessTapCoreAudio.defaultOutputDeviceID() != session.startDefaultOutputDeviceID {
+                self.stop(session: session, reason: .outputDeviceChanged)
+                return
+            }
+
+            // A DAW, game or Audio MIDI Setup can change the device's rate mid-session; the direct
+            // engine's converter was built for the old one. Stopping as an output change lets the
+            // Product side reconnect with a fresh converter.
+            if let startRate = session.startOutputSampleRate,
+               let currentRate = ProcessTapCoreAudio.nominalSampleRate(for: session.startDefaultOutputDeviceID),
+               currentRate != startRate {
+                AppLogger.processTap.info("Live control output sample rate changed app=\(session.targetName, privacy: .public) from=\(startRate, privacy: .public) to=\(currentRate, privacy: .public)")
                 self.stop(session: session, reason: .outputDeviceChanged)
                 return
             }
@@ -683,6 +695,9 @@ final class ProcessTapLiveSession: @unchecked Sendable {
     let targetName: String
     let gainState: ProcessTapLiveGainState
     let startDefaultOutputDeviceID: AudioDeviceID
+    /// The output device's sample rate when the direct engine built its converter; nil for the
+    /// AudioQueue path, which converts on its own.
+    let startOutputSampleRate: Double?
     let resources: ProcessTapResourceContext
     let output: ProcessTapLiveOutputBackend
     let accumulator: ProcessTapDiagnosticsAccumulator
@@ -703,6 +718,7 @@ final class ProcessTapLiveSession: @unchecked Sendable {
         targetName: String,
         gainState: ProcessTapLiveGainState,
         startDefaultOutputDeviceID: AudioDeviceID,
+        startOutputSampleRate: Double? = nil,
         resources: ProcessTapResourceContext,
         output: ProcessTapLiveOutputBackend,
         accumulator: ProcessTapDiagnosticsAccumulator,
@@ -716,6 +732,7 @@ final class ProcessTapLiveSession: @unchecked Sendable {
         self.targetName = targetName
         self.gainState = gainState
         self.startDefaultOutputDeviceID = startDefaultOutputDeviceID
+        self.startOutputSampleRate = startOutputSampleRate
         self.resources = resources
         self.output = output
         self.accumulator = accumulator
@@ -847,9 +864,22 @@ final class ProcessTapLiveSession: @unchecked Sendable {
 final class ProcessTapLiveGainState: @unchecked Sendable {
     private let lock = NSLock()
     private var gain: ProcessTapReplayGainOption
+    /// Touched only by the callback thread through `scalarForAudioThread()`.
+    private var lastAudioThreadScalar: Float
 
     init(gain: ProcessTapReplayGainOption) {
         self.gain = gain
+        self.lastAudioThreadScalar = gain.scalar
+    }
+
+    /// Audio-thread read that never waits: while `update` holds the lock it returns the previous
+    /// value, and the new one is picked up on the next callback.
+    func scalarForAudioThread() -> Float {
+        if lock.try() {
+            lastAudioThreadScalar = gain.scalar
+            lock.unlock()
+        }
+        return lastAudioThreadScalar
     }
 
     var scalar: Float {

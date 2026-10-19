@@ -128,7 +128,7 @@ extension CoreAudioProcessTapLiveController {
             // `observe` returns whether this callback had real (non-silent) audio, reusing the peak
             // it already computes — no extra scan — so the output queue can gate starvation on it.
             let hadRealAudioInput = accumulator.observe(inputData)
-            outputQueue.enqueue(inputData, gain: gainState.scalar, hadRealAudioInput: hadRealAudioInput)
+            outputQueue.enqueue(inputData, gain: gainState.scalarForAudioThread(), hadRealAudioInput: hadRealAudioInput)
         }
 
         let createIOProcStatus = resources.createIOProc(
