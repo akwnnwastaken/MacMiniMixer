@@ -1,0 +1,20 @@
+# macOS production release
+
+The release workflow scans the source, runs the macOS tests, builds the app and verifies its identity and architecture. Pull requests and manual runs without a tag stop after the build and upload a staging artifact for testing. It is not a release asset.
+
+## Set up the repository once
+
+1. Protect `main` with required review and CI. Restrict creation of `v*` tags to release maintainers, and prevent moving or deleting release tags. Enable [immutable releases](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes) for future releases where possible. Tags used by another platform keep their own rules.
+2. In Settings → Environments, create `macos-production-signing`. Under **Selected branches and tags**, allow the **branch** `main` only. Add the owner or release reviewers, require review and disable admin bypass where available. When a second reviewer is available, prevent self-review. Verify protection before uploading credentials. Keep these names scoped to this environment: do not define them as repository or organization variables or secrets.
+3. Set the following environment **variables**: `APPLE_TEAM_ID` (Developer Program membership Team ID), `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID`. Use a dedicated App Store Connect team API key authorized to submit notarizations; Apple documents the [notary credentials](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
+4. Add these environment **secrets** through GitHub or from private file input using `gh secret set --env macos-production-signing`: `APPLE_DEVELOPER_ID_P12_BASE64` (Developer ID Application certificate **with** its private key), `APPLE_DEVELOPER_ID_P12_PASSWORD`, and `APPLE_NOTARY_KEY_P8_BASE64` (notary API private key). Encode files with `base64 < /private/path/to/file | tr -d '\n'` piped directly into the secret command, not to the terminal. Keep originals in secure storage. Do not use an ad hoc or self-signed key.
+
+## Prepare a new draft
+
+1. Run the no-tag workflow on `main` first. Require its scans, existing regression tests and packaging checks to pass. The macOS project has no external package dependencies today. The release gate rejects new SwiftPM or other tracked dependency-manager inputs until an advisory scanner is configured for them.
+2. Require the full Cloudflare baseline before the first production release and a new full audit after material security boundary changes. For other versions, review the diff against the retained audit, repeat targeted tests and check dependencies and secrets. Link the evidence to the **exact** main SHA. Leave the environment variable `MACOS_RELEASE_APPROVED_SHA` unset if a required review is incomplete, a confirmed critical/high issue remains, or a plausible high-impact release blocker is still unverified.
+3. On the reviewed main tip, confirm the bundle marketing version. Create a new matching tag on the reviewed commit (for example `git push origin <approved-main-SHA>:refs/tags/vX.Y.Z`). Set `MACOS_RELEASE_APPROVED_SHA` to that main commit only after reviewing the evidence.
+4. On GitHub Actions, dispatch `release.yml` on branch `main`, enter the existing tag, and approve the protected environment job once the ref and SHA have been checked. The signing job takes only the artifact ID from its prerequisite, imports identities into a temporary keychain, requires Apple Accepted, staples, rechecks the final artifact, and publishes its checksum and source provenance to a **draft** only.
+5. Review the green workflow, matching assets and provenance, and test the browser-downloaded draft asset on a clean Mac. Complete the signed audio, TCC and Launch at Login checklist in [RELEASING.md](RELEASING.md). Obtain the maintainer's explicit publish approval before publishing the draft in the GitHub UI.
+
+A pre-existing release or draft for the tag stops automation. Inspect a failed or abandoned draft manually; the workflow never edits existing release assets. Keep prior public versions and tags intact.

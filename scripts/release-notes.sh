@@ -3,7 +3,7 @@
 # release-notes.sh — print the GitHub Release notes for a MacMiniMixer release.
 #
 # Usage:
-#   scripts/release-notes.sh <tag> <version>
+#   scripts/release-notes.sh <tag> <version> [--notarized]
 #   scripts/release-notes.sh v0.14 0.14
 #
 # Prints, to stdout:
@@ -27,13 +27,15 @@ if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
   exit 0
 fi
 
-if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+if [[ $# -lt 2 || $# -gt 3 || -z "$1" || -z "$2" || ( $# == 3 && "$3" != --notarized ) ]]; then
   echo "usage: scripts/release-notes.sh <tag> <version>   (e.g. v0.14 0.14)" >&2
   exit 2
 fi
 
 tag="$1"
 version="$2"
+notarized="${3:-}"
+[[ "$tag" == "v$version" && "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || exit 2
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 changelog="${repo_root}/CHANGELOG.md"
@@ -62,11 +64,13 @@ look for its icon in the menu bar.
 
 ## Before you install
 
-- **Ad-hoc signed, not notarized.** This build is not signed with an Apple Developer ID and
-  has not been notarized by Apple, so Gatekeeper blocks the first launch:
-  - macOS 13–14: Control-click (right-click) `MacMiniMixer.app` → **Open** → **Open**.
-  - macOS 15 or later: try to open the app once, then go to **System Settings → Privacy &
-    Security** and click **Open Anyway**.
+EOF
+if [[ "$notarized" == --notarized ]]; then
+  echo '- **Developer ID signed and notarized by Apple.** Install normally and allow System Audio Recording when prompted.'
+else
+  echo '- **Ad-hoc development build.** This build is for local testing and has not been notarized.'
+fi
+cat <<'EOF'
 - **Requirements:** the app runs on **macOS 13.0 or later**. Per-app audio features (Product
   Real Control and other Process Tap features) require **macOS 14.2 or later**.
 - **Product Real Control is experimental, always on, and has no app-count limit.** There is no
@@ -77,8 +81,7 @@ look for its icon in the menu bar.
   mode: `defaults write com.akwnnwastaken.macminimixer MacMiniMixerDeveloperMode -bool YES`, then
   relaunch.
 - macOS asks for **System Audio Recording** permission the first time you use a Process Tap
-  feature. Because this build is ad-hoc signed, macOS may ask again (or the permission may
-  need to be re-enabled in System Settings) after updating to a newer build.
+  feature. Check System Settings if macOS asks again after a change of signing identity.
 EOF
 
 # This version's CHANGELOG.md section ("## [vX.Y] ...") without its heading.
