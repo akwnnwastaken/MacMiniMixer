@@ -3,14 +3,13 @@
 Maintainer guide for packaging MacMiniMixer as a direct-download `.zip` and publishing it as a
 GitHub Release.
 
-> **Guardrail:** nothing in this pipeline publishes a release on its own. A tag push only creates a
-> **draft**, and a person publishes it. Tag and release only when the maintainer explicitly asks
-> (see `docs/HANDOFF.md` §3).
+> The protected workflow creates a draft after signing and notarization. Publish only after
+> the maintainer approves the final draft.
 
 ## What gets shipped
 
-- `MacMiniMixer-<version>.zip` contains `MacMiniMixer.app`, a Release build that is **ad-hoc
-  signed and not notarized**. It ships with `MacMiniMixer-<version>.zip.sha256`.
+- `MacMiniMixer-<version>.zip` contains the Developer ID signed and notarized Release app.
+  It ships with `MacMiniMixer-<version>.zip.sha256` and build provenance.
 - The app is **menu bar only**: `Info.plist` sets `LSUIElement`, so there is no Dock icon and no main
   window. The app lives in the menu bar and quits from **Quit MacMiniMixer** in the panel header's `⋯` menu.
 - It runs on **macOS 13.0+**. Product Real Control and the other Process Tap features need
@@ -22,8 +21,8 @@ GitHub Release.
 | Workflow | Trigger | Result |
 | --- | --- | --- |
 | `Build` → `package` job | pushes to `main` and manual (`workflow_dispatch`) runs, after the `build` job passes; docs-only changes skip CI | artifact `MacMiniMixer-app` (`MacMiniMixer-<version>-<sha7>.zip` + `.sha256`), kept 14 days |
-| `Release` | push of a `v*` tag | tests → zip → tag/version check → artifact + **draft** GitHub Release |
-| `Release` | manual (`workflow_dispatch`) | tests → zip → artifact only, no GitHub Release (branch runs add a `-<sha7>` suffix) |
+| `macOS release candidate` | PR or manual dispatch without a tag | scans, tests, release build and staging artifact |
+| `macOS release candidate` | dispatch on reviewed `main` with the exact existing tag | scans, tests, build, protected signing/notarization and verified draft |
 
 ## 1. Pre-release checklist
 
@@ -64,7 +63,7 @@ GitHub Release.
       git grep -n -E 'MARKETING_VERSION|CURRENT_PROJECT_VERSION' -- '*.pbxproj'  # expect 4 + 4, all new
       ```
 - [ ] `README.md` (the version in its status note and the zip name in "Installation") and
-      `docs/HANDOFF.md` say the version is released, not "unreleased checkpoint".
+      `docs/HANDOFF.md` are ready to update after publication.
 - [ ] The release commit is pushed and its `Build` run is green. That run's `MacMiniMixer-app`
       artifact is a good final smoke test.
 
@@ -103,174 +102,14 @@ open MacMiniMixer.app
 A zip you unpack locally is not quarantined, so Gatekeeper won't prompt. To see what users see,
 download the zip in a browser, from the draft release or the workflow artifact.
 
-## 3. Tag → draft release
+## 3. Prepare and review the draft
 
-```bash
-git fetch origin
-git push origin origin/main:refs/tags/v0.14   # no local tag object on purpose, see "Manual release" below (GH007)
-gh run watch            # or watch the Release workflow in the Actions tab
-```
+Use the [protected macOS release runbook](MACOS-RELEASE.md). Push the matching version tag
+straight from the approved commit to create a lightweight tag without a tagger email, then
+dispatch the workflow on `main`. Existing releases and drafts are never changed by the workflow.
 
-The `Release` workflow (`.github/workflows/release.yml`) does the following:
-
-1. Runs `xcodebuild test`, the same command CI uses.
-2. Runs `scripts/package-app.sh`.
-3. Checks that the tag is exactly `v` + `CFBundleShortVersionString` (`v0.14` ⇔ `0.14`).
-4. Uploads the zip as a workflow artifact.
-5. Creates a **draft** GitHub Release with the zip and `.sha256`. Its notes come from
-   `scripts/release-notes.sh <tag> <version>`: the ad-hoc / not-notarized status and how to open the
-   app, macOS 13.0+ (14.2+ for per-app features), that Product Real Control is experimental, always
-   on and unlimited, that Advanced needs developer mode, this version's CHANGELOG Highlights, and a
-   link to the full CHANGELOG at the tag.
-
-If something goes wrong:
-
-- **"Tag does not match app version."** You tagged before bumping `MARKETING_VERSION`, or you
-  mistyped the tag. Delete the tag, fix the cause, and tag again:
-  ```bash
-  git push --delete origin v0.14 && git tag -d v0.14
-  ```
-- **A test failed.** If it's flaky (this has happened once in CI), use **Re-run failed jobs**. If
-  the draft already exists, the re-run replaces its assets (`gh release upload --clobber`) and keeps
-  the notes. If the release was already published, the assets are still replaced and the run shows
-  a warning.
-- **You want a dry run without a tag.** Use Actions → Release → **Run workflow**, or
-  `gh workflow run release.yml --ref main`. You get the artifact and no release.
-- **You want to abandon the release.** Run `gh release delete v0.14 --yes --cleanup-tag`, then
-  `git tag -d v0.14`.
-
-## Manual release (CI unavailable)
-
-When GitHub Actions can't run (for example out of macOS minutes), tag and publish by hand from a
-Mac, after the checklist in section 1 (run the tests locally, bump the version, finalize the
-CHANGELOG, push the release commit to `main`):
-
-1. Create the tag on GitHub by pushing the release commit straight to a tag ref:
-   ```bash
-   git fetch origin
-   git push origin origin/main:refs/tags/v0.14
-   git fetch origin --tags            # optional: get the tag locally
-   ```
-   Don't create the tag locally first. A tag object embeds the tagger's email, which GitHub's
-   private-email push protection (GH007) rejects. A plain `git tag v0.14` was rejected the same
-   way for v0.14 (the push wrote a tag object, likely because of a local tag setting). Pushing the
-   commit to `refs/tags/…` creates a lightweight tag with no email in it. If a rejected local tag is
-   left over, remove it with `git tag -d v0.14`. The tag push also starts the `Release` workflow. With CI
-   unavailable that run fails and can be ignored; if it does run, it creates a draft release for the
-   tag, so publish that draft ([section 4](#4-publish-the-draft)) instead of running
-   `gh release create`.
-2. Build and package the app:
-   ```bash
-   scripts/package-app.sh   # → dist/MacMiniMixer-0.14.zip + dist/MacMiniMixer-0.14.zip.sha256
-   ```
-3. Publish the release, either with the `gh` CLI:
-   ```bash
-   gh release create v0.14 dist/MacMiniMixer-0.14.zip dist/MacMiniMixer-0.14.zip.sha256 \
-     --title "MacMiniMixer v0.14" --prerelease \
-     --notes-file <(scripts/release-notes.sh v0.14 0.14)
-   ```
-   or in the web UI (Releases → **Draft a new release**): choose the `v0.14` tag, upload the zip
-   and `.sha256`, tick **Set as a pre-release**, and paste the notes copied with
-   ```bash
-   scripts/release-notes.sh v0.14 0.14 | pbcopy
-   ```
-
-## 4. Publish the draft
-
-1. Open GitHub → **Releases** → the draft **MacMiniMixer v0.14**.
-2. Download the zip in a browser on a Mac, check it with `shasum -a 256 -c …`, install it as in
-   [section 5](#5-opening-an-ad-hoc-signed-build-end-users), and spot-check it.
-3. Edit the notes if needed. Since the project is pre-1.0, consider ticking **Set as a
-   pre-release**.
-4. Click **Publish release**, or run `gh release edit v0.14 --draft=false`.
-5. Afterwards, refresh `docs/HANDOFF.md` and start a new `## [Unreleased]` CHANGELOG section if it
-   isn't there already.
-
-## 5. Opening an ad-hoc-signed build (end users)
-
-The build is not notarized, so Gatekeeper blocks the first launch of a downloaded copy.
-
-1. Unzip `MacMiniMixer-<version>.zip` and move `MacMiniMixer.app` to `/Applications`.
-2. Open it once, using one of these:
-   - **macOS 13–14:** Control-click (right-click) the app → **Open** → **Open**.
-   - **macOS 15 and later:** the right-click bypass no longer works. Double-click the app and
-     dismiss the warning. Then go to **System Settings → Privacy & Security**, scroll to
-     *Security*, click **Open Anyway** for MacMiniMixer, and confirm.
-3. Look for the icon in the **menu bar**. There is no Dock icon or window (`LSUIElement`).
-4. macOS asks for **System Audio Recording** permission the first time a Process Tap feature runs.
-   The permission is tied to the code signature, and every ad-hoc build has a different one. After
-   an update, macOS may ask again, or the old entry may need to be removed and re-enabled under
-   Privacy & Security.
-
-## Future: Developer ID signing + notarization
-
-**Documented only, not implemented.** With Developer ID signing and notarization, users get a
-normal first launch with no Gatekeeper workaround. A stable code identity can improve permission
-continuity, but System Audio Recording behavior across updates must be verified with the final
-signed build; it is not guaranteed by the bundle identifier alone.
-
-**Prerequisites**
-
-- An Apple Developer Program membership.
-- A **Developer ID Application** certificate, exported with its private key as a `.p12`.
-- Notarization credentials. Use an App Store Connect API key (recommended for CI), or an Apple ID
-  with an app-specific password and your Team ID.
-- The approved app bundle identifier `com.akwnnwastaken.macminimixer` is already configured.
-  Verify System Audio Recording and Launch at Login with the final signed build before shipping.
-- Hardened runtime, which notarization requires. The app target already has
-  `ENABLE_HARDENED_RUNTIME = YES`, and the commands below sign with `--options runtime`. There is no
-  entitlements file today. Check on a notarized build that Process Tap capture still works under
-  the hardened runtime. If it doesn't, an entitlements file may be needed, for example with
-  `com.apple.security.device.audio-input`. This is unverified and must be tested.
-
-**Steps** (replacing the ad-hoc signing in `scripts/package-app.sh`):
-
-```bash
-APP=MacMiniMixer.app
-IDENTITY="Developer ID Application: <Name> (<TEAMID>)"
-
-# 1. Sign with hardened runtime + secure timestamp. Avoid --deep for Developer ID: if nested code is
-#    ever added (helpers, frameworks), sign it inside-out first. Add --entitlements <file> if needed.
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
-codesign --verify --deep --strict --verbose=2 "$APP"
-
-# 2. Zip and notarize (blocks until Apple returns a verdict).
-ditto -c -k --sequesterRsrc --keepParent "$APP" MacMiniMixer-0.14.zip
-xcrun notarytool submit MacMiniMixer-0.14.zip \
-  --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-UUID> \
-  --wait
-#   Apple ID alternative: --apple-id <apple-id> --team-id <TEAMID> --password <app-specific-password>
-#   On "Invalid": xcrun notarytool log <submission-id> <same credentials>
-
-# 3. Staple the ticket to the .app (a .zip can't be stapled), then re-zip the stapled app.
-xcrun stapler staple "$APP"
-xcrun stapler validate "$APP"
-rm MacMiniMixer-0.14.zip
-ditto -c -k --sequesterRsrc --keepParent "$APP" MacMiniMixer-0.14.zip
-shasum -a 256 MacMiniMixer-0.14.zip > MacMiniMixer-0.14.zip.sha256
-
-# 4. Gatekeeper should now accept it.
-spctl --assess --type execute --verbose=4 "$APP"   # accepted, source=Notarized Developer ID
-```
-
-**Repository secrets for CI** (for the tag-only `Release` workflow; never expose them to PR
-builds):
-
-| Secret | Purpose |
-| --- | --- |
-| `MACOS_CERTIFICATE_P12_BASE64` | base64 of the Developer ID Application `.p12` (certificate + private key) |
-| `MACOS_CERTIFICATE_PASSWORD` | password of that `.p12` |
-| `MACOS_KEYCHAIN_PASSWORD` | password for a temporary CI keychain (any random string) |
-| `MACOS_SIGNING_IDENTITY` | `Developer ID Application: <Name> (<TEAMID>)` (could also be a plain repository variable) |
-| `NOTARY_API_KEY_P8_BASE64`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER_ID` | App Store Connect API key for `notarytool` (recommended) |
-| *or* `NOTARY_APPLE_ID`, `NOTARY_TEAM_ID`, `NOTARY_APP_PASSWORD` | Apple ID alternative |
-
-In CI, a few steps run before packaging:
-
-1. Decode the `.p12`.
-2. Create and unlock a temporary keychain (`security create-keychain`, `security unlock-keychain`).
-3. Import the certificate into it (`security import … -T /usr/bin/codesign`).
-4. Allow codesign to use the key (`security set-key-partition-list -S apple-tool:,apple:,codesign: -s`).
-5. Add the keychain to the search list (`security list-keychains -d user -s …`).
-
-Then sign, notarize, staple and re-zip as above, and delete the keychain in an `if: always()` step.
+Download the new draft ZIP in a browser on a clean Mac and verify the checksum. Unzip and
+move the app to Applications. Run the final signed-build checks in section 1, including
+System Audio Recording, audio recovery and Launch at Login. After explicit maintainer approval,
+publish the draft in GitHub and update the README and handoff. The local ad hoc ZIP is for
+development testing only.
